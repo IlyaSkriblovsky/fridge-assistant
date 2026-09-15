@@ -119,7 +119,9 @@ BUZZER low for the duration.
 Waking is not instant -- image load from flash, latch, microphone rail, then the
 settle window the driver discards. The first fraction of a second of speech is
 lost, which is why the buzzer chirp comes first: it tells the user when to
-start. The exact wake-to-first-sample time has not been measured yet.
+start. Measured at 169 ms from the wake event to the first captured sample, of
+which 57 ms was the boot itself and 101 ms a latch delay that has since been
+taken off the wake path -- [E1](experiments.md).
 
 Caching the BSSID and channel in RTC memory across sleeps and passing them to
 `WiFi.begin(ssid, pass, channel, bssid)` cuts reconnect time substantially, and
@@ -164,6 +166,12 @@ that split cheap later.
 
 Active low with internal pull-ups. The AI button is GPIO4, the side buttons are
 GPIO5 and GPIO6.
+
+The press that wakes the device is still held when `setup()` runs, so the
+firmware reads the level rather than waiting for an edge. GPIO4 also comes back
+as an RTC pad, which is what ext1 and its pull-up need across the sleep:
+`rtc_gpio_deinit()` hands it to the GPIO matrix before `digitalRead()` means
+anything.
 
 Debouncing matters on release as well as on press: without requiring a stable
 high for 30-50 ms, a bounce ends the utterance mid-sentence. A minimum hold of
@@ -224,6 +232,11 @@ The notes are short, and the backend can drop the head of the recording if it
 ever matters.
 
 A press too short to count makes no sound at all -- [D7](deferred.md).
+
+Drive the buzzer through LEDC rather than `tone()`. `tone()` hands the note to a
+background task and returns before the sound ends, so a chirp issued just before
+`esp_deep_sleep_start()` is either cut off or still sounding when the pads are
+parked.
 
 ### Errors
 
@@ -318,6 +331,14 @@ version:
 
 Also worth knowing:
 
+- **Opening the serial monitor resets the board.** Connecting the cable to a
+  running board does not; opening the port does. `monitor_rts = 0` and
+  `monitor_dtr = 0` are applied to a port that is not open yet, and opening a
+  tty on macOS asserts DTR before they take effect, which the board's auto-reset
+  circuit reads as a reset. It arrives through EN, so the chip treats it as a
+  power-on and RTC memory is cleared with it. A monitor attached after a battery
+  run therefore finds nothing: observing one means the buzzer, flash storage, or
+  a monitor opened before the run starts.
 - **The sensor I2C bus sits on a strapping pin.** SCL is GPIO0, which the
   ESP32-S3 samples at reset to choose boot mode. The bus has to stay passive
   until boot is over, so the battery gauge cannot be read at the very top of
