@@ -47,26 +47,18 @@ not even shipped with the Arduino framework, so it would be an added dependency.
 that proves the chain end to end. Latency cost is the utterance duration plus
 the upload, paid before the backend sees anything.
 
-**Later:** the same POST with `Transfer-Encoding: chunked`. The request opens on
-button press, the body streams as audio is captured, and the terminating chunk
-*is* the "transmission over" signal -- no separate protocol needed. The response
-body is still just the answer. This keeps one request and one response while
-letting the backend start transcribing while the user is still talking.
+**Later:** the same POST with `Transfer-Encoding: chunked` -- [D4](deferred.md).
+The request opens on button press, the body streams as audio is captured, and
+the terminating chunk *is* the "transmission over" signal, so there is still no
+separate protocol and the response body is still just the answer.
 
-Two things to know before doing that:
-
-- `esp_http_client` supports chunked request bodies (`esp_http_client_open()`
-  with a negative length) and is available from the Arduino framework. Arduino's
-  own `HTTPClient` only sends bodies of known length, so the chunked path must
-  use the IDF client or hand-written requests over `NetworkClient`.
-- Servers and proxies commonly buffer a whole chunked request body before
-  handing it to the application, which silently turns streaming back into a
-  plain POST. Since the backend is ours, this is a configuration matter (in
-  nginx, `proxy_request_buffering off`).
-- A WAV header declares the payload length, which is unknown when a chunked
-  request opens. At that point either the length fields get a placeholder the
-  backend agrees to ignore, or the body switches to raw PCM with the format in
-  request headers. Deferred until the chunked step.
+Worth knowing now, because it shapes where the code goes: `esp_http_client`
+supports chunked request bodies (`esp_http_client_open()` with a negative
+length) and is available from the Arduino framework, while Arduino's own
+`HTTPClient` only sends bodies of known length. Servers and proxies also tend to
+buffer a whole chunked request body before handing it to the application, which
+turns streaming silently back into a plain POST; since the backend is ours, that
+is a configuration matter (in nginx, `proxy_request_buffering off`).
 
 ### The request contract
 
@@ -94,7 +86,7 @@ error reporting can come later.
 
 ### Transport security
 
-Plain HTTP to start. HTTPS is wanted, because the backend is meant to live in
+Plain HTTP to start -- [D5](deferred.md). HTTPS is wanted, because the backend is meant to live in
 the cloud rather than at home, but on a device that wakes from deep sleep for
 every question the TLS handshake is paid every single time. Whether that cost is
 acceptable is [E2](experiments.md); the alternative is a proxy on the home
@@ -164,9 +156,9 @@ followed by a BUSY wait, and it must not sit between two I2S reads.
 Two tasks are enough while the upload happens after the button is released,
 because rendering and uploading never overlap: the "Listening" refresh runs while
 WiFi is still associating, and WiFi makes progress in its own IDF tasks
-regardless. The chunked variant breaks that -- a refresh would stall an upload in
-progress -- so display gets its own task at that point. Keeping display calls
-behind a small interface now makes that split cheap later.
+regardless. The chunked variant breaks that and needs a third task
+([D4](deferred.md)), so keeping display calls behind a small interface now makes
+that split cheap later.
 
 ### Buttons
 
@@ -180,14 +172,8 @@ whole pipeline.
 
 ### Screen
 
-Three transitions exist for now, and all three use a **full refresh**: asleep ->
-Listening, Listening -> answer, Listening -> error. Each changes most of the
-screen, which is what a full refresh is for, and it clears accumulated ghosting
-as a side effect.
-
-That means the partial-refresh fix in `sticky_epaper.h` is currently unused. It
-stays, because the bug it works around returns the moment anything draws a
-partial update, and because a correct driver is worth more than a smaller one.
+Three transitions exist: asleep -> Listening, Listening -> answer, Listening ->
+error. All three take a full refresh for now -- [D6](deferred.md).
 
 The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
@@ -195,36 +181,26 @@ answer disappears as soon as a new question starts.
 
 Battery level is drawn on the **answer and error screens**, not on the Listening
 screen. It is read from the BQ27220 fuel gauge on the sensor I2C bus (address
-`0x55`, register `0x2C`, two bytes little-endian, percent).
+`0x55`, register `0x2C`, two bytes little-endian, percent). Acting on a low
+reading is [D3](deferred.md).
 
 That placement started as a workaround -- the sensor bus runs over GPIO0, a
 strapping pin, so it cannot be touched at the very top of boot -- but it is the
 better place anyway: the wake path stays short where latency is felt, and the
 figure shown is the one measured after WiFi and the upload have already drawn
-their current. Nothing is done about a low battery yet; it is displayed, not
-acted on.
+their current.
 
 The wider UI is deliberately unconsidered until the proof of concept works.
 
-### Text rendering: transliteration for now
+### Text rendering
 
-Answers can be in Russian, and nothing on this device can currently draw
-Cyrillic. The GFXFF FreeFonts declare the range `0x20`-`0x7E`, the built-in GLCD
-font is ASCII too, and `font/Custom` holds only Latin display faces.
+Answers can be in Russian, so the display has to render Cyrillic eventually.
+Seeed_GFX2's `SmoothFont` loads VLW fonts and looks glyphs up by Unicode code
+point, which is the path; nothing else in the library can draw anything outside
+ASCII.
 
-Seeed_GFX2 does ship a `SmoothFont` class that loads VLW fonts and looks glyphs
-up by Unicode code point, which is the real answer. Two things make it a later
-job: it is a separate drawing API from `drawString`, and it renders with alpha
-blending, so on a 1bpp panel the intermediate levels need thresholding.
-
-Until then the text arrives already transliterated to ASCII, **done on the
-backend**. The backend has the string and real libraries for it, and the day the
-device can render Cyrillic this becomes a server-side switch rather than a
-firmware change. It also keeps the JSON pure ASCII, so the device never has to
-decode `\uXXXX` escapes.
-
-The device should still degrade gracefully if a non-ASCII byte arrives rather
-than drawing garbage.
+Until that is taken on, answers arrive already transliterated, done on the
+backend -- [D1](deferred.md).
 
 ### Sound
 
@@ -247,9 +223,7 @@ add the chirp's own duration to the dead time at the front of every question.
 The notes are short, and the backend can drop the head of the recording if it
 ever matters.
 
-A press too short to count currently makes no sound at all. That leaves a
-deliberate-but-brief press with no feedback, which is a UX question parked until
-the proof of concept works.
+A press too short to count makes no sound at all -- [D7](deferred.md).
 
 ### Errors
 
@@ -276,7 +250,7 @@ chirps, logs to Serial1 and sleeps.
 Two cases are not errors:
 
 - **Press shorter than `kButtonMinHoldMs`.** An accidental tap. Nothing is sent
-  and no error is shown -- the device goes straight back to sleep.
+  and nothing is shown -- the device goes straight back to sleep.
 - **Recording reached the 30 s cap.** Capture stops and whatever was recorded is
   sent as a normal question.
 
@@ -366,18 +340,14 @@ Also worth knowing:
   microphone's DC bias. It has to be removed per block or silence does not read
   as silence.
 
-## Open questions
+## What is still moving
 
-- **Answer layout.** Word wrapping is needed regardless of script, and a reply
-  longer than one screen has nowhere to go. No pagination exists and the buttons
-  that would drive it are not assigned.
-- **Feedback for a press too short to count.** Silence today; see the sound
-  table. Parked as a UX question.
-- **Low battery behaviour.** The level is displayed; whether the device should
-  refuse to record below some threshold is undecided.
-- **Chunked upload details** -- the WAV length placeholder, and splitting the
-  display into its own task. Both deferred until after the proof of concept.
+Nothing about the design is currently unresolved. What remains is tracked in two
+places, deliberately kept out of this document so it does not age every time a
+shortcut is taken or a number comes in:
 
-Open measurements live in [experiments.md](experiments.md): wake latency,
-HTTPS overhead, microphone settle time, and whether the AI button reacts to a
-long hold in hardware.
+- **[deferred.md](deferred.md)** -- simplifications taken on purpose, each with
+  the end state it stands in for and what triggers the change.
+- **[experiments.md](experiments.md)** -- measurements the design is waiting on:
+  wake latency, HTTPS overhead, microphone settle time, and whether the AI button
+  reacts to a long hold in hardware.

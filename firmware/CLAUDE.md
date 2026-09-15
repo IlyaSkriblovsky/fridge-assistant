@@ -18,6 +18,7 @@ the hardware traps.
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
+| `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
 
@@ -56,6 +57,8 @@ their process.
 - **Keep `src/secrets.example.h` in step with `src/secrets.h`,** and never put
   real credentials in a tracked file. Settings that are not secret belong in
   `src/config.h`, which is tracked.
+- **Put a shortcut in `docs/deferred.md`, not in the vision.** The vision says
+  what the device is; deferrals are the list that gets deleted a line at a time.
 - **Don't guess at a number that belongs in `docs/experiments.md`.** Wake
   latency, HTTPS overhead and microphone settle time are unmeasured on purpose;
   record a measurement there rather than inventing a constant.
