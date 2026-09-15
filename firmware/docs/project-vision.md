@@ -298,6 +298,10 @@ version:
 
 Also worth knowing:
 
+- **The sensor I2C bus sits on a strapping pin.** SCL is GPIO0, which the
+  ESP32-S3 samples at reset to choose boot mode. The bus has to stay passive
+  until boot is over, so the battery gauge cannot be read at the very top of
+  `setup()` the way the power latch is.
 - This unit has SSD1677 glass. Production mixes SSD1677 and SSD2677 across
   otherwise identical boards, and the two need different drivers. The library's
   auto-detect exists but its SSD1677 path renders inverted, so this project binds
