@@ -1,0 +1,22 @@
+# Shared 8 MB partition layout for reTerminal E1001-E1004 apps. E1005 viewer
+# and diagnostic-tool environments use the same first 8 MB of their 32 MB flash.
+#
+# app0/app1 give us OTA - the SD-driven flash path writes into whichever
+# is NOT the currently-booted slot, then flips otadata and reboots.
+# 3.0 MiB per slot fits today's largest firmware image (~2.84 MiB,
+# calendar-viewer on E1003) with roughly 165 KiB of remaining headroom.
+#
+# NVS at the standard 0x9000/0x5000 offsets so Wi-Fi credentials survive
+# re-flashes with the Arduino ESP32 stock bootloader.
+#
+# CHANGING THIS FILE requires a full USB re-flash - the OTA writer can
+# only replace app slots, not the partition table itself. Any change to
+# otadata / app0 / app1 offsets invalidates SPIFFS content.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x5000,
+otadata,    data, ota,     0xE000,   0x2000,
+app0,       app,  ota_0,   0x10000,  0x300000,
+app1,       app,  ota_1,   0x310000, 0x300000,
+spiffs,     data, spiffs,  0x610000, 0x1E0000,
+coredump,   data, coredump,0x7F0000, 0x10000,
