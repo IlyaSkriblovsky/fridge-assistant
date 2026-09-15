@@ -17,13 +17,17 @@ It is a personal device, built for one user, powered by battery.
 2. **Press.** Wake, hold the power latch, chirp the buzzer immediately -- that
    chirp is the "speak now" cue, not the screen.
 3. **Record.** Power the microphone, capture 16 kHz mono PCM into a linear
-   buffer in PSRAM. Draw a "Listening" screen whenever the panel gets round to
-   it; it will be late and that is accepted.
+   buffer in PSRAM. Draw a "Listening" screen, with the battery level on it,
+   whenever the panel gets round to it; it will be late and that is accepted.
 4. **Connect.** Bring up WiFi concurrently with recording, in a separate task.
 5. **Release.** Debounce, then stop capturing.
-6. **Upload.** POST the buffer to the backend.
+6. **Upload.** POST the recording to the backend as a WAV.
 7. **Answer.** The backend replies with text. Render it on the e-paper.
-8. **Sleep.** Back to deep sleep with the latch held.
+8. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
+   screen until the next question.
+
+Measurements the design still waits on are tracked in
+[experiments.md](experiments.md).
 
 ## Decisions
 
@@ -54,6 +58,43 @@ Two things to know before doing that:
   handing it to the application, which silently turns streaming back into a
   plain POST. Since the backend is ours, this is a configuration matter (in
   nginx, `proxy_request_buffering off`).
+- A WAV header declares the payload length, which is unknown when a chunked
+  request opens. At that point either the length fields get a placeholder the
+  backend agrees to ignore, or the body switches to raw PCM with the format in
+  request headers. Deferred until the chunked step.
+
+### The request contract
+
+```
+POST {config::kBackendBaseUrl}{config::kAudioPath}      ->  POST /audio
+Content-Type: audio/wav
+Authorization: Bearer {secrets::kBackendToken}
+
+<WAV: PCM, 16 kHz, mono, signed 16-bit little-endian>
+```
+
+Sample rate and format travel in the WAV header rather than in custom headers,
+so the body is self-describing and can be saved and played back as a file on the
+backend side.
+
+The response is JSON with the answer in `response`:
+
+```json
+{ "response": "..." }
+```
+
+Anything else -- a non-200 status, a body that does not parse, or valid JSON
+without a `response` field -- is one error to the device, shown on screen. Richer
+error reporting can come later.
+
+### Transport security
+
+Plain HTTP to start. HTTPS is wanted, because the backend is meant to live in
+the cloud rather than at home, but on a device that wakes from deep sleep for
+every question the TLS handshake is paid every single time. Whether that cost is
+acceptable is [E2](experiments.md); the alternative is a proxy on the home
+network, which is one more component to maintain and so a worse answer if the
+number turns out to be small.
 
 ### Audio buffer: linear, capped at 30 seconds
 
@@ -64,10 +105,9 @@ a write pointer overtaking a drain pointer.
 16 kHz, 16-bit, mono is 32 KB/s, so the 30 s cap is 960 KB. Recording stops at
 the cap whether or not the button is still held.
 
-Format on the wire is raw little-endian signed 16-bit PCM. It must be stated in
-the request contract (header, query or content type) rather than assumed. WAV is
-a poor fit for the chunked variant because its header declares a length that is
-not known when the request opens.
+The buffer holds raw signed 16-bit little-endian PCM and is sent as a WAV. The
+44-byte header should be reserved at the front of the allocation and filled in
+once the length is known, so that sending never copies a megabyte to prepend it.
 
 ### Power: deep sleep
 
@@ -116,6 +156,13 @@ would be dropped in chunks.
 E-paper refresh belongs in the second task: it is a long blocking SPI transfer
 followed by a BUSY wait, and it must not sit between two I2S reads.
 
+Two tasks are enough while the upload happens after the button is released,
+because rendering and uploading never overlap: the "Listening" refresh runs while
+WiFi is still associating, and WiFi makes progress in its own IDF tasks
+regardless. The chunked variant breaks that -- a refresh would stall an upload in
+progress -- so display gets its own task at that point. Keeping display calls
+behind a small interface now makes that split cheap later.
+
 ### Buttons
 
 Active low with internal pull-ups. The AI button is GPIO4, the side buttons are
@@ -126,16 +173,85 @@ high for 30-50 ms, a bounce ends the utterance mid-sentence. A minimum hold of
 roughly 300 ms should also be required so an accidental tap does not wake the
 whole pipeline.
 
-### Secrets
+### Screen
 
-`src/secrets.h` holds WiFi credentials and the backend URL and token. It is
-gitignored; `src/secrets.example.h` is the committed template and must be kept
-in step when a constant is added. A missing `secrets.h` breaks the build at the
-include; empty values are reported over Serial1 at runtime.
+Three transitions exist for now, and all three use a **full refresh**: asleep ->
+Listening, Listening -> answer, Listening -> error. Each changes most of the
+screen, which is what a full refresh is for, and it clears accumulated ghosting
+as a side effect.
 
-They are plain strings in the firmware image and anyone who can read the flash
-can read them. Acceptable for a personal device; they should not be credentials
-that matter elsewhere.
+That means the partial-refresh fix in `sticky_epaper.h` is currently unused. It
+stays, because the bug it works around returns the moment anything draws a
+partial update, and because a correct driver is worth more than a smaller one.
+
+The answer stays on screen until the next question -- that is the point of
+e-paper. The Listening screen replaces it on button press, so the previous
+answer disappears as soon as a new question starts.
+
+The Listening screen also shows battery level, read from the BQ27220 fuel gauge
+on the sensor I2C bus (address `0x55`, register `0x2C`, two bytes little-endian,
+percent). Nothing is done about a low battery yet; it is displayed, not acted on.
+
+The wider UI is deliberately unconsidered until the proof of concept works.
+
+### Text rendering: transliteration for now
+
+Answers can be in Russian, and nothing on this device can currently draw
+Cyrillic. The GFXFF FreeFonts declare the range `0x20`-`0x7E`, the built-in GLCD
+font is ASCII too, and `font/Custom` holds only Latin display faces.
+
+Seeed_GFX2 does ship a `SmoothFont` class that loads VLW fonts and looks glyphs
+up by Unicode code point, which is the real answer. Two things make it a later
+job: it is a separate drawing API from `drawString`, and it renders with alpha
+blending, so on a 1bpp panel the intermediate levels need thresholding.
+
+Until then the text is transliterated to ASCII. **This should happen on the
+backend, not on the device** -- the backend already has the string, has real
+libraries for it, and can switch to sending UTF-8 the day the device can render
+it, with no firmware change. The device should still degrade gracefully if a
+non-ASCII byte arrives rather than drawing garbage.
+
+### Errors
+
+Every failure does the same three things: chirp, draw the message, sleep.
+
+| Situation | Screen |
+| --- | --- |
+| WiFi did not associate | `NO WIFI` |
+| Backend unreachable | `NO SERVER` |
+| Backend answered with a non-200 status | `SERVER ERROR` plus the status code |
+| Response did not parse, or has no `response` field | `BAD RESPONSE` |
+| No answer within `kResponseTimeoutMs` | `TIMED OUT` |
+| Microphone did not start | `NO MICROPHONE` |
+
+If the display itself fails to initialise there is nothing to draw on; that case
+chirps, logs to Serial1 and sleeps.
+
+Two cases are not errors:
+
+- **Press shorter than `kButtonMinHoldMs`.** An accidental tap. Nothing is sent
+  and no error is shown -- the device goes straight back to sleep.
+- **Recording reached the 30 s cap.** Capture stops and whatever was recorded is
+  sent as a normal question.
+
+### Configuration and secrets
+
+Split in two, by whether a value can be committed:
+
+- **`src/config.h`** -- tracked. Backend base URL and path, recording cap,
+  response timeout, button debounce and minimum hold. Meant to be edited.
+- **`src/secrets.h`** -- gitignored. WiFi credentials and the backend token.
+  `src/secrets.example.h` is the committed template and must be kept in step
+  when a constant is added. A missing `secrets.h` breaks the build at the
+  include; empty values are reported over Serial1 at runtime.
+
+Secrets are plain strings in the firmware image and anyone who can read the
+flash can read them. Acceptable for a personal device; they should not be
+credentials that matter elsewhere.
+
+The backend URL sits in `config.h` because it is currently a LAN address. If the
+backend moves to a public host whose address is worth not publishing, it moves
+to `secrets.h`.
 
 ## Hardware notes
 
@@ -202,11 +318,19 @@ Also worth knowing:
 
 ## Open questions
 
-- Wake-to-first-sample latency has not been measured. It decides how much of the
-  first word is lost and whether light sleep is worth its higher idle draw.
-- Answer rendering: word wrap, font choice, and what to do with a reply longer
-  than one screen.
-- Error paths -- no WiFi, no backend, backend error, timeout -- each needs a
-  screen, and every one of them must still end in deep sleep.
-- Backend think time is seconds. Read timeouts must allow for it, and idle
-  connections can be dropped by NAT in between.
+- **Transliteration on the backend, not the device** -- proposed above, not yet
+  agreed.
+- **JSON parsing on the device.** Reading one field out of a response invites
+  hand-rolled string searching, which breaks on escapes and `\uXXXX` sequences.
+  ArduinoJson is the obvious dependency and is not yet added.
+- **Answer layout.** Word wrapping is needed regardless of script, and a reply
+  longer than one screen has nowhere to go. No pagination exists and the buttons
+  that would drive it are not assigned.
+- **Low battery behaviour.** The level is displayed; whether the device should
+  refuse to record below some threshold is undecided.
+- **Chunked upload details** -- the WAV length placeholder, and the display task
+  split. Both deferred until after the proof of concept.
+
+Open measurements live in [experiments.md](experiments.md): wake latency,
+HTTPS overhead, microphone settle time, and whether the AI button reacts to a
+long hold in hardware.

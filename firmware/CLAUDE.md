@@ -15,8 +15,10 @@ the hardware traps.
 | `src/main.cpp` | Boot sequence, power latch, display and WiFi setup |
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
+| `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
+| `docs/experiments.md` | Measurements still owed, and what each one unblocks |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions |
 
 ## Build and flash
@@ -52,7 +54,11 @@ their process.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;
   a blocking WiFi connect drops audio.
 - **Keep `src/secrets.example.h` in step with `src/secrets.h`,** and never put
-  real credentials in a tracked file.
+  real credentials in a tracked file. Settings that are not secret belong in
+  `src/config.h`, which is tracked.
+- **Don't guess at a number that belongs in `docs/experiments.md`.** Wake
+  latency, HTTPS overhead and microphone settle time are unmeasured on purpose;
+  record a measurement there rather than inventing a constant.
 
 ## Verifying on hardware
 
