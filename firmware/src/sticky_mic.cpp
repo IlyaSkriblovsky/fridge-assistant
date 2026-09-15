@@ -11,9 +11,6 @@ namespace {
 // stack budget, large enough that the per-read overhead does not matter.
 constexpr uint32_t kChunkSamples = 256;
 
-// Audio discarded right after the mic rail comes up, in milliseconds.
-constexpr uint32_t kSettleMs = 200;
-
 // GPIO19/20 carry the native USB-Serial-JTAG D-/D+ signals. Clearing the GPIO
 // matrix is not enough, because the USB function is a dedicated pad connection
 // that bypasses the matrix entirely -- the pad enable in the peripheral itself
@@ -31,7 +28,7 @@ void releaseUsbJtagPins() {
 
 }  // namespace
 
-bool StickyMic::begin(uint32_t sampleRate) {
+bool StickyMic::begin(uint32_t sampleRate, uint32_t settleMs) {
   if (_started) return true;
 
   _sampleRate = sampleRate;
@@ -55,8 +52,10 @@ bool StickyMic::begin(uint32_t sampleRate) {
 
   // Drain the settling period so the caller's first readLevel() is already
   // looking at real audio.
-  MicLevel discard;
-  readLevel(discard, (sampleRate * kSettleMs) / 1000);
+  if (settleMs > 0) {
+    MicLevel discard;
+    readLevel(discard, (sampleRate * settleMs) / 1000);
+  }
 
   return true;
 }

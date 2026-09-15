@@ -12,11 +12,13 @@ the hardware traps.
 
 | Path | What |
 | --- | --- |
-| `src/main.cpp` | Boot sequence, power latch, display and WiFi setup |
+| `src/main.cpp` | Boot sequence, display and WiFi setup |
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
+| `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
+| `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
@@ -29,6 +31,7 @@ the hardware traps.
 ```
 ~/.platformio/penv/bin/pio run                                  # build
 ~/.platformio/penv/bin/pio run -t upload --upload-port <port>    # flash
+~/.platformio/penv/bin/pio run -e exp_e1 -t upload ...           # an experiment rig
 ```
 
 The board enumerates as a CH343P bridge (`1A86:55D3`), typically

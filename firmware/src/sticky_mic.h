@@ -37,14 +37,26 @@ class StickyMic {
   static constexpr int kPinPowerEnable = 38;
   static constexpr uint32_t kSampleRate = 16000;
 
+  // Audio discarded right after the mic rail comes up, in milliseconds.
+  //
+  // Measured -- docs/experiments.md, E3. The power-up transient is above speech
+  // level for the first 8 ms only; after 16 ms it sits more than 13 dB below
+  // speech and keeps falling. The level does not reach the room's noise floor
+  // for about 200 ms, which is what the old value waited for, but everything
+  // after the first few milliseconds is usable audio that was being thrown away.
+  // Three 8 ms blocks of margin is the compromise.
+  //
+  // begin() takes it as an argument so the experiment can set it to zero.
+  static constexpr uint32_t kSettleMs = 24;
+
   // Floor reported instead of -inf dBFS for a digitally silent block.
   static constexpr float kSilenceDbfs = -120.0f;
 
   // Powers the mic rail, frees GPIO19/20 from the USB PHY and starts I2S in
-  // PDM-RX mode (16-bit mono, hardware PDM->PCM filter). The first ~200 ms of
+  // PDM-RX mode (16-bit mono, hardware PDM->PCM filter). The first settleMs of
   // audio is read and dropped: the MEMS mic and the PDM2PCM filter both need
   // to settle, and until they do every block reads as a loud transient.
-  bool begin(uint32_t sampleRate = kSampleRate);
+  bool begin(uint32_t sampleRate = kSampleRate, uint32_t settleMs = kSettleMs);
 
   // Stops I2S and cuts power to the mic.
   void end();
