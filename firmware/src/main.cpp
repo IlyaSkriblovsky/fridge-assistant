@@ -10,35 +10,10 @@
 #include "secrets.h"
 #include "sticky_epaper.h"
 #include "sticky_mic.h"
+#include "sticky_power.h"
 
 constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
-
-// The Sticky holds its own power rail up through a latch: GPIO45 (PWR_HOLD)
-// and GPIO46 (PWR_LOCK) have to be driven high early in boot or the board cuts
-// itself off once the power button is released. On USB the rail is fed
-// externally, which is why the sketch ran without this, but on battery it would
-// switch off mid-boot. Pin names and sequence follow Seeed's own firmware
-// (reTerminal_Sticky_Bunny: src/board/pin_config.h, src/board/board_power.cpp).
-//
-// Both are ESP32-S3 strapping pins, sampled only at reset, so taking them over
-// as outputs afterwards is safe.
-constexpr int PIN_PWR_HOLD = 45;
-constexpr int PIN_PWR_LOCK = 46;
-
-void setupPowerLatch() {
-  // Clear any pad holds a previous deep sleep may have left armed before
-  // driving the pins, otherwise the writes land on latched pads.
-  gpio_deep_sleep_hold_dis();
-  gpio_hold_dis(static_cast<gpio_num_t>(PIN_PWR_HOLD));
-  gpio_hold_dis(static_cast<gpio_num_t>(PIN_PWR_LOCK));
-
-  pinMode(PIN_PWR_HOLD, OUTPUT);
-  digitalWrite(PIN_PWR_HOLD, HIGH);
-  pinMode(PIN_PWR_LOCK, OUTPUT);
-  digitalWrite(PIN_PWR_LOCK, HIGH);
-  delay(100);  // let the rail settle before anything else draws on it
-}
 
 // reTerminal Sticky (E1005) panel wiring is owned by Board_reTerminal_Sticky:
 //   SCK 13, MOSI 14, MISO 12 (shared with microSD), CS 15, DC 16,
@@ -134,13 +109,13 @@ bool micReady = false;
 
 void setup() {
   // First thing on boot -- everything below depends on the board staying alive.
-  setupPowerLatch();
+  stickyPower::holdLatch();
 
   Serial1.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(50);
   Serial1.println("Sticky Test 2");
-  Serial1.printf("Power latch held: HOLD GPIO%d, LOCK GPIO%d\n", PIN_PWR_HOLD,
-                 PIN_PWR_LOCK);
+  Serial1.printf("Power latch held: HOLD GPIO%d, LOCK GPIO%d\n",
+                 stickyPower::kPinHold, stickyPower::kPinLock);
 
   setupDisplay();
 
