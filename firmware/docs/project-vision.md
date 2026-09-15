@@ -188,9 +188,16 @@ The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
 answer disappears as soon as a new question starts.
 
-The Listening screen also shows battery level, read from the BQ27220 fuel gauge
-on the sensor I2C bus (address `0x55`, register `0x2C`, two bytes little-endian,
-percent). Nothing is done about a low battery yet; it is displayed, not acted on.
+Battery level is drawn on the **answer and error screens**, not on the Listening
+screen. It is read from the BQ27220 fuel gauge on the sensor I2C bus (address
+`0x55`, register `0x2C`, two bytes little-endian, percent).
+
+That placement started as a workaround -- the sensor bus runs over GPIO0, a
+strapping pin, so it cannot be touched at the very top of boot -- but it is the
+better place anyway: the wake path stays short where latency is felt, and the
+figure shown is the one measured after WiFi and the upload have already drawn
+their current. Nothing is done about a low battery yet; it is displayed, not
+acted on.
 
 The wider UI is deliberately unconsidered until the proof of concept works.
 
@@ -205,11 +212,33 @@ up by Unicode code point, which is the real answer. Two things make it a later
 job: it is a separate drawing API from `drawString`, and it renders with alpha
 blending, so on a 1bpp panel the intermediate levels need thresholding.
 
-Until then the text is transliterated to ASCII. **This should happen on the
-backend, not on the device** -- the backend already has the string, has real
-libraries for it, and can switch to sending UTF-8 the day the device can render
-it, with no firmware change. The device should still degrade gracefully if a
-non-ASCII byte arrives rather than drawing garbage.
+Until then the text arrives already transliterated to ASCII, **done on the
+backend**. The backend has the string and real libraries for it, and the day the
+device can render Cyrillic this becomes a server-side switch rather than a
+firmware change. It also keeps the JSON pure ASCII, so the device never has to
+decode `\uXXXX` escapes.
+
+The device should still degrade gracefully if a non-ASCII byte arrives rather
+than drawing garbage.
+
+### Sound
+
+The buzzer on GPIO48 is the only feedback fast enough to be useful -- the e-paper
+is one to two seconds behind everything. Three patterns, distinguishable without
+looking:
+
+| Event | Pattern |
+| --- | --- |
+| Ready to listen | two very short notes, low then high |
+| Answer received | two short notes, high then low |
+| Error | one longer note |
+
+The rising pair opens a question and the falling pair closes it, so the two
+normal outcomes are opposites, and the single sustained note is neither.
+
+A press too short to count currently makes no sound at all. That leaves a
+deliberate-but-brief press with no feedback, which is a UX question parked until
+the proof of concept works.
 
 ### Errors
 
@@ -218,11 +247,17 @@ Every failure does the same three things: chirp, draw the message, sleep.
 | Situation | Screen |
 | --- | --- |
 | WiFi did not associate | `NO WIFI` |
+| WiFi dropped while recording | `NO WIFI` |
 | Backend unreachable | `NO SERVER` |
 | Backend answered with a non-200 status | `SERVER ERROR` plus the status code |
 | Response did not parse, or has no `response` field | `BAD RESPONSE` |
 | No answer within `kResponseTimeoutMs` | `TIMED OUT` |
 | Microphone did not start | `NO MICROPHONE` |
+
+A network failure during recording aborts immediately rather than letting the
+user finish talking into a recording that has nowhere to go. It costs an
+interrupted sentence, but the alternative is a long silence followed by the same
+error.
 
 If the display itself fails to initialise there is nothing to draw on; that case
 chirps, logs to Serial1 and sleeps.
@@ -322,18 +357,15 @@ Also worth knowing:
 
 ## Open questions
 
-- **Transliteration on the backend, not the device** -- proposed above, not yet
-  agreed.
-- **JSON parsing on the device.** Reading one field out of a response invites
-  hand-rolled string searching, which breaks on escapes and `\uXXXX` sequences.
-  ArduinoJson is the obvious dependency and is not yet added.
 - **Answer layout.** Word wrapping is needed regardless of script, and a reply
   longer than one screen has nowhere to go. No pagination exists and the buttons
   that would drive it are not assigned.
+- **Feedback for a press too short to count.** Silence today; see the sound
+  table. Parked as a UX question.
 - **Low battery behaviour.** The level is displayed; whether the device should
   refuse to record below some threshold is undecided.
-- **Chunked upload details** -- the WAV length placeholder, and the display task
-  split. Both deferred until after the proof of concept.
+- **Chunked upload details** -- the WAV length placeholder, and splitting the
+  display into its own task. Both deferred until after the proof of concept.
 
 Open measurements live in [experiments.md](experiments.md): wake latency,
 HTTPS overhead, microphone settle time, and whether the AI button reacts to a

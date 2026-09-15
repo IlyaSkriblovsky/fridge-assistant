@@ -19,7 +19,7 @@ the hardware traps.
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
-| `platformio.ini` | Pinned Seeed_GFX2 and platform revisions |
+| `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
 
 ## Build and flash
 
