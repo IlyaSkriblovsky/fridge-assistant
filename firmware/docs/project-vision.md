@@ -14,15 +14,20 @@ It is a personal device, built for one user, powered by battery.
 ## Interaction flow
 
 1. **Asleep.** Deep sleep, woken by the AI button (GPIO4, ext1, any-low).
-2. **Press.** Wake, hold the power latch, chirp the buzzer immediately -- that
-   chirp is the "speak now" cue, not the screen.
-3. **Record.** Power the microphone, capture 16 kHz mono PCM into a linear
-   buffer in PSRAM. Draw a "Listening" screen, with the battery level on it,
-   whenever the panel gets round to it; it will be late and that is accepted.
+2. **Press.** Wake and hold the power latch.
+3. **Record.** Power the microphone, wait out its settle window, then start
+   capturing 16 kHz mono PCM into a linear buffer in PSRAM -- and only then
+   chirp. The chirp means "the microphone is live", so it cannot come earlier
+   without inviting the user to talk into a microphone that is not listening
+   yet. Everything before it is dead time, which is what
+   [E1](experiments.md) and [E3](experiments.md) exist to shrink.
 4. **Connect.** Bring up WiFi concurrently with recording, in a separate task.
+   Draw the "Listening" screen whenever the panel gets round to it; it will be
+   late and that is accepted.
 5. **Release.** Debounce, then stop capturing.
 6. **Upload.** POST the recording to the backend as a WAV.
-7. **Answer.** The backend replies with text. Render it on the e-paper.
+7. **Answer.** The backend replies with text. Render it, with battery level, on
+   the e-paper.
 8. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
    screen until the next question.
 
@@ -235,6 +240,12 @@ looking:
 
 The rising pair opens a question and the falling pair closes it, so the two
 normal outcomes are opposites, and the single sustained note is neither.
+
+The ready chirp sounds *after* capture has started, so the microphone records
+it. That is the cheaper trade: chirping first and then starting capture would
+add the chirp's own duration to the dead time at the front of every question.
+The notes are short, and the backend can drop the head of the recording if it
+ever matters.
 
 A press too short to count currently makes no sound at all. That leaves a
 deliberate-but-brief press with no feedback, which is a UX question parked until
