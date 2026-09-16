@@ -193,6 +193,15 @@ whole pipeline.
 Three transitions exist: asleep -> Listening, Listening -> answer, Listening ->
 error. All three take a full refresh for now -- [D6](deferred.md).
 
+**Landscape, with the three buttons along the bottom edge on the right.** That
+is where the AI button falls under the right thumb, which is the hand the device
+is held in. It is also the panel's default orientation in Seeed_GFX2 --
+`Board_reTerminal_Sticky` sets a horizontal mirror and no rotation -- so nothing
+calls `setRotation()` and the code says nothing about orientation at all. The
+other way up reads exactly as well and was tried; it puts the buttons along the
+top and off to the left, which is a two-handed device. Checked on the panel both
+ways round.
+
 The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
 answer disappears as soon as a new question starts.
