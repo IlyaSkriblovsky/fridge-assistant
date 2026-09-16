@@ -21,7 +21,7 @@ which means asking.
 | S1 | Buzzer module | The three patterns, on LEDC | Done |
 | S2 | Button module | A press with a length, debounced | Done |
 | S3 | Capture into PSRAM | A recording, as a WAV in memory | Done |
-| S4 | Capture task | Recording that survives WiFi and the panel | Not started |
+| S4 | Capture task | Recording that survives WiFi and the panel | Done |
 | S5 | Screens | Listening, answer, error | Not started |
 | S6 | WiFi | Association without blocking, BSSID cached | Not started |
 | S7 | Upload and answer | The backend round trip | Not started |
@@ -262,12 +262,101 @@ eat it several times over, which is why they are not in it.
 of the vision's "does nothing but read I2S": a `gpio_get_level()` costs nothing
 and never blocks, and it buys a tight stop. The orchestrator polls in a loop
 that also refreshes the panel, so a release arriving during a full refresh would
-otherwise add a second or two of room noise to the end of every recording. If
-this holds up on the device, it belongs in the vision.
+otherwise add a second or two of room noise to the end of every recording. It
+held up on the device and has moved into the vision's concurrency decision.
 
 **Verified by** recording while WiFi associates and the Listening screen
 refreshes, then checking the buffer for gaps -- this is the step the two-task
 split exists for, so a clean recording under both loads is the result.
+
+### What it turned out to involve
+
+`src/sticky_capture.h/.cpp`. `StickyCapture` is `start()`, `abort()`,
+`finished()`, `wait()` and `stop()`, and the orchestrator's half of it is five
+lines:
+
+```
+if (!mic.begin()) fail("microphone", mic.lastError());
+capture.start(mic, audio, button);
+stickyBuzzer::ready();      // on this task, while the recording already runs
+...                         // WiFi, the Listening screen, seconds of both
+capture.wait();
+```
+
+**Ownership is handed over, not shared**, which is why there is no locking
+anywhere in the three modules the task drives. Between `start()` and the moment
+`finished()` first returns true, the microphone, the buffer and the button
+belong to the task and the orchestrator must not touch them. Exactly two things
+cross the boundary while it runs: the abort request going in, a flag the task
+notices between two reads, and the finish coming out, a binary semaphore whose
+give carries the barrier that makes everything the task wrote visible to
+whoever comes back out of `wait()`.
+
+**Core 1 at priority 10.** `loopTask` runs at 1, so a DMA buffer coming ready
+preempts the orchestrator rather than queueing behind a panel refresh; the WiFi
+(23) and lwIP (18) tasks are pinned to core 0, so the recording and the network
+never compete for the same core at all. The task prints nothing -- Serial1
+belongs to the orchestrator, and a line at 115200 is a millisecond the reads do
+not have to spare.
+
+Four ways to stop, and the orchestrator needs all four apart: a debounced
+release, the 30 s cap, an abort, and a microphone that stopped delivering. The
+cap is a question like any other; the abort is the vision's rule that a
+recording with nowhere to go is ended rather than finished, and the driver
+exercises it by aborting when the association times out.
+
+**The ready chirp is back where the vision puts it.** S3's driver had to chirp
+before `StickyMic::begin()`, because 110 ms of blocking between two reads of a
+single-task loop tore a hole in the recording. Now it sounds on the orchestrator
+while the capture task keeps reading, and it is audible in the first block of
+every dump with nothing missing behind it -- which is the question
+[S3](#s3----capture-into-psram) left open, answered on the device.
+
+**The floor under a short press is gone**, as [S2](#s2----button) predicted. The
+button is polled every chunk -- 256 samples, 16 ms -- from the moment the task
+starts, so a press no longer reads as the length of whatever the orchestrator
+happened to be blocked in.
+
+The driver is the real path again, minus the upload: press, chirp, speak through
+a full refresh and an association, release. WiFi and the panel are raw in
+`main.cpp` rather than modules, since [S5](#s5----screens) and
+[S6](#s6----wifi) are what give them one; all this step needs of them is an
+orchestrator that is genuinely busy for seconds on end.
+
+### What it measured
+
+Three recordings under both loads, the full refresh (2.60 s, every time)
+covering the first two thirds of each and the association (0.68-1.27 s) inside
+it.
+
+| Held | Recorded | The task's own clock | Missing |
+| --- | --- | --- | --- |
+| 3832 ms | 3760 ms, 235 chunks | 3764 ms | 4 ms |
+| 5032 ms | 4960 ms, 310 chunks | 4964 ms | 4 ms |
+| 4342 ms | 4272 ms, 267 chunks | 4274 ms | 2 ms |
+
+- **Nothing was dropped.** Time that passes without samples to show for it is
+  audio the DMA threw away, and across three runs it came to 2-4 ms -- a
+  fraction of one chunk, which is the read still in flight when the release was
+  seen. Each dump has the speech where it was spoken at the usual -45 dBFS, the
+  first burst falling entirely inside the panel refresh, and no discontinuity
+  anywhere in it.
+- **The loads cost nothing measurable.** The longest gap between two reads was
+  30.1 ms of the 90 ms the DMA holds -- and none of it is the refresh. 16, 21
+  and 18 reads took half again as long as a chunk, against 15.7, 20.7 and 17.8
+  predicted by arithmetic alone: the DMA delivers 240-frame blocks and the task
+  asks for 256 samples, so every fifteenth read waits for a second block. The
+  first one is always chunk 7, once the head start left by the settle read has
+  been eaten. Every slow read in the three runs is the DMA's own granularity and
+  not one of them is the orchestrator.
+- **That gap is not the headroom**, and it should not be read as a third of the
+  budget spent. A read that waits is a read blocked *inside* `readSamples()`,
+  which is the safe place to be; what costs audio is time spent away from the
+  read, and the only column that measures that is the missing milliseconds.
+- The 227 ms hold at the top of every log is the cold boot -- a flash, or the
+  reset that opening the serial monitor causes, has no button down, so the press
+  ends on the debounce window with 64 ms of power-up transient recorded. It is
+  the driver's way of saying "press the button".
 
 ## S5 -- Screens
 

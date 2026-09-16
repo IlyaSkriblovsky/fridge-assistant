@@ -154,8 +154,13 @@ Capture and networking cannot share a thread. The I2S DMA holds 6 x 240 frames,
 which is 90 ms at 16 kHz, while a blocking WiFi connect takes seconds. Audio
 would be dropped in chunks.
 
-- **Capture task**, pinned to a core, does nothing but read I2S into the buffer.
-- **Network/UI task** does WiFi, HTTP and the e-paper.
+- **Capture task**, pinned to core 1, reads I2S into the buffer and polls the
+  button between reads. A `gpio_get_level()` costs nothing and never blocks, and
+  it buys a tight stop: the other task's loop refreshes the panel, so a release
+  arriving during a refresh would otherwise add a second or two of room noise to
+  the end of every recording.
+- **Network/UI task** does WiFi, HTTP and the e-paper. The WiFi and lwIP tasks
+  sit on core 0, so the recording and the network never share a core either.
 
 E-paper refresh belongs in the second task: it is a long blocking SPI transfer
 followed by a BUSY wait, and it must not sit between two I2S reads.
