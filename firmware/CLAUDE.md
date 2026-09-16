@@ -13,6 +13,7 @@ the hardware traps.
 | Path | What |
 | --- | --- |
 | `src/main.cpp` | Boot sequence, display and WiFi setup |
+| `src/sticky_buzzer.h/.cpp` | Buzzer on LEDC: the ready, answer and error patterns |
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
 | `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
@@ -24,6 +25,11 @@ the hardware traps.
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
 | `docs/implementation.md` | The build order, step by step, and notes from each step |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
+
+The `sticky_` prefix means the module is tied to this board: it cannot be read
+without the pin map and cannot be checked without the device. Modules without it
+(`config`, `secrets`) are portable logic, and new ones should only take the
+prefix if they touch the hardware.
 
 ## Build and flash
 

@@ -18,7 +18,7 @@ which means asking.
 
 | # | Step | Delivers | Status |
 | --- | --- | --- | --- |
-| S1 | Buzzer module | The three patterns, on LEDC | Not started |
+| S1 | Buzzer module | The three patterns, on LEDC | Done |
 | S2 | Button module | A press with a length, debounced | Not started |
 | S3 | Capture into PSRAM | A recording, as a WAV in memory | Not started |
 | S4 | Capture task | Recording that survives WiFi and the panel | Not started |
@@ -58,6 +58,31 @@ very short notes, low then high), answer (two short notes, high then low), error
   three are distinguishable without looking.
 
 **Verified by** ear.
+
+### What was picked
+
+| Pattern | Notes | Total |
+| --- | --- | --- |
+| ready | 2000 Hz 40 ms, rest 30 ms, 3000 Hz 40 ms | 110 ms |
+| answer | 3000 Hz 90 ms, rest 50 ms, 2000 Hz 90 ms | 230 ms |
+| error | 1500 Hz 450 ms | 450 ms |
+
+The two pairs share the same two notes and differ only in direction, so the
+normal outcomes are opposites; the error note is below both and long enough that
+it cannot be heard as a pair that was cut short. Kept near 2-3 kHz because that
+is where a small piezo is loudest -- 1500 Hz was the one value expected to come
+out quiet, and did not. Confirmed on the device: the three are distinguishable
+without looking.
+
+`play()` takes a `Note{hz, ms}` array with `hz == 0` as a rest, so the patterns
+are three static arrays and re-tuning one costs a line. LEDC is attached once per
+pattern rather than once per note, or every gap would carry a pad glitch.
+
+The listening test ran from a temporary driver in `main.cpp`, removed with this
+step: three passes and then silence, rather than a repeat from `loop()`. **The
+board has no off switch**, so a demo that repeats can only be stopped by pulling
+the battery, while reset replays a fixed number of passes on demand. Worth
+knowing at [S5](#s5----screens), which also needs a temporary driver.
 
 ## S2 -- Button
 
