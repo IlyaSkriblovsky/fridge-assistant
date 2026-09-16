@@ -18,6 +18,7 @@ the hardware traps.
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
 | `src/sticky_audio.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/sticky_capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
+| `src/sticky_screen.h/.cpp` | The three screens, and the only place the panel is touched |
 | `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |

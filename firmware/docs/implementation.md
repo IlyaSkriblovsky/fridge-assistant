@@ -22,7 +22,7 @@ which means asking.
 | S2 | Button module | A press with a length, debounced | Done |
 | S3 | Capture into PSRAM | A recording, as a WAV in memory | Done |
 | S4 | Capture task | Recording that survives WiFi and the panel | Done |
-| S5 | Screens | Listening, answer, error | Not started |
+| S5 | Screens | Listening, answer, error | Done |
 | S6 | WiFi | Association without blocking, BSSID cached | Not started |
 | S7 | Upload and answer | The backend round trip | Not started |
 | S8 | The flow | Wake, record, ask, show, sleep | Not started |
@@ -385,6 +385,76 @@ and that is cheap only if nothing else calls the panel directly.
 **Verified by** the user looking at the panel. Worth driving all three screens
 from a temporary `loop()` before the flow exists, since this is the one step
 where the failure mode is cosmetic and only a human can see it.
+
+### What it turned out to involve
+
+`StickyScreen` is `begin()`, `clear()` and the three screens, and it is the only
+place `Seeed_GFX` is touched -- `sticky_epaper.h` is now included by
+`sticky_screen.cpp` rather than by `main.cpp`, so the rest of the firmware never
+has to know the glass is wrong twice. `begin()` failing is the vision's "nothing
+to draw on": it reports the library's own message through `lastError()` and the
+caller chirps, logs and sleeps.
+
+**Nothing draws by itself.** `begin()` only brings the panel up, and the
+pre-clear [S8](#s8----the-flow) asks about is `clear()`, a call of its own. That
+keeps the cold-start question where it belongs -- the driver already answers it
+with `stickyPower::wokeFromDeepSleep()`, which is exactly what S8 will do.
+
+**Three faces, at 235 dpi.** `FreeSansBold24pt7b` doubled is the Listening
+screen: 516 px of `LISTENING` on an 800 px panel, by a long way the largest of
+the three because it is the one screen read from across a room rather than in
+the hand. The same face at size 1 is an error title, white inside the bar --
+the widest in the vision's table is `NO MICROPHONE` at 416 px, so every title
+clears the bar's edges. `FreeSans24pt7b` is the answer and `FreeSans18pt7b` the
+error detail. Together they cost about 22 KB of flash, which is nothing against
+the 3 MB partition.
+
+**A black bar is what tells an error from an answer** before either has been
+read. The alternative -- three screens of black text on white, differing only in
+wording -- makes the user read the screen to find out whether anything went
+wrong, on a device whose whole point is that it is glanced at.
+
+**Non-ASCII degrades per character, not per byte.** `screenDrawableText()` keeps
+0x20-0x7E, skips UTF-8 continuation bytes and writes one `?` for everything
+else, so a Russian word that slips past the backend's transliteration
+([D1](deferred.md)) comes out as one `?` per letter instead of two or three. It
+is the only part of the module that can be reasoned about away from the device,
+which is why it is a free function rather than a private method. Sanitising also
+keeps `textWidth()` honest: it walks bytes while `drawString()` decodes UTF-8,
+so the two disagree about the width of anything multi-byte, and every datum but
+`TL_DATUM` is computed from that width.
+
+The driver is a walkthrough -- one screen per press of the AI button, seven of
+them, covering the Listening screen, the phrase the backend really returns, an
+answer too long for the line, an answer with Cyrillic in it, an error title on
+its own, one with a detail, and the widest title in the table. Seven full
+refreshes back to back is also a ghosting test the flow itself never performs.
+**The board has no off switch**, so, like S1's listening test, nothing repeats:
+the walkthrough ends in deep sleep and five idle minutes end it early. One
+minute was tried first and was too short to walk away from the desk mid-screen.
+
+### What it measured
+
+The panel's full refresh is deterministic to the millisecond -- the duration is
+the controller's waveform table, not our code, and a cold start repeated the
+same two numbers exactly.
+
+| Screen | Refresh |
+| --- | --- |
+| `clear()`, cold start only | 2373 ms |
+| Listening | 2386 ms |
+| the three answers | 2375-2377 ms |
+| the three errors | 2443-2446 ms |
+
+- **The pre-clear costs a screen's worth of time**, which is what S8's note is
+  about: 2373 ms on a `POWERON`, and not spent at all on an `ext1` wake, where
+  the first log line after the wake is already the Listening screen.
+- **The black bar costs about 70 ms**, all of it in `fillRect` filling the frame
+  buffer. The SPI transfer and the waveform are the same either way.
+- No ghosting anywhere in seven consecutive full refreshes, including the three
+  that follow a screen with a band of black across it. `LISTENING` reads from
+  across the room, `NO MICROPHONE` sits inside the bar, and the orientation is
+  the one the vision settles on -- checked on the panel.
 
 ## S6 -- WiFi
 
