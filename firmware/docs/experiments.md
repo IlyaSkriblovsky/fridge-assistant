@@ -79,12 +79,19 @@ starts are `esp_timer_get_time()` deltas; the boot stage is not, for the reason
 below. Nothing is printed until the capture is over -- at 115200 baud a log line
 is several milliseconds injected straight into the path being measured.
 
-**The boot stage needs the RTC counter, not `esp_timer`.** `esp_timer`'s base is
-synced to the RTC counter at startup (`libesp_timer.a`, `system_time.c`), and
-that counter keeps running through deep sleep. So `esp_timer_get_time()` at the
-top of `setup()` reports time since the first power-on with the whole sleep
-included, not the length of the boot -- it only looks correct after a USB reset,
-which is the one case this experiment must not use.
+**The boot stage needs the RTC counter, not `esp_timer`.** `esp_timer` does not
+carry deep sleep: it reads the same small value at the top of every `setup()`
+however long the board slept, so it cannot see a boot that ran before it
+started, and two readings from either side of a sleep are not on the same scale.
+
+*Corrected 2026-09-16, while checking S2 on the device.* This paragraph used to
+say the opposite -- that `esp_timer`'s base is synced to the RTC counter at
+startup and therefore includes the sleep. The S2 driver timed the gap between
+two wakes both ways and got a negative number from `esp_timer` on all twenty of
+them, each equal to minus the time the previous wake had spent awake. The method
+below was already on the RTC counter, so neither it nor any number in the result
+changes; only the reason was wrong. Nothing else in the tree times anything
+across a sleep with `esp_timer`.
 
 What works instead is the timer wake. `esp_sleep_enable_timer_wakeup()` programs
 the deadline as the RTC counter at sleep entry plus the requested duration, so

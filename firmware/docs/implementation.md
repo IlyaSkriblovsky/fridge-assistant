@@ -19,7 +19,7 @@ which means asking.
 | # | Step | Delivers | Status |
 | --- | --- | --- | --- |
 | S1 | Buzzer module | The three patterns, on LEDC | Done |
-| S2 | Button module | A press with a length, debounced | Not started |
+| S2 | Button module | A press with a length, debounced | Done |
 | S3 | Capture into PSRAM | A recording, as a WAV in memory | Not started |
 | S4 | Capture task | Recording that survives WiFi and the panel | Not started |
 | S5 | Screens | Listening, answer, error | Not started |
@@ -102,6 +102,54 @@ pull-up.
 
 **Verified by** the hold length over Serial1 across a few dozen presses, short
 and long, with attention to whether a release ever registers twice.
+
+### What it turned out to involve
+
+`StickyButton` is `begin(pressStartUs)`, `poll()`, `heldMs()`, `isTap()` and
+`isDown()`. `begin()` takes the start of the press as an argument rather than
+reading the clock, because the press is older than the firmware: the caller
+passes the earliest timestamp it has, which is the top of `setup()`. `poll()`
+never blocks and latches the release, so a late bounce cannot end the same press
+twice -- and from [S4](#s4----capture-task) it is the capture task that calls
+it, between I2S reads.
+
+**Two floors under the measurement**, neither of which touches the tap/question
+decision, both worth knowing before anyone reads a hold as exact:
+
+- **Every hold reads about 60 ms short.** The press starts before the boot does,
+  and a button wake carries no deadline to measure the boot against
+  ([E1](experiments.md)). So `kButtonMinHoldMs` of 300 ms asks for roughly
+  360 ms of real press.
+- **A press shorter than the ready chirp reads as the chirp's length.** The
+  chirp blocks for 110 ms and nothing polls during it, so short taps came back
+  as exactly 161-162 ms, over and over. It disappears on its own at S4, when the
+  poll moves into the capture task, which does not stop for a chirp.
+
+The driver was one press per wake -- sleep, press, one row, sleep -- which is
+the real path rather than an imitation of it: the press is already down when
+`setup()` runs, and only a wake reproduces that. It replaced the display/WiFi/
+HTTP bring-up demo in `main.cpp`, which could not coexist with it; those pieces
+come back as real modules in S5 to S7.
+
+**The bounce question needed an instrument.** A press that produces two rows is
+the failure to look for, but a bounce re-waking the board looks exactly like a
+quick tap in the log -- same wake cause, same tiny hold. The rows had nothing to
+tell them apart until the driver started reporting how long it had slept since
+the previous row: a bounce comes back about a boot later, ~60 ms, while a human
+pressing again is hundreds of milliseconds at the very least.
+
+That is also where a claim in [E1](experiments.md) turned out to be wrong.
+Timing the gap with `esp_timer` gave a negative number on every wake, each equal
+to minus the previous wake's awake time -- `esp_timer` restarts on every deep
+sleep wake and does not carry the sleep, whatever E1 said. The measurement is on
+the RTC counter, and E1 has been corrected.
+
+**79 presses over three flashes**, and on the last 20 the gap between wakes was
+measured: the smallest was 196 ms, three times the bounce floor, and no press
+ever produced two rows. The threshold lands where `config.h` puts it -- 303 and
+307 ms came back as questions, 272 and 282 ms as taps -- and a 14 s hold rode
+through with a line a second, which re-confirms [E4](experiments.md) on the
+firmware's own code rather than on a rig.
 
 ## S3 -- Capture into PSRAM
 
