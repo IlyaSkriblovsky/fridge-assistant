@@ -25,9 +25,15 @@ It is a personal device, built for one user, powered by battery.
    Draw the "Listening" screen whenever the panel gets round to it; it will be
    late and that is accepted.
 5. **Release.** Debounce, then stop capturing.
-6. **Upload.** POST the recording to the backend as a WAV.
-7. **Answer.** The backend replies with text. Render it on the e-paper.
-8. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
+6. **Working.** Say that the question was taken and is being answered. The
+   backend runs speech recognition and a language model, which is seconds --
+   `kResponseTimeoutMs` allows thirty of them -- and until the answer is drawn
+   the panel still reads "Listening", which stops being true the moment the
+   button comes up. Nothing else covers the gap either: the answer chirp sounds
+   with the answer, not before it.
+7. **Upload.** POST the recording to the backend as a WAV.
+8. **Answer.** The backend replies with text. Render it on the e-paper.
+9. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
    screen until the next question.
 
 Press and hold is the simplest interaction that has a beginning and an end. It
@@ -190,8 +196,22 @@ whole pipeline.
 
 ### Screen
 
-Three transitions exist: asleep -> Listening, Listening -> answer, Listening ->
-error. All three take a full refresh for now -- [D6](deferred.md).
+Four transitions exist: asleep -> Listening, Listening -> working, working ->
+answer, working -> error. All take a full refresh for now -- [D6](deferred.md).
+
+**The working transition is the only one that costs the user anything**, and
+that is what makes its form an open question rather than a fourth call on the
+screen module. Every other transition happens while the user is waiting for
+nothing: the Listening refresh runs under the recording, and the answer refresh
+runs when the question is over. This one sits on the critical path -- released,
+draw, upload, wait, draw again -- so a full refresh adds its 2.4 s to the wait
+for every answer, to show a screen that a fast backend may not leave up long
+enough to read.
+
+Three shapes are plausible and the choice needs a backend that actually thinks
+behind it, so it is settled at S8 rather than here: a screen of its own, a
+partial refresh of the word alone ([D6](deferred.md)), or no screen at all and a
+fourth buzzer pattern on release.
 
 **Landscape, with the three buttons along the bottom edge on the right.** That
 is where the AI button falls under the right thumb, which is the hand the device
@@ -385,9 +405,15 @@ Also worth knowing:
 
 ## What is still moving
 
-Nothing about the design is currently unresolved. What remains is tracked
-elsewhere, deliberately kept out of this document so it does not age every time
-a shortcut is taken, a number comes in or a step is finished:
+One thing is: **what the device does between the button coming up and the
+answer arriving**, in the interaction flow's step 6. That the gap has to be
+covered is settled; which of the three shapes covers it is not, and cannot be
+until there is a model behind the backend to be slow. It is the one open
+question in this document and it belongs to S8.
+
+Everything else that remains is tracked elsewhere, deliberately kept out of this
+document so it does not age every time a shortcut is taken, a number comes in or
+a step is finished:
 
 - **[deferred.md](deferred.md)** -- simplifications taken on purpose, each with
   the end state it stands in for and what triggers the change.

@@ -551,7 +551,30 @@ stop, upload, answer or error chirp, draw, deep sleep.
   seconds spent flushing a panel the Listening screen is about to overwrite
   anyway. It is needed on a cold start, where the controller's previous-image
   RAM is unknown; `stickyPower::wokeFromDeepSleep()` already tells the two
-  apart.
+  apart. S5 measured the cost at 2373 ms and the driver already branches on it.
+- **Decide what the device does between the release and the answer.** The
+  vision's step 6, and the one question it leaves open. Until the answer is
+  drawn the panel still reads `LISTENING`, which stops being true the moment the
+  button comes up, and nothing else covers the gap -- the answer chirp sounds
+  with the answer. This is the step where it can finally be judged, because it
+  is the first time a real wait exists to sit through.
+
+  It is the only transition that costs the user anything: released, draw,
+  upload, wait, draw again, so a full refresh puts its 2.4 s in front of every
+  answer -- to show a screen a fast backend may not leave up long enough to
+  read. Three shapes, in rising order of work:
+
+  - a screen of its own, `StickyScreen::working()`, at the full 2.4 s;
+  - a fourth buzzer pattern on release and no screen at all, which costs
+    milliseconds but leaves the panel lying until the answer lands;
+  - a partial refresh of the word alone -- [D6](deferred.md), which would also
+    be the first time the partial-refresh correction in `src/sticky_epaper.h`
+    has ever run on the device, and whose cost on this panel is unmeasured.
+
+  Whichever is chosen, the number that decides it is how long the backend
+  actually takes, which [S7](#s7----upload-and-answer) is the first step to
+  produce -- and only once there is a model behind it rather than a fixed
+  phrase.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
 

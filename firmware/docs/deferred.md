@@ -16,7 +16,7 @@ in one place rather than archaeology through commit messages.
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
 | D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
-| D6 | Full refresh on every transition | Partial refresh where it pays | The UI/UX pass |
+| D6 | Full refresh on every transition | Partial refresh where it pays | The working screen at S8, or the UI/UX pass |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
@@ -72,6 +72,20 @@ Two things have to be settled when this changes:
   uploading never overlap; with a streaming upload, a one-to-two second panel
   refresh would stall it.
 
+**That task is close to free, which was not obvious.** A full refresh takes
+2.4 s on this panel ([S5](implementation.md#s5----screens)), but almost none of
+it is CPU: the library waits for the controller on the BUSY pin in a
+`delay(1)` + `yield()` loop (`core/Gpio.h`, `gfxWaitForPin`), and `delay()` in
+arduino-esp32 is `vTaskDelay()` against a 1000 Hz tick. So a refresh is about
+2200 yields, and a task doing nothing but drawing is blocked for essentially all
+of its life -- it can share a core with anything and wants no priority to speak
+of.
+
+The same fact explains a result S5 and [S4](implementation.md#s4----capture-task)
+both measured: the panel costs the capture task nothing. While the orchestrator
+is inside a refresh it is parked in `vTaskDelay`, so the capture task at
+priority 10 preempts it freely rather than queueing behind it.
+
 ## D6 -- Partial refresh
 
 All three transitions -- asleep to Listening, Listening to answer, Listening to
@@ -79,8 +93,17 @@ error -- use a full refresh. Each changes most of the screen, and a full refresh
 clears accumulated ghosting as a side effect.
 
 This means the partial-refresh correction in `src/sticky_epaper.h` is currently
-unused. It stays: the library bug it works around returns the moment anything
-draws a partial update, and a correct driver is worth more than a smaller one.
+unused -- it has never run on the device at all. It stays: the library bug it
+works around returns the moment anything draws a partial update, and a correct
+driver is worth more than a smaller one.
+
+**The working screen may pull this forward.** The vision's step 6 is the one
+transition on the critical path of a question, so it is the first place where
+2.4 s is spent out of the user's time rather than under a recording -- see
+[S8](implementation.md#s8----the-flow). If that is what a partial refresh is
+for, two things are owed first: how long one takes on this panel, which nobody
+has measured, and what the accumulated ghosting looks like over a real sequence
+of transitions, which only a human at the panel can say.
 
 ## D7 -- Nothing for a press too short
 
