@@ -433,6 +433,20 @@ refreshes back to back is also a ghosting test the flow itself never performs.
 the walkthrough ends in deep sleep and five idle minutes end it early. One
 minute was tried first and was too short to walk away from the desk mid-screen.
 
+**The image is on the glass before `refresh()` returns**, and the first version
+of the driver lost every press made in between. It polled the button after the
+refresh, so a press that started and ended while the panel still had the task
+had simply never happened -- which is exactly what someone does when they press
+as soon as the screen appears. The driver now latches the falling edge from an
+interrupt and compares against a snapshot taken *before* the refresh.
+
+The flow does not have this gap and never did: from [S4](#s4----capture-task)
+the capture task polls the button every 16 ms right through the Listening
+refresh, which is the reason the two tasks are split. It is worth knowing anyway
+because it puts a number on "the panel is behind everything" -- there is a
+window of roughly half a second where the user has read the screen and the
+firmware is still inside the library.
+
 ### What it measured
 
 The panel's full refresh is deterministic to the millisecond -- the duration is
@@ -455,6 +469,28 @@ same two numbers exactly.
   that follow a screen with a band of black across it. `LISTENING` reads from
   across the room, `NO MICROPHONE` sits inside the bar, and the orientation is
   the one the vision settles on -- checked on the panel.
+
+**Where the 2.4 seconds goes.** About 220 ms of it is fixed cost the library
+adds and 2.2 s is the panel's own waveform, waited out on the BUSY pin:
+
+- `Driver_SSD1677::sleep()` ends with `delay(100)`, and
+  `Panel_EPaper::ePaperSleep()` adds another 100 ms on top of it -- 200 ms of
+  unconditional delay after the physical refresh has already finished.
+- The library puts the controller into deep sleep after every refresh, so the
+  next one begins with `hardwareReset(10, 10)`, a software reset and a fresh
+  upload of the waveform table: 21 ms of delay plus the transfer.
+
+Shortening the remaining 2.2 s means a different waveform, which is what partial
+refresh and `refreshFast()` are -- [D6](deferred.md), and not before the UI/UX
+pass.
+
+**The screen is readable about 0.4 s before the firmware knows it.** Six presses
+made as soon as each screen appeared landed at -295, -402, -21, -224 and -70 ms
+relative to the moment `refresh()` returned, and one deliberate slow press at
++194 s. Five of the six were made while the panel still had the task -- every
+one of them was caught by the latch, and every one would have been lost by the
+poll it replaced. The widest, 402 ms, is twice the 200 ms of library delay, so
+most of that window is the tail of the waveform rather than the delays.
 
 ## S6 -- WiFi
 
