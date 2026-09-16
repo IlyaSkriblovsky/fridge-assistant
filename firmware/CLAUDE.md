@@ -16,6 +16,7 @@ the hardware traps.
 | `src/sticky_buzzer.h/.cpp` | Buzzer on LEDC: the ready, answer and error patterns |
 | `src/sticky_button.h/.cpp` | AI button: the press that woke the board, timed and debounced |
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
+| `src/sticky_audio.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |

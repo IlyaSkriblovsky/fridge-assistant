@@ -1,32 +1,35 @@
-// S2 -- the AI button on the device. A temporary driver, the way S1's listening
-// test was: docs/implementation.md asks for the hold length over Serial1 across
-// a few dozen presses, and S8 replaces all of this with the orchestrator.
+// S3 -- capture into PSRAM. A temporary driver, the way S1's and S2's were:
+// docs/implementation.md asks for a fixed few seconds recorded and the levels
+// of the finished buffer logged block by block, so that speech has to show up
+// where it was spoken. S8 replaces all of this with the orchestrator.
 //
-// One press per wake, which is the path the firmware will take: the board
-// sleeps, the press wakes it, and the press is already down when setup() runs.
-// Each wake prints one row and goes back to sleep, so a few dozen presses is a
-// few dozen rows and the board is never left running -- it has no off switch.
+// One recording per wake, then back to sleep. The board has no off switch, so
+// nothing here repeats on its own: press the AI button, wait for the ready
+// chirp, say something at a moment you can find again in the dump -- two words,
+// a pause, two words -- and the answer chirp says the recording is over.
 //
-// The chirps are the ones from the flow. Ready when the press has been
-// registered (in the firmware it will mean the microphone is live), answer when
-// the press was long enough to count. A tap gets the ready chirp and nothing
-// after it, which is [D7](docs/deferred.md) made audible.
+// **The chirp comes before capture here, which is the opposite of the flow.**
+// The vision starts capture first so that the chirp can honestly mean "the
+// microphone is live", but that only works once the chirp is on another task:
+// it blocks for 110 ms, and the I2S DMA holds 90 ms, so a chirp between two
+// reads of a single-task loop overflows the ring and tears a hole in the
+// recording. Chirping before StickyMic::begin() costs the user the 34 ms of
+// rail and settle that follow, and leaves the timeline in the dump exact --
+// which is the thing this step is checked on. S4 is where the order in the
+// vision becomes free.
 //
-// Nothing polls the button until the UART is up and the ready chirp is over, so
-// a press shorter than those reads as the 161 ms they take together rather than
-// its own length. It costs nothing here: the minimum hold is 300 ms and
-// everything at stake is above it. In the firmware the floor goes away on its
-// own -- S4 moves the poll into the capture task, which does not stop for a
-// chirp.
+// The button is not read at all here. The recording is a fixed length because
+// this step is about the buffer; the press only supplies the wake, and S4 is
+// where the length becomes the user's again.
 
 #include <Arduino.h>
-#include <esp_private/esp_clk.h>
-#include <esp_timer.h>
-#include <soc/rtc.h>
+#include <esp_heap_caps.h>
+#include <esp_memory_utils.h>
 
 #include "config.h"
-#include "sticky_button.h"
+#include "sticky_audio.h"
 #include "sticky_buzzer.h"
+#include "sticky_mic.h"
 #include "sticky_power.h"
 
 namespace {
@@ -34,122 +37,167 @@ namespace {
 constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
-// A line per second while the button is held, so a long press shows life
-// instead of silence.
-constexpr uint32_t kProgressMs = 1000;
+// Long enough to fit a phrase, a silence and a phrase, short enough that the
+// dump is a screen and not a scroll.
+constexpr uint32_t kRecordMs = 5000;
 
-// The press count survives the sleeps but not a power-on or the reset that
-// opening the serial monitor causes -- which is the session boundary wanted
-// here, since the monitor is what the rows are being read on.
-constexpr uint32_t kMagic = 0x5B2B0770;
-RTC_DATA_ATTR uint32_t g_magic;
-RTC_DATA_ATTR uint32_t g_presses;
+// One row per block of the dump. 100 ms is finer than a syllable, so a word
+// lands in several rows and a pause is unmistakable.
+constexpr uint32_t kBlockMs = 100;
 
-// What tells a bounce from a second press: a row that lands a boot's worth of
-// time after the previous sleep is the release re-triggering ext1, while a
-// human pressing again is hundreds of milliseconds at the very least. The floor
-// is the boot itself, ~60 ms, which is inside this interval.
-//
-// Off the RTC counter, which is the only clock here that runs through deep
-// sleep. esp_timer restarts on every wake, so a reading taken before the sleep
-// and one taken after it are not on the same scale -- measured with this driver,
-// and it corrects what docs/experiments.md used to say in E1.
-RTC_DATA_ATTR uint64_t g_sleptAtTicks;
+// The bar spans the range this microphone actually works in: a quiet room reads
+// about -70 dBFS on this unit and speech at arm's length peaks near -45 dBFS.
+constexpr float kBarFloorDbfs = -80.0f;
+constexpr float kBarTopDbfs = -20.0f;
+constexpr int kBarWidth = 40;
 
-// Header and rows go through the same format string so the columns line up.
-constexpr const char* kRowFormat = "%4s  %-5s %-9s %5s %7s %8s  %s\n";
+StickyMic mic;
+StickyAudio audio;
 
-StickyButton button;
+// Fills buf with a bar of kBarWidth cells, proportional to dbfs. Reading fifty
+// rows of numbers for the one place the speech is takes longer than looking.
+void drawBar(char* buf, size_t size, float dbfs) {
+  float t = (dbfs - kBarFloorDbfs) / (kBarTopDbfs - kBarFloorDbfs);
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
 
-void printBanner() {
-  Serial1.println();
-  Serial1.println("S2 button driver -- one press per wake, then back to sleep");
-  Serial1.printf("  a press under %lu ms is a tap; release needs %lu ms of stable high\n",
-                 static_cast<unsigned long>(config::kButtonMinHoldMs),
-                 static_cast<unsigned long>(config::kButtonDebounceMs));
-  Serial1.println("  held is short by the boot, ~60 ms, which cannot be measured here");
-  Serial1.println("  slept is sleep entry to this wake, off the RTC counter: a row that");
-  Serial1.println("  is only a boot behind the last one is a bounce, not a second press");
-  Serial1.println();
-  Serial1.printf(kRowFormat, "#", "wake", "reset", "down", "held", "slept", "verdict");
+  int filled = static_cast<int>(t * kBarWidth + 0.5f);
+  size_t n = 0;
+  while (n + 1 < size && n < static_cast<size_t>(filled)) buf[n++] = '#';
+  buf[n] = '\0';
 }
 
-// Microseconds to a millisecond cell, with a dash where the number does not
-// exist -- the first row of a session has no sleep behind it.
-const char* msCell(char* buf, size_t size, int64_t us, bool valid) {
-  if (valid) {
-    snprintf(buf, size, "%lld", us / 1000);
-  } else {
-    snprintf(buf, size, "--");
+// Everything that goes wrong here ends the same way: say what it was, sound the
+// error pattern and sleep. On battery the chirp is the whole message.
+[[noreturn]] void fail(const char* what, const char* detail) {
+  Serial1.printf("FAILED: %s -- %s\n", what, detail);
+  Serial1.flush();
+  mic.end();
+  stickyBuzzer::error();
+  stickyPower::deepSleep();
+}
+
+void reportBuffer() {
+  Serial1.printf("  buffer: %u bytes at %p (%s), %lu s at %lu Hz\n",
+                 static_cast<unsigned>(audio.allocatedBytes()),
+                 static_cast<const void*>(audio.samples()),
+                 esp_ptr_external_ram(audio.samples()) ? "PSRAM" : "NOT PSRAM",
+                 static_cast<unsigned long>(config::kMaxRecordSeconds),
+                 static_cast<unsigned long>(audio.sampleRate()));
+  Serial1.printf("  PSRAM free after it: %u of %u bytes\n",
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 static_cast<unsigned>(heap_caps_get_total_size(MALLOC_CAP_SPIRAM)));
+}
+
+// The header, once, as bytes. Until S7 exists there is nothing else that would
+// notice a wrong field, and a WAV a player refuses is a long way to find a
+// swapped byte order.
+void reportHeader() {
+  const uint8_t* wav = audio.wav();
+  Serial1.printf("  wav: %u bytes total, %u of header\n",
+                 static_cast<unsigned>(audio.wavBytes()),
+                 static_cast<unsigned>(StickyAudio::kHeaderBytes));
+  for (size_t i = 0; i < StickyAudio::kHeaderBytes; i += 16) {
+    Serial1.printf("   %02u ", static_cast<unsigned>(i));
+    for (size_t j = i; j < i + 16 && j < StickyAudio::kHeaderBytes; ++j) {
+      Serial1.printf("%02x ", wav[j]);
+    }
+    Serial1.println();
   }
-  return buf;
 }
 
-void printRow(uint32_t index, bool downAtStart, uint32_t heldMs, int64_t sleptUs,
-              bool sleptValid, bool tap) {
-  char cIndex[8], cHeld[10], cSlept[12];
-  snprintf(cIndex, sizeof(cIndex), "%lu", static_cast<unsigned long>(index));
-  snprintf(cHeld, sizeof(cHeld), "%lu", static_cast<unsigned long>(heldMs));
+// The dump the step is verified on: the recorded buffer walked in blocks, each
+// reduced by the same arithmetic a live reading uses.
+void reportBlocks() {
+  const uint32_t blockSamples = (audio.sampleRate() * kBlockMs) / 1000;
+  if (blockSamples == 0) return;
 
-  Serial1.printf(kRowFormat, cIndex, stickyPower::wakeupCauseName(),
-                 stickyPower::resetReasonName(), downAtStart ? "yes" : "no", cHeld,
-                 msCell(cSlept, sizeof(cSlept), sleptUs, sleptValid),
-                 tap ? "tap, discarded" : "question");
+  Serial1.println();
+  Serial1.printf("  %5s %7s %9s %8s %7s  %s\n", "block", "at", "rms", "dBFS", "peak",
+                 "level");
+
+  const int16_t* samples = audio.samples();
+  const uint32_t total = audio.recordedSamples();
+  uint32_t loudest = 0;
+  float loudestDbfs = StickyMic::kSilenceDbfs;
+
+  for (uint32_t start = 0, index = 0; start < total; start += blockSamples, ++index) {
+    uint32_t count = total - start;
+    if (count > blockSamples) count = blockSamples;
+
+    const MicLevel level = micLevelOf(samples + start, count);
+    if (level.dbfs > loudestDbfs) {
+      loudestDbfs = level.dbfs;
+      loudest = index;
+    }
+
+    char bar[kBarWidth + 1];
+    drawBar(bar, sizeof(bar), level.dbfs);
+    Serial1.printf("  %5lu %6lu %9.1f %8.1f %7.0f  %s\n",
+                   static_cast<unsigned long>(index + 1),
+                   static_cast<unsigned long>(index * kBlockMs), level.rms, level.dbfs,
+                   level.peak, bar);
+  }
+
+  const MicLevel whole = micLevelOf(samples, total);
+  Serial1.println();
+  Serial1.printf("  whole recording: %.1f dBFS rms, peak %.0f, loudest block %lu\n",
+                 whole.dbfs, whole.peak, static_cast<unsigned long>(loudest + 1));
 }
 
 }  // namespace
 
 void setup() {
-  // The press started before this line and there is no way to find out how long
-  // before: a button wake carries no deadline to measure the boot against. This
-  // is the earliest honest origin for the hold.
-  const int64_t tEntry = esp_timer_get_time();
-  const uint64_t rtcEntry = rtc_time_get();
-
   // First thing on boot -- everything below depends on the board staying alive.
   stickyPower::holdLatch();
-  button.begin(tEntry);
 
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   delay(50);
 
-  const bool sameSession = stickyPower::wokeFromDeepSleep() && g_magic == kMagic;
-  const bool sleptValid = sameSession && rtcEntry > g_sleptAtTicks;
-  const int64_t sleptUs =
-      sleptValid ? static_cast<int64_t>(rtc_time_slowclk_to_us(
-                       rtcEntry - g_sleptAtTicks, esp_clk_slowclk_cal_get()))
-                 : 0;
-  if (!sameSession) {
-    g_magic = kMagic;
-    g_presses = 0;
-    printBanner();
-  }
+  Serial1.println();
+  Serial1.println("S3 capture driver -- one recording per wake, then back to sleep");
+  Serial1.printf("  wake %s, reset %s\n", stickyPower::wakeupCauseName(),
+                 stickyPower::resetReasonName());
 
-  // Before the chirp, because the chirp is 110 ms in which a short press can
-  // end. A "no" here is a press that was over before the firmware could look.
-  const bool downAtStart = button.isDown();
+  // The buffer first: a failure here is the vision's NO MEMORY, and it is worth
+  // finding out before the microphone rail is even powered.
+  if (!audio.begin(StickyMic::kSampleRate)) fail("audio buffer", audio.lastError());
+  reportBuffer();
+  Serial1.printf("  recording %lu ms from the ready chirp -- speak after it\n",
+                 static_cast<unsigned long>(kRecordMs));
+  Serial1.flush();
 
+  // Then the chirp, and only then the microphone -- see the note at the top of
+  // the file. Nothing may block between begin() and the loop for longer than
+  // the DMA holds, which is why the printing above is already done.
   stickyBuzzer::ready();
+  if (!mic.begin()) fail("microphone", mic.lastError());
 
-  uint32_t nextProgress = kProgressMs;
-  while (!button.poll()) {
-    if (button.heldMs() >= nextProgress) {
-      Serial1.printf("  held %lu ms\n", static_cast<unsigned long>(button.heldMs()));
-      nextProgress += kProgressMs;
-    }
-    delay(1);
+  const uint32_t wanted =
+      static_cast<uint32_t>(static_cast<uint64_t>(mic.sampleRate()) * kRecordMs / 1000);
+
+  while (audio.recordedSamples() < wanted) {
+    uint32_t want = audio.nextChunkSamples();
+    if (want == 0) break;  // the 30 s cap, which kRecordMs is well inside
+    const uint32_t remaining = wanted - audio.recordedSamples();
+    if (want > remaining) want = remaining;
+
+    const uint32_t got = mic.readSamples(audio.writeHead(), want);
+    if (got == 0) fail("capture", mic.lastError());
+    audio.commit(got);
   }
 
-  printRow(++g_presses, downAtStart, button.heldMs(), sleptUs, sleptValid, button.isTap());
+  mic.end();
+  stickyBuzzer::answer();
 
-  if (!button.isTap()) stickyBuzzer::answer();
+  Serial1.printf("  recorded %lu samples, %lu ms\n",
+                 static_cast<unsigned long>(audio.recordedSamples()),
+                 static_cast<unsigned long>(audio.recordedMs()));
+  reportHeader();
+  reportBlocks();
 
   Serial1.flush();
-  stickyPower::prepareDeepSleep();
-  // As late as possible, so the interval reported on the next wake is the sleep
-  // and the boot and nothing else.
-  g_sleptAtTicks = rtc_time_get();
-  stickyPower::enterDeepSleep();
+  stickyPower::deepSleep();
 }
 
 void loop() {

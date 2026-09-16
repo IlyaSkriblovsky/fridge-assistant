@@ -20,7 +20,7 @@ which means asking.
 | --- | --- | --- | --- |
 | S1 | Buzzer module | The three patterns, on LEDC | Done |
 | S2 | Button module | A press with a length, debounced | Done |
-| S3 | Capture into PSRAM | A recording, as a WAV in memory | Not started |
+| S3 | Capture into PSRAM | A recording, as a WAV in memory | Done |
 | S4 | Capture task | Recording that survives WiFi and the panel | Not started |
 | S5 | Screens | Listening, answer, error | Not started |
 | S6 | WiFi | Association without blocking, BSSID cached | Not started |
@@ -179,6 +179,73 @@ to nearly nothing) is the same subject and is tracked there.
 **Verified by** recording a fixed few seconds, then logging block levels across
 the captured buffer -- speech has to show up where it was spoken. A dump of the
 buffer to the backend, once S7 exists, is what actually proves it is audio.
+
+### What it turned out to involve
+
+`StickyAudio` is `begin(sampleRate)`, three lines per chunk, and `wav()`:
+
+```
+const uint32_t want = audio.nextChunkSamples();          // 0 at the cap
+const uint32_t got = mic.readSamples(audio.writeHead(), want);
+audio.commit(got);
+```
+
+`writeHead()` hands out an address inside the PSRAM allocation, so samples go
+from the DMA to their final place in one step and nothing is copied afterwards.
+`wav()` writes the 44 reserved bytes at the front and returns the buffer, which
+from [S7](#s7----upload-and-answer) on is the POST body unchanged.
+
+`StickyMic::readSamples()` is the raw read that fills it: one `readBytes()`, no
+averaging and no DC removal. Adding it pulled the level arithmetic out of
+`readLevel()` into `MicLevelMeter`, because the dump needs exactly the numbers a
+live reading gives, over a slice of PSRAM instead of over an I2S read.
+`readLevel()` now feeds the meter chunk by chunk and is otherwise unchanged.
+
+**The ready chirp cannot be inside the recording while there is only one task.**
+`stickyBuzzer::ready()` blocks for 110 ms and the I2S DMA holds 90 ms, so a
+chirp between two reads overflows the ring and tears a hole in the recording.
+The driver chirps *before* `StickyMic::begin()` instead, which costs the user
+the 34 ms of rail and settle that follow and leaves the timeline in the dump
+exact -- which is the thing this step is checked on. Nothing about the flow
+changes: this is the vision's concurrency argument arriving one step early. But
+it does settle a question [S8](#s8----the-flow) would otherwise have to ask
+again -- **the chirp belongs to the orchestrator, not to the capture task**, and
+it is [S4](#s4----capture-task) that makes the vision's order free.
+
+### What it measured
+
+Two recordings, one from a reset into a quiet room and one from a button wake
+with two words, a pause and two words.
+
+- **The buffer is where it should be.** 960044 bytes at `0x3c050f18`, which
+  `esp_ptr_external_ram()` confirms is PSRAM, leaving 7418128 of 8388608 bytes
+  free. 44 bytes of header and 960000 of audio, which is the 30 s cap exactly.
+- **Nothing was dropped.** 80000 samples for a 5000 ms recording, twice, off
+  chunks of 256 -- no short read anywhere, so `readBytes()` really does return
+  everything asked for as long as the caller comes back inside the 90 ms.
+- **The header is right**, byte for byte: `RIFF` 160036, `WAVE`, `fmt ` 16, PCM,
+  1 channel, 16000 Hz, 32000 B/s, block align 2, 16 bits, `data` 160000. Checked
+  by hand because until S7 exists nothing else would notice a swapped field.
+
+The spoken run, in 100 ms blocks:
+
+| Blocks | At | Level | What |
+| --- | --- | --- | --- |
+| 1-3 | 0-300 ms | -37.7 -> -57.0 dBFS | the power-up transient, still decaying |
+| 4-7 | 300-800 ms | about -67 dBFS | room |
+| 14-20 | 1300-2000 ms | -50 to -44 dBFS | the first two words |
+| 21-32 | 2000-3200 ms | about -69 dBFS | the pause |
+| 33-41 | 3200-4100 ms | -61 to -43 dBFS | the second two words |
+| 42-50 | 4100-5000 ms | about -69 dBFS | room |
+
+Speech where speech was, silence where silence was, and both at the levels the
+vision records for this unit -- a quiet room near -70 dBFS, speech at arm's
+length peaking near -45. The first three blocks are [E3](experiments.md) seen
+again at a coarser grain: the transient is below speech level from about 200 ms
+and at the floor by 400 ms, measured this time on the firmware's own code rather
+than on a rig. It is also the reason the driver's own dump opens loud, and why
+the loudest block of a recording is the first one -- worth remembering before
+anyone reads that as a fault.
 
 ## S4 -- Capture task
 

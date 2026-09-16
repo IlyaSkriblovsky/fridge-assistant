@@ -30,6 +30,30 @@ struct MicLevel {
   uint32_t samples; // how many samples actually went into the numbers
 };
 
+// The arithmetic behind a MicLevel, kept apart from where the samples come
+// from: readLevel() feeds it one I2S read at a time, and a walk over a finished
+// recording feeds it a slice of the PSRAM buffer.
+//
+// One pass collects everything a level needs. The sums give mean and variance
+// (variance = mean of squares - square of mean, which is the DC-free power),
+// and the extremes give the peak deviation once the mean is known. int64
+// accumulators, because 32768^2 per sample overflows int32 after two samples.
+class MicLevelMeter {
+ public:
+  void add(const int16_t* samples, uint32_t count);
+  MicLevel result() const;
+
+ private:
+  int64_t _sum = 0;
+  int64_t _sumSquares = 0;
+  int32_t _smallest = INT16_MAX;
+  int32_t _largest = INT16_MIN;
+  uint32_t _count = 0;
+};
+
+// One-shot form, for a block that is already in memory.
+MicLevel micLevelOf(const int16_t* samples, uint32_t count);
+
 class StickyMic {
  public:
   static constexpr int kPinClk = 19;
@@ -72,6 +96,17 @@ class StickyMic {
   // bias; without subtracting it the "silence" reading would sit at whatever
   // that bias happens to be instead of near zero.
   bool readLevel(MicLevel& out, uint32_t samples = 1024);
+
+  // Reads PCM straight into the caller's buffer -- one I2S read, no averaging
+  // and no DC removal, so the samples arrive carrying the microphone's own bias
+  // exactly as the hardware delivered them. Returns how many samples were
+  // written, or 0 with lastError() set.
+  //
+  // Blocks until the buffer is full: the read underneath loops until it has
+  // every sample asked for, so the call takes maxSamples/sampleRate seconds.
+  // The I2S DMA holds 6 x 240 frames -- 90 ms at 16 kHz -- which is the whole
+  // budget a caller has to spend between two of these.
+  uint32_t readSamples(int16_t* dest, uint32_t maxSamples);
 
   // Human-readable reason the last begin()/readLevel() returned false.
   const char* lastError() const { return _lastError; }
