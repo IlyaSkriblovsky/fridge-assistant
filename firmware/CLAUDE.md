@@ -22,6 +22,7 @@ the hardware traps.
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
+| `docs/implementation.md` | The build order, step by step, and notes from each step |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
 
 ## Build and flash
@@ -62,6 +63,9 @@ their process.
   `src/config.h`, which is tracked.
 - **Put a shortcut in `docs/deferred.md`, not in the vision.** The vision says
   what the device is; deferrals are the list that gets deleted a line at a time.
+- **Work through `docs/implementation.md` and leave the notes there.** It holds
+  the step order and what each step turned out to involve. A step counts as done
+  when it has run on the device, not when it builds.
 - **Don't guess at a number that belongs in `docs/experiments.md`.** Wake
   latency, HTTPS overhead and microphone settle time are unmeasured on purpose;
   record a measurement there rather than inventing a constant.

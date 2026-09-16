@@ -26,10 +26,12 @@ It is a personal device, built for one user, powered by battery.
    late and that is accepted.
 5. **Release.** Debounce, then stop capturing.
 6. **Upload.** POST the recording to the backend as a WAV.
-7. **Answer.** The backend replies with text. Render it, with battery level, on
-   the e-paper.
+7. **Answer.** The backend replies with text. Render it on the e-paper.
 8. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
    screen until the next question.
+
+Press and hold is the simplest interaction that has a beginning and an end. It
+is not settled that it is the right one -- [D9](deferred.md).
 
 Measurements the design still waits on are tracked in
 [experiments.md](experiments.md).
@@ -65,7 +67,6 @@ is a configuration matter (in nginx, `proxy_request_buffering off`).
 ```
 POST {config::kBackendBaseUrl}{config::kAudioPath}      ->  POST /audio
 Content-Type: audio/wav
-Authorization: Bearer {secrets::kBackendToken}
 
 <WAV: PCM, 16 kHz, mono, signed 16-bit little-endian>
 ```
@@ -73,6 +74,10 @@ Authorization: Bearer {secrets::kBackendToken}
 Sample rate and format travel in the WAV header rather than in custom headers,
 so the body is self-describing and can be saved and played back as a file on the
 backend side.
+
+The request carries no credentials -- [D8](deferred.md). The backend is on the
+LAN and answers anyone who can reach it, which is the same trust boundary the
+WiFi password already draws.
 
 The response is JSON with the answer in `response`:
 
@@ -187,10 +192,11 @@ The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
 answer disappears as soon as a new question starts.
 
-Battery level is drawn on the **answer and error screens**, not on the Listening
-screen. It is read from the BQ27220 fuel gauge on the sensor I2C bus (address
-`0x55`, register `0x2C`, two bytes little-endian, percent). Acting on a low
-reading is [D3](deferred.md).
+Battery level belongs on the **answer and error screens**, not on the Listening
+screen -- read from the BQ27220 fuel gauge on the sensor I2C bus (address
+`0x55`, register `0x2C`, two bytes little-endian, percent). No screen shows it
+yet: nothing on this unit has talked to that gauge, so it waits for
+[E5](experiments.md), which has to establish the same conversation -- [D3](deferred.md).
 
 That placement started as a workaround -- the sensor bus runs over GPIO0, a
 strapping pin, so it cannot be touched at the very top of boot -- but it is the
@@ -251,6 +257,7 @@ Every failure does the same three things: chirp, draw the message, sleep.
 | Response did not parse, or has no `response` field | `BAD RESPONSE` |
 | No answer within `kResponseTimeoutMs` | `TIMED OUT` |
 | Microphone did not start | `NO MICROPHONE` |
+| The audio buffer could not be allocated | `NO MEMORY` |
 
 A network failure during recording aborts immediately rather than letting the
 user finish talking into a recording that has nowhere to go. It costs an
@@ -273,7 +280,8 @@ Split in two, by whether a value can be committed:
 
 - **`src/config.h`** -- tracked. Backend base URL and path, recording cap,
   response timeout, button debounce and minimum hold. Meant to be edited.
-- **`src/secrets.h`** -- gitignored. WiFi credentials and the backend token.
+- **`src/secrets.h`** -- gitignored. WiFi credentials, and whatever else turns
+  out not to be committable.
   `src/secrets.example.h` is the committed template and must be kept in step
   when a constant is added. A missing `secrets.h` breaks the build at the
   include; empty values are reported over Serial1 at runtime.
@@ -363,12 +371,14 @@ Also worth knowing:
 
 ## What is still moving
 
-Nothing about the design is currently unresolved. What remains is tracked in two
-places, deliberately kept out of this document so it does not age every time a
-shortcut is taken or a number comes in:
+Nothing about the design is currently unresolved. What remains is tracked
+elsewhere, deliberately kept out of this document so it does not age every time
+a shortcut is taken, a number comes in or a step is finished:
 
 - **[deferred.md](deferred.md)** -- simplifications taken on purpose, each with
   the end state it stands in for and what triggers the change.
 - **[experiments.md](experiments.md)** -- measurements the design is waiting on:
   wake latency, HTTPS overhead, microphone settle time, and whether the AI button
   reacts to a long hold in hardware.
+- **[implementation.md](implementation.md)** -- the order the firmware is being
+  built in, and what each step turned out to involve.

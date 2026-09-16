@@ -18,8 +18,4 @@ namespace secrets {
 constexpr const char* kWifiSsid = "";
 constexpr const char* kWifiPassword = "";
 
-// Bearer token for the backend. The backend's URL is not a secret and lives in
-// config.h.
-constexpr const char* kBackendToken = "";
-
 }  // namespace secrets

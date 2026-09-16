@@ -13,11 +13,13 @@ in one place rather than archaeology through commit messages.
 | --- | --- | --- | --- |
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
-| D3 | Battery level shown, nothing acted on | Some low-battery behaviour | Undecided |
+| D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
 | D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
 | D6 | Full refresh on every transition | Partial refresh where it pays | The UI/UX pass |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
+| D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
+| D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
 
 ---
 
@@ -39,6 +41,21 @@ arrives rather than drawing garbage.
 
 This costs nothing on the parsing side either way: ArduinoJson decodes `\uXXXX`
 escapes, surrogate pairs included, into UTF-8 by itself.
+
+## D3 -- No battery reading
+
+The screens show no battery level, and the gauge is never read. That is one step
+further back than it looks: nothing on this unit has ever talked to the BQ27220,
+so the first version would have had to bring up an I2C bus on a strapping pin,
+confirm the device answers at `0x55`, and decide what a reading from a gauge
+that has never learned this pack is worth -- all inside the one path where a
+failure costs the user their answer.
+
+[E5](experiments.md) needs exactly that conversation for its own reasons, and it
+can have it where a wrong answer costs nothing. So the gauge gets proven there
+first, and the answer screen picks it up afterwards.
+
+Acting on a low reading stays a separate question after that, and an open one.
 
 ## D4 -- Chunked upload
 
@@ -64,3 +81,53 @@ clears accumulated ghosting as a side effect.
 This means the partial-refresh correction in `src/sticky_epaper.h` is currently
 unused. It stays: the library bug it works around returns the moment anything
 draws a partial update, and a correct driver is worth more than a smaller one.
+
+## D7 -- Nothing for a press too short
+
+A press shorter than `config::kButtonMinHoldMs` is discarded silently: no
+screen, no sound, nothing sent.
+
+"No sound" cannot be quite true, because the ready chirp comes first by design.
+Capture starts roughly 70 ms after the wake -- [E1](experiments.md)'s 169 ms
+less the latch delay that has since come off the wake path -- and the chirp
+follows it immediately, while the minimum hold is 300 ms. So a tap between the
+two has already been answered with "the microphone is live", which was true when
+it sounded. Nothing further happens.
+
+Both alternatives are worse than the inconsistency: waiting out the minimum hold
+before chirping puts 300 ms of dead time at the front of every question, and a
+minimum hold shorter than the chirp is not a minimum hold.
+
+Feedback of its own for the discarded tap waits for the UI/UX pass -- along with
+[D9](deferred.md), which may remove the case entirely.
+
+## D8 -- No authentication
+
+The POST carries no `Authorization` header and the backend does not ask for one.
+
+Nothing is protected by this that the WiFi password does not already protect:
+the backend is a LAN address, so reaching it means already being on the network.
+A token in the firmware image would not change that -- it is readable by anyone
+who can read the flash, which is anyone holding the device.
+
+It becomes real the day the backend moves to a public host, which is the same
+day TLS does ([D5](deferred.md)) -- and a bearer token sent in clear would be
+worse than none, so the two arrive together or not at all.
+
+## D9 -- Press and hold
+
+The device records while the AI button is held and sends on release. It is the
+simplest interaction that has a beginning and an end, and the only one that
+needs no way of guessing when the user has finished talking.
+
+That is not the same as it being right. A short press to start and a second
+press to stop would let the user put the device down mid-sentence; so would a
+tap on the screen, or simply a run of silence. Each needs something this one
+does not -- silence detection needs a threshold and a hangover time, the touch
+panel is unpowered and unused, and a start/stop pair needs the device awake and
+listening in between -- and none of them is obviously better without a working
+device to try them on.
+
+Cheap to defer, because all of them change only *when the recording stops*.
+Everything else in the pipeline is the same either way, so the question can wait
+for the UI/UX pass and take [D7](deferred.md) with it.

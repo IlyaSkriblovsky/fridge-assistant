@@ -18,7 +18,7 @@ the firmware grows, so they have to be re-measurable in one command.
 | E2 | How much does HTTPS add to the round trip versus plain HTTP? | Whether the backend can live in the cloud | Not taken | -- |
 | E3 | How long does the microphone actually need to settle? | How much of the first word is lost | Taken 2026-09-15 | Only the first 8 ms is above speech level; discard cut from 200 ms to 24 ms |
 | E4 | Does holding the AI button trigger anything in hardware? | Whether push-to-talk can use GPIO4 at all | Taken 2026-09-15, to 20 s | Nothing happens. GPIO4 is usable |
-| E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered | Not taken | -- |
+| E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered; also [D3](deferred.md) | Not taken | -- |
 
 ---
 
@@ -353,4 +353,6 @@ still wakes the board at all.
   off. What matters here is the difference between two readings, not either one.
 - Nobody has talked to this gauge yet on this unit. Confirming it answers at
   0x55 and returns a plausible voltage is the first step -- and the answer
-  screen needs exactly that code anyway.
+  screen needs exactly that code anyway, which is why it waits for this
+  experiment rather than bringing the bus up on the path where a failure costs
+  the user their answer ([D3](deferred.md)).
