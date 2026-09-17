@@ -44,6 +44,7 @@ prefix if they touch the hardware.
 ~/.platformio/penv/bin/pio run                                  # build
 ~/.platformio/penv/bin/pio run -t upload --upload-port <port>    # flash
 ~/.platformio/penv/bin/pio run -e exp_e1 -t upload ...           # an experiment rig
+~/.platformio/penv/bin/pio run -e exp_e6 -t upload ...           # ... one per experiment
 ```
 
 The board enumerates as a CH343P bridge (`1A86:55D3`), typically
@@ -69,6 +70,10 @@ their process.
   belong in `src/` as subclasses, which is what `sticky_epaper.h` does.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;
   a blocking WiFi connect drops audio.
+- **`WiFi.persistent(false)` goes before `WiFi.mode()`.** Arduino's default
+  storage is FLASH, so a mode set before that call goes through NVS and costs
+  1.6 s on every wake -- measured in [E6](docs/experiments.md). `StickyWifi`
+  does it in the right order; anything else touching WiFi has to as well.
 - **Keep `src/secrets.example.h` in step with `src/secrets.h`,** and never put
   real credentials in a tracked file. Settings that are not secret belong in
   `src/config.h`, which is tracked.

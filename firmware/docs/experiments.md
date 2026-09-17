@@ -19,7 +19,7 @@ the firmware grows, so they have to be re-measurable in one command.
 | E3 | How long does the microphone actually need to settle? | How much of the first word is lost | Taken 2026-09-15 | Only the first 8 ms is above speech level; discard cut from 200 ms to 24 ms |
 | E4 | Does holding the AI button trigger anything in hardware? | Whether push-to-talk can use GPIO4 at all | Taken 2026-09-15, to 20 s | Nothing happens. GPIO4 is usable |
 | E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered; also [D3](deferred.md) | Not taken | -- |
-| E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Not taken | -- |
+| E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Taken 2026-09-17 | 2.1 s waiting for the OFFER, 1.000 s of ARP check. A cached lease gets the device onto the network in 0.18 s instead of 3.3 s |
 
 ---
 
@@ -395,6 +395,23 @@ removes:
    candidate and the one most likely to work; it needs a fallback to DHCP when
    the lease has gone stale, and a rule for what "stale" means.
 
+**How.** `src/experiments/e6_dhcp_cost.cpp`:
+
+```
+~/.platformio/penv/bin/pio run -e exp_e6 -t upload --upload-port <port>
+```
+
+It associates through `StickyWifi`, so the association half is the firmware's
+own code, and alternates wake by wake: an ordinary DHCP wake, then one that
+installs the previous wake's lease with `WiFi.config()`. On DHCP wakes the lwIP
+client's state machine is sampled every 2 ms through `netif_dhcp_data()`, which
+is where the timeline comes from. Every fourth wake installs a lease from a
+different subnet on purpose, to measure what a stale one costs.
+
+**An address nobody used is not an address**, so each wake ends with a TCP
+connect to the gateway. A refusal proves as much as an acceptance -- something
+replied to this address -- and only a timeout means the address does not work.
+
 **Already ruled out.** WiFi power save: `WiFi.setSleep(false)` before the
 association changed nothing at all (3.11-3.15 s against 3.14-3.24 s), so the
 station is not asleep through an answer that has already arrived. Measured, no
@@ -405,3 +422,68 @@ that keeps one has to notice when the network disagrees -- another client on the
 same address, or a different network entirely behind the same SSID. The safe
 version is a cached lease that is tried first and dropped the moment anything
 about it fails, which is the same shape as the BSSID cache S6 already has.
+
+### Result
+
+Twelve wakes on the home network, alternating, with every fourth one carrying a
+lease from a subnet the device was not on.
+
+| Wake | Address | Probe | Top of setup() to a usable network |
+| --- | --- | --- | --- |
+| DHCP | 3166-3293 ms | 12-15 ms | 3268-3427 ms |
+| cached lease | 39-90 ms | 32-34 ms | 178-226 ms |
+| stale lease | 39-44 ms, then 3137-3225 ms of DHCP | 3019-3033 ms of timeouts | 6323-6424 ms |
+
+**The 3.2 s is two things, and only one of them is ours.** The timeline is the
+same on every DHCP wake:
+
+```
+      44 ms  SELECTING    DISCOVER is out
+    2129 ms  REQUESTING   an OFFER came back, REQUEST is out
+    2166 ms  CHECKING     the ACK is in, ARP-checking the address
+    3166 ms  BOUND        the address is ours
+   0 retries, lease 86400 s
+```
+
+- **2.1 s of it is the router taking its time over the OFFER**, and it is not a
+  lost packet: `tries` is zero on every wake, so nothing was retransmitted. The
+  same server then answers the REQUEST with an ACK in 30-50 ms, so it is not a
+  slow server in general -- only a slow first answer. Nothing on the device can
+  make that faster.
+- **1.000 s of it is the ARP check**, to the millisecond, on every wake.
+  `CONFIG_LWIP_DHCP_DOES_ARP_CHECK=y` in the prebuilt libraries this project
+  links against, and lwipopts.h says the check "lasts 1 - 2 seconds". Turning it
+  off means `framework = arduino, espidf` and a menuconfig, which is a large
+  price for a third of the number.
+
+**A cached lease removes all of it.** `WiFi.config()` with the previous wake's
+address, installed before the association, gets the device onto a network it can
+use in 178-226 ms from the top of `setup()` -- against 3268-3427 ms for DHCP,
+which is the same connect fifteen times over. The lease this network hands out
+is 86400 s, a day, so an address is good for far longer than the RTC memory
+holding it survives.
+
+**A stale lease costs one question, not a failure.** An address from the wrong
+subnet installs happily and then answers nothing: both probes time out, and
+asking properly afterwards takes the usual 3.2 s, for 6.3-6.4 s in total. That
+is the whole risk, and it is bounded -- twice a normal connect on the wake that
+notices, and back to 180 ms afterwards.
+
+**What it changes.** Caching the lease is worth roughly three seconds of every
+question and is the largest single saving available anywhere in the flow. Two
+things make it cheaper than it looks in the firmware:
+
+- **The upload is already the probe.** S7 opens a TCP connection to the backend
+  on every question, so a cached address that has gone stale shows up as a
+  connect that fails -- no extra probe is needed on the happy path, and the
+  fallback is to drop the lease, start DHCP and try again.
+- **The lease has a known life.** 86400 s from the server, and the RTC counter
+  survives deep sleep, so an entry can be aged out rather than trusted forever.
+
+**A trap found on the way.** `WiFi.persistent(false)` has to be called *before*
+`WiFi.mode(WIFI_STA)`. Arduino's default storage is FLASH, so a mode set while
+that is still true goes through NVS and costs 1.6 s -- a full half of a cached
+connect's entire budget, spent before the association even starts. With the
+order right, `WiFi.mode()` takes 33-48 ms. `StickyWifi::begin()` already does it
+in that order; the first version of this rig did not, which is how it was
+found.
