@@ -1,4 +1,4 @@
-#include "sticky_button.h"
+#include "sticky/button.h"
 
 #include <Arduino.h>
 #include <driver/gpio.h>

@@ -384,7 +384,7 @@ cross-checked against this project's own measurements.
 ### Traps
 
 Three of these cost real time to find and are fixed in this repo. See
-`src/sticky_epaper.h` and `src/sticky_mic.cpp` for the details; the short
+`src/sticky/epaper.h` and `src/sticky/mic.cpp` for the details; the short
 version:
 
 - **The board switches itself off without the power latch.** GPIO45 and GPIO46

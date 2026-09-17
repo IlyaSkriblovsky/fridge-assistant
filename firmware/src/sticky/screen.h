@@ -13,7 +13,7 @@
 // three become messages on a queue and everything else stays as it is.
 //
 // The panel is a 3.97" 800x480 monochrome e-paper on an SSD1677 controller,
-// through the two corrections in src/sticky_epaper.h -- which is included by
+// through the two corrections in src/sticky/epaper.h -- which is included by
 // the implementation rather than by this header, so the rest of the firmware
 // never has to know the glass is wrong twice.
 //

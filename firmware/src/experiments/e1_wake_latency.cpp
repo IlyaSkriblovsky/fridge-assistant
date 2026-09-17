@@ -44,8 +44,8 @@
 #include <esp_sleep.h>
 #include <soc/rtc.h>
 
-#include "sticky_mic.h"
-#include "sticky_power.h"
+#include "sticky/mic.h"
+#include "sticky/power.h"
 
 namespace {
 

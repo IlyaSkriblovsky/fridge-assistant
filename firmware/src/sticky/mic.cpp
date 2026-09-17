@@ -1,4 +1,4 @@
-#include "sticky_mic.h"
+#include "sticky/mic.h"
 
 #include <Arduino.h>
 #include <driver/gpio.h>

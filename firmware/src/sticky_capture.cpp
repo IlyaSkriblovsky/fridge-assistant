@@ -2,9 +2,10 @@
 
 #include <esp_timer.h>
 
+#include "sticky/button.h"
+#include "sticky/mic.h"
+
 #include "sticky_audio.h"
-#include "sticky_button.h"
-#include "sticky_mic.h"
 
 StickyCapture::~StickyCapture() {
   if (_task != nullptr) {

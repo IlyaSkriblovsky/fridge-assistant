@@ -35,14 +35,16 @@
 
 #include "config.h"
 #include "secrets.h"
+
+#include "sticky/button.h"
+#include "sticky/buzzer.h"
+#include "sticky/mic.h"
+#include "sticky/power.h"
+#include "sticky/screen.h"
+
 #include "sticky_audio.h"
 #include "sticky_backend.h"
-#include "sticky_button.h"
-#include "sticky_buzzer.h"
 #include "sticky_capture.h"
-#include "sticky_mic.h"
-#include "sticky_power.h"
-#include "sticky_screen.h"
 #include "sticky_wifi.h"
 
 namespace {

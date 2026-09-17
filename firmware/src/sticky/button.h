@@ -3,7 +3,7 @@
 #include <esp_timer.h>
 #include <stdint.h>
 
-#include "sticky_power.h"
+#include "sticky/power.h"
 
 // reTerminal Sticky (E1005) AI button: active low, internal pull-up, and the
 // ext1 source that wakes the board for every question.

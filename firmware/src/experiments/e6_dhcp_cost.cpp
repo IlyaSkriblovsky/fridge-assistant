@@ -48,8 +48,10 @@
 
 #include "config.h"
 #include "secrets.h"
-#include "sticky_buzzer.h"
-#include "sticky_power.h"
+
+#include "sticky/buzzer.h"
+#include "sticky/power.h"
+
 #include "sticky_wifi.h"
 
 namespace {

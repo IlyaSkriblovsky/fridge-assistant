@@ -126,7 +126,7 @@ All three transitions -- asleep to Listening, Listening to answer, Listening to
 error -- use a full refresh. Each changes most of the screen, and a full refresh
 clears accumulated ghosting as a side effect.
 
-This means the partial-refresh correction in `src/sticky_epaper.h` is currently
+This means the partial-refresh correction in `src/sticky/epaper.h` is currently
 unused -- it has never run on the device at all. It stays: the library bug it
 works around returns the moment anything draws a partial update, and a correct
 driver is worth more than a smaller one.

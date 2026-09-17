@@ -44,7 +44,7 @@ and every later step's error path wants it.
 
 ## S1 -- Buzzer
 
-`src/sticky_buzzer.h/.cpp`. Three patterns, from the vision's table: ready (two
+`src/sticky/buzzer.h/.cpp`. Three patterns, from the vision's table: ready (two
 very short notes, low then high), answer (two short notes, high then low), error
 (one longer note).
 
@@ -87,7 +87,7 @@ knowing at [S5](#s5----screens), which also needs a temporary driver.
 
 ## S2 -- Button
 
-`src/sticky_button.h/.cpp`. The AI button on GPIO4, active low, internal
+`src/sticky/button.h/.cpp`. The AI button on GPIO4, active low, internal
 pull-up.
 
 - `rtc_gpio_deinit()` first: GPIO4 comes out of the sleep as an RTC pad and
@@ -361,7 +361,7 @@ it.
 
 ## S5 -- Screens
 
-`src/sticky_screen.h/.cpp`: `listening()`, `answer(text)`, `error(title, detail)`.
+`src/sticky/screen.h/.cpp`: `listening()`, `answer(text)`, `error(title, detail)`.
 A small interface on purpose -- D4 moves the display into its own task later,
 and that is cheap only if nothing else calls the panel directly.
 
@@ -390,8 +390,8 @@ where the failure mode is cosmetic and only a human can see it.
 ### What it turned out to involve
 
 `StickyScreen` is `begin()`, `clear()` and the three screens, and it is the only
-place `Seeed_GFX` is touched -- `sticky_epaper.h` is now included by
-`sticky_screen.cpp` rather than by `main.cpp`, so the rest of the firmware never
+place `Seeed_GFX` is touched -- `src/sticky/epaper.h` is now included by
+`src/sticky/screen.cpp` rather than by `main.cpp`, so the rest of the firmware never
 has to know the glass is wrong twice. `begin()` failing is the vision's "nothing
 to draw on": it reports the library's own message through `lastError()` and the
 caller chirps, logs and sleeps.
@@ -1002,7 +1002,7 @@ stop, upload, answer or error chirp, draw, deep sleep.
   - a fourth buzzer pattern on release and no screen at all, which costs
     milliseconds but leaves the panel lying until the answer lands;
   - a partial refresh of the word alone -- [D6](deferred.md), which would also
-    be the first time the partial-refresh correction in `src/sticky_epaper.h`
+    be the first time the partial-refresh correction in `src/sticky/epaper.h`
     has ever run on the device, and whose cost on this panel is unmeasured.
 
   **[E7](experiments.md) has now produced the number, and it is two numbers.**

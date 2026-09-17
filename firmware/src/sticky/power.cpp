@@ -1,4 +1,4 @@
-#include "sticky_power.h"
+#include "sticky/power.h"
 
 #include <Arduino.h>
 #include <driver/gpio.h>

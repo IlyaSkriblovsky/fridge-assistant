@@ -13,16 +13,16 @@ the hardware traps.
 | Path | What |
 | --- | --- |
 | `src/main.cpp` | Boot sequence, plus the temporary driver for the step being built; S8 makes it the orchestrator |
-| `src/sticky_buzzer.h/.cpp` | Buzzer on LEDC: the ready, answer and error patterns |
-| `src/sticky_button.h/.cpp` | AI button: the press that woke the board, timed and debounced |
-| `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
+| `src/sticky/power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
+| `src/sticky/buzzer.h/.cpp` | Buzzer on LEDC: the ready, answer and error patterns |
+| `src/sticky/button.h/.cpp` | AI button: the press that woke the board, timed and debounced |
+| `src/sticky/mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
+| `src/sticky/screen.h/.cpp` | The three screens, and the only place the panel is touched |
+| `src/sticky/epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/sticky_audio.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/sticky_capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
 | `src/sticky_wifi.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/sticky_backend.h/.cpp` | The round trip: the recording up as a POST, the answer back as JSON |
-| `src/sticky_screen.h/.cpp` | The three screens, and the only place the panel is touched |
-| `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
-| `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
@@ -33,10 +33,16 @@ the hardware traps.
 | `docs/implementation.md` | The build order, step by step, and notes from each step |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
 
-The `sticky_` prefix means the module is tied to this board: it cannot be read
-without the pin map and cannot be checked without the device. Modules without it
-(`config`, `secrets`) are portable logic, and new ones should only take the
-prefix if they touch the hardware.
+`src/sticky/` is the board: a module belongs there when it cannot be read
+without the pin map or cannot be checked without the device. The folder carries
+that fact, which is why the files inside it are named plainly -- `sticky/mic.h`
+declares `StickyMic`, and the include path is where the prefix is spelled.
+Everything at the top of `src/` is logic that happens to run here: it may know
+about PSRAM, FreeRTOS or arduino-esp32, but not about the E1005. A new module
+goes into `sticky/` only if it touches the hardware.
+
+The word means the reTerminal Sticky, not this project. The project has no name
+yet, and the directory it is checked out into is not one.
 
 ## Build and flash
 
@@ -65,11 +71,11 @@ their process.
 - **Don't touch GPIO19/20 for anything else.** They are the microphone, and they
   are also the native USB-Serial-JTAG pads that `StickyMic::begin()` has to take
   away from the USB PHY.
-- **Don't "simplify" `src/sticky_epaper.h`.** Both overrides work around real
+- **Don't "simplify" `src/sticky/epaper.h`.** Both overrides work around real
   library bugs -- inverted polarity and a missing previous-image plane on partial
   refresh. Removing either brings back an inverted or smearing display.
 - **Don't edit `.pio/libdeps/`.** It is wiped by package updates. Library fixes
-  belong in `src/` as subclasses, which is what `sticky_epaper.h` does.
+  belong in `src/` as subclasses, which is what `src/sticky/epaper.h` does.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;
   a blocking WiFi connect drops audio.
 - **A number read off a poll is a number about the poller.** The orchestrator

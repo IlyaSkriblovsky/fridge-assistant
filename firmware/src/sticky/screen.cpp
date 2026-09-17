@@ -1,4 +1,4 @@
-#include "sticky_screen.h"
+#include "sticky/screen.h"
 
 #include <font/GFXFF/FreeSans18pt7b.h>
 #include <font/GFXFF/FreeSans24pt7b.h>
@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#include "sticky_epaper.h"
+#include "sticky/epaper.h"
 
 namespace {
 

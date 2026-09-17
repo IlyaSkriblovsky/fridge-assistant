@@ -1,4 +1,4 @@
-#include "sticky_buzzer.h"
+#include "sticky/buzzer.h"
 
 #include <Arduino.h>
 
