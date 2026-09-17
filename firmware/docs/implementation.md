@@ -25,6 +25,7 @@ which means asking.
 | S5 | Screens | Listening, answer, error | Done |
 | S6 | WiFi | Association without blocking, BSSID cached | Done |
 | S7 | Upload and answer | The backend round trip | Not started |
+| S7b | Cached DHCP lease | Three seconds off every question | Not started |
 | S8 | The flow | Wake, record, ask, show, sleep | Not started |
 | S9 | Re-run E1 | Wake latency of the real firmware | Not started |
 
@@ -656,6 +657,38 @@ after the device works end to end.
 **Verified by** the byte count on the screen matching the recording's length,
 and by each error row of the vision's table provoked deliberately: wrong port
 for `NO SERVER`, a backend returning 500, a backend returning `{}`.
+
+## S7b -- Cached DHCP lease
+
+A letter rather than a number because this step did not exist when the order was
+written: [E6](experiments.md) measured what an address costs and the answer was
+large enough to be worth a step of its own. It lands here, straight after S7 and
+before the flow, for one reason -- **the upload is the probe**. A cached address
+that has gone stale shows up as a TCP connect that fails, which is something S7
+does on every question anyway, so this step needs no probe of its own and no
+extra second on the happy path.
+
+What it delivers: the lease from the last successful wake kept in RTC memory
+next to the BSSID, installed with `WiFi.config()` before the association, and
+dropped the moment the question it is carrying cannot reach anything.
+
+- The saving is 3.1 s per question: 178-226 ms from the top of `setup()` to a
+  usable network, against 3268-3427 ms for DHCP ([E6](experiments.md)).
+- **Failure is the only detector, and it has to be wired to the upload.**
+  `StickyWifi` cannot tell a good address from a stale one by itself -- both
+  install in 40 ms and neither says anything. So the rule is the one E6's rig
+  demonstrated: when the connection to the backend fails, drop the lease, start
+  DHCP, and let the question have its answer 3.2 s later. A stale lease costs
+  6.3 s on the wake that notices and nothing afterwards.
+- **A lease has a life and the firmware can count it.** This network offers
+  86400 s. The RTC counter survives deep sleep -- the correction
+  [S2](#s2----button) made to E1 is the same fact -- so an entry can be aged out
+  rather than trusted until it fails.
+- Nothing here is a claim on a fixed address: the device only ever reuses what
+  the server gave it, which is what makes this different from a static IP.
+
+**Verified by** the E6 numbers coming back from the firmware rather than a rig,
+and by a question that starts with a stale lease still getting its answer.
 
 ## S8 -- The flow
 
