@@ -26,6 +26,7 @@ the hardware traps.
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
+| `tools/` | The host half of an experiment: the serial logger, the pcap reader E7 needs |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |

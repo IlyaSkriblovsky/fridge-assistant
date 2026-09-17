@@ -781,6 +781,14 @@ all, across the runs that found the two bugs below.
   took 6848 ms. The backend is not in it -- it swallows 120 KB in 4 ms over the
   LAN. Written up as [E7](experiments.md), which S8 needs before it can weigh
   2.4 s of refresh against a round trip it cannot predict.
+
+  **[E7](experiments.md) has since answered it.** 128 KB goes up in 660 ms and
+  the spread is one lost acknowledgement: the device keeps 5744 bytes in flight,
+  about one ACK in 110 does not come back, and with nothing behind it to cover
+  the loss the window stops for a retransmission timeout of one to two and a
+  half seconds. An upload is twenty-two bursts, so roughly one question in four
+  pays and the payload has nothing to do with which -- which is this row of the
+  table, exactly.
 - **Four questions could not reach a backend that was running**, twice in each
   of two runs, always giving up at exactly the connect timeout. The backend
   never saw them: no file appeared in its `recordings/` for either, while the
@@ -793,6 +801,13 @@ all, across the runs that found the two bugs below.
   because a failed connect is what that step plans to read as a stale lease. On
   this network a healthy link produces one roughly every fifteen questions, and
   S7b would answer it by throwing away an address that was fine.
+
+  **[E7](experiments.md) could not reproduce it** -- seventy-one connections,
+  every SYN answered inside a millisecond, none retransmitted -- and it corrected
+  the inference above on the way. "No file appeared in `recordings/`" only means
+  the POST never completed; a file is written when the upload finishes, so it is
+  silent about whether the SYN ever arrived. The backend was not the witness this
+  row took it for.
 
 ## S7b -- Cached DHCP lease
 
@@ -810,14 +825,19 @@ dropped the moment the question it is carrying cannot reach anything.
 
 - The saving is 3.1 s per question: 178-226 ms from the top of `setup()` to a
   usable network, against 3268-3427 ms for DHCP ([E6](experiments.md)).
-- **The detector is not as clean as it looked.** [S7](#s7----upload-and-answer)
-  found that a healthy network on this desk produces a connect that fails
-  outright about once every fifteen questions, for reasons that are
-  [E7](experiments.md)'s to find. A lease dropped on one of those costs the
-  3.2 s this step exists to save, on a wake where nothing was wrong. It does not
-  sink the step -- the cost of a false positive is exactly the cost of not
-  having the cache at all -- but the rule below wants a second failure behind it
-  rather than a first, and E7 comes before this step for that reason.
+- **The detector is not as clean as it looked, and E7 did not clean it.**
+  [S7](#s7----upload-and-answer) found that a healthy network on this desk
+  produces a connect that fails outright about once every fifteen questions. A
+  lease dropped on one of those costs the 3.2 s this step exists to save, on a
+  wake where nothing was wrong. [E7](experiments.md) went looking and found
+  nothing: seventy-one connections, every SYN answered in 0.1 to 0.7 ms, none
+  retransmitted. So the false positive is not a routine property of this
+  network -- but it happened four times in two S7 runs and remains unexplained,
+  and E7 names a mechanism that would do it (a SYN-ACK lost the way it found
+  ACKs being lost costs a 3 s retransmit against a 5 s budget) without proving
+  it. **The rule below still wants a second failure behind it rather than a
+  first**, and it is cheap: the cost of asking twice is one extra connect
+  timeout on a wake that was already going to be slow.
 - **Failure is the only detector, and it has to be wired to the upload.**
   `StickyWifi` cannot tell a good address from a stale one by itself -- both
   install in 40 ms and neither says anything. So the rule is the one E6's rig
@@ -869,10 +889,15 @@ stop, upload, answer or error chirp, draw, deep sleep.
     be the first time the partial-refresh correction in `src/sticky_epaper.h`
     has ever run on the device, and whose cost on this panel is unmeasured.
 
-  Whichever is chosen, the number that decides it is how long the backend
-  actually takes, which [S7](#s7----upload-and-answer) is the first step to
-  produce -- and only once there is a model behind it rather than a fixed
-  phrase.
+  **[E7](experiments.md) has now produced the number, and it is two numbers.**
+  The round trip is about 0.5 s three times out of four and 1.5 to 5.5 s the
+  fourth time, because one upload in four stops for a retransmission timeout
+  that has nothing to do with its size. So the wait this screen covers is
+  usually shorter than the refresh that would announce it and occasionally four
+  times longer -- which argues against the first shape and for one of the two
+  cheap ones, and says the choice cannot be made on an average. What it does not
+  cover is a model: the backend still answers a fixed phrase, so the thinking
+  time that will dominate this wait in the end is still unmeasured.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
 
@@ -905,3 +930,7 @@ by accident.
 - **How long the upload takes does not matter yet.** Nothing waits on the
   answer, so the number has nowhere to land until [D4](deferred.md) is being
   weighed for real. (S7)
+
+  *Reopened and closed by [E7](experiments.md), 2026-09-17.* It is being weighed
+  for real now: the upload's stalls are spread through the body, which is the
+  case where streaming moves them under the hold. D4 has the argument.

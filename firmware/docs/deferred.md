@@ -14,7 +14,7 @@ in one place rather than archaeology through commit messages.
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
-| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has, for long questions |
+| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
 | D6 | Full refresh on every transition | Partial refresh where it pays | The working screen at S8, or the UI/UX pass |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
@@ -70,8 +70,8 @@ came up, against a backend that swallows the same bytes in 4 ms. Streaming would
 move nearly all of that under the recording, where the user is still talking and
 it costs nothing.
 
-Two things keep it from being obvious, and both say the same thing -- measure
-[E7](experiments.md) first:
+One thing kept it from being obvious and [E7](experiments.md) has now settled
+it, in this step's favour:
 
 - **It buys nothing for a short question.** The network is not usable until
   about 3.4 s after the press, so a one or two second recording has no window to
@@ -80,12 +80,17 @@ Two things keep it from being obvious, and both say the same thing -- measure
   device's worst waits are: a short question's 2.4 s of waiting for an address
   is [S7b](implementation.md#s7b----cached-dhcp-lease)'s to remove, not this
   step's.
-- **Part of the upload is not upload.** The same run showed 112684 bytes taking
-  6848 ms while three times that went in half the time. Whatever those seconds
-  are, streaming only moves them earlier if they are spread through the body; if
-  they sit at the front of the connection, opening it earlier is exactly what
-  removes them, and if they are per packet it removes nothing. E7 is what tells
-  the two apart, and it decides how much this step is worth.
+- **Part of the upload is not upload, and it is spread through the body.** The
+  same run showed 112684 bytes taking 6848 ms while three times that went in
+  half the time, and [E7](experiments.md) found what those seconds are: the
+  device keeps 5744 bytes in flight, one ACK in 110 is lost coming back, and
+  with nothing behind it to cover the loss the window stops for a full
+  retransmission timeout of one to two and a half seconds. An upload is
+  twenty-two windows, so about one question in four pays -- anywhere in the
+  body, which is the case that makes this step worth the most. Streaming moves
+  the stalls under the hold along with the bytes. It also scales the right way
+  for once: a long question has more windows and therefore more chances to
+  stall, and a long question is exactly the one with room to stream.
 
 Two things have to be settled when this changes:
 
