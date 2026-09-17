@@ -19,6 +19,7 @@ the hardware traps.
 | `src/sticky_audio.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/sticky_capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
 | `src/sticky_wifi.h/.cpp` | The association: polled, never waited on, with the AP cached across sleeps |
+| `src/sticky_backend.h/.cpp` | The round trip: the recording up as a POST, the answer back as JSON |
 | `src/sticky_screen.h/.cpp` | The three screens, and the only place the panel is touched |
 | `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
 | `src/sticky_epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |

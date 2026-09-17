@@ -24,7 +24,7 @@ which means asking.
 | S4 | Capture task | Recording that survives WiFi and the panel | Done |
 | S5 | Screens | Listening, answer, error | Done |
 | S6 | WiFi | Association without blocking, BSSID cached | Done |
-| S7 | Upload and answer | The backend round trip | Not started |
+| S7 | Upload and answer | The backend round trip | Done |
 | S7b | Cached DHCP lease | Three seconds off every question | Not started |
 | S8 | The flow | Wake, record, ask, show, sleep | Not started |
 | S9 | Re-run E1 | Wake latency of the real firmware | Not started |
@@ -658,6 +658,142 @@ after the device works end to end.
 and by each error row of the vision's table provoked deliberately: wrong port
 for `NO SERVER`, a backend returning 500, a backend returning `{}`.
 
+### What it turned out to involve
+
+`src/sticky_backend.h/.cpp`. `StickyBackend` is one call -- `ask(wav, bytes)`
+returning one of five results -- and the orchestrator's half of it is two lines:
+
+```
+const StickyBackend::Result result = backend.ask(audio.wav(), audio.wavBytes());
+if (result == StickyBackend::Result::Ok) screen.answer(backend.answer());
+```
+
+The body goes from PSRAM by pointer and length, as
+[S3](#s3----capture-into-psram) arranged: `StickyAudio` reserved the 44 header
+bytes at the front of its own allocation, so what goes on the wire is that
+allocation and nothing copies a megabyte. `HTTPClient::POST()` takes a non-const
+pointer although it only reads through it, so there is one `const_cast`, and it
+is what keeps the copy from happening.
+
+**The screen strings are not in the module.** `lastError()` returns a line for
+Serial1 and the orchestrator maps the five results onto the vision's titles,
+which is the division [S6](#s6----wifi) already drew between `NO WIFI` and
+`StickyWifi`'s own strings. It keeps the vision's error table in one place
+rather than in two halves that can drift apart.
+
+**Two timeouts, because the two waits are different questions.** A backend that
+is thinking gets `config::kResponseTimeoutMs`; a backend that will not accept a
+connection gets `config::kBackendConnectTimeoutMs`, which is new here at 5 s.
+HTTPClient defaults the second to 5 s as well, so the constant changes nothing
+today and exists because [S7b](#s7b----cached-dhcp-lease) makes it load-bearing:
+the failed connect is the only thing that can tell a stale cached lease from a
+good one, so that number is exactly what the wake which notices will cost.
+
+Three things about `HTTPClient` are worth knowing before reading a log from this
+module:
+
+- **Every failure to connect is reported as "connection refused."** Refused,
+  unreachable, no route -- all `HTTPC_ERROR_CONNECTION_REFUSED`. So the clock is
+  the only thing that separates a port that said no from an address that said
+  nothing, and the module says which by comparing the elapsed time against the
+  connect timeout. The difference is worth keeping: it is the shape S7b's stale
+  lease will arrive in, and the two cost 200 ms and 5 s respectively.
+- **`setTimeout()` takes a `uint16_t`.** A `config.h` that ever asked for more
+  than 65.5 s would wrap to something short and the device would report
+  `TIMED OUT` while the backend was still working -- a failure that looks like
+  the network and is an edit. There is a `static_assert` on it.
+- **A reply that stops halfway is a timeout, not a bad answer.** `getString()`
+  drops the read error and returns what it has, so a body cut short would parse
+  as malformed JSON and show `BAD RESPONSE`. The declared length is the only
+  witness left, and comparing it against what arrived is what keeps the two
+  apart.
+
+The driver is the whole chain for the first time -- record, associate, POST,
+draw -- with one thing the orchestrator will not have: **the target changes on
+every question**. Each press walks one row of the vision's error table and the
+next press walks the next, so the error paths are testable without a rebuild
+between them; after the last row every press is the real endpoint again. Three
+of the rows need a backend that misbehaves on purpose, which the prototype
+server now has as `/audio/fault/500`, `/audio/fault/empty` and
+`/audio/fault/slow` -- they drain the upload before answering, or the response
+would close the connection under a device that is still sending and every fault
+would read as `NO SERVER`. The other two rows need no backend at all: a closed
+port and an address in TEST-NET-1.
+
+**A release that arrives before the address is not a failure**, and the first
+driver had it wrong. It asked `wifi.poll() != Online` after the recording
+stopped, which is true both for an association that failed and for one that is
+still three seconds from finishing -- so every question shorter than a DHCP
+exchange ended in `NO WIFI` with a recording in hand and nothing wrong with the
+network. Eight in a row on holds of 2.7 to 3.4 s, against the 3.2 s that
+[E6](experiments.md) says an address costs. `NO WIFI` means the association's
+own budget ran out, `config::kWifiConnectTimeoutMs`, and nothing else; a
+question that finished early waits for the network it has already started.
+[S6](#s6----wifi) had left exactly this on the table for S8 and it arrived a
+step early, which is what a driver that runs the whole chain is for.
+
+**The answer chirp moved in front of the refresh**, and the vision moved with
+it. It used to sound when `screen.answer()` returned, on the principle that the
+chirp means the answer is on the glass. On the device that reads as latency that
+is not there: the panel is 2.4 s behind, the buzzer is the one channel that is
+not, and a full refresh is legible well before it ends -- the text appears
+inverted partway through. So the chirp now says the answer has arrived, the
+refresh finishes while the user is still looking up, and every outcome chirps
+before it draws rather than errors doing one thing and answers the other.
+
+### What it measured
+
+The run of record is fifteen wakes: the error table walked once, then nine real
+questions with holds from 2.3 to 12.6 s. The table was walked three times in
+all, across the runs that found the two bugs below.
+
+| What | Screen | Round trip |
+| --- | --- | --- |
+| the real endpoint | the answer, byte count matching | 238 ms - 6848 ms |
+| a closed port | `NO SERVER` | 56-193 ms |
+| an address nothing answers at | `NO SERVER` | 5004 ms |
+| `/audio/fault/500` | `SERVER ERROR 500` | 329-4274 ms |
+| `/audio/fault/empty` | `BAD RESPONSE` | 475-4284 ms |
+| `/audio/fault/slow` | `TIMED OUT` | 30503-32879 ms |
+
+- **The chain is proved.** The byte count on the panel matched the recording
+  every time -- 88620 bytes held for 2833 ms, 400428 for 12568 ms, and seven
+  more in between -- which is what this step existed to show. Every row of the
+  vision's error table was reached deliberately and showed the screen it is
+  supposed to.
+- **The two timeouts held.** The connect gave up at 5004 ms against 5000, and
+  the response at 30621 ms against 30000 -- the extra being the upload, which
+  happens before the wait starts.
+- **The network is usable about 3.4 s after the press**, of which 3.2 s is the
+  address ([E6](experiments.md)) and 190 ms is everything before
+  `StickyWifi::begin()` gets called. So the wait after the release is 3.4 s
+  minus the hold and nothing else: 1.11 s measured for a 2.34 s hold, 0.33 s for
+  a 3.18 s hold, zero past about 3.4 s. A one-second question waits about 2.4 s,
+  which is [S6](#s6----wifi)'s prediction arriving intact.
+- **Release to answer on the glass is 3.5 to 9.5 s**, and it decomposes exactly:
+  the wait for the network, the round trip, the 230 ms chirp and 2.4 s of
+  refresh. The fastest question in the run still took 3478 ms to show anything,
+  against a round trip of 238 ms -- so **the backend is not what the user is
+  waiting for**, and S8's working screen is a question about the other three
+  terms.
+- **The round trip is not a number yet, and that is the finding.** 238 ms to
+  6.8 s, and not because of size: 400428 bytes went up in 2876 ms while 112684
+  took 6848 ms. The backend is not in it -- it swallows 120 KB in 4 ms over the
+  LAN. Written up as [E7](experiments.md), which S8 needs before it can weigh
+  2.4 s of refresh against a round trip it cannot predict.
+- **Four questions could not reach a backend that was running**, twice in each
+  of two runs, always giving up at exactly the connect timeout. The backend
+  never saw them: no file appeared in its `recordings/` for either, while the
+  wakes on both sides of them were answered normally. The host was not asleep --
+  its own power log has no sleep event anywhere near, and an assertion holding
+  it awake across the whole session. So it is the link, and the only instrument
+  that can say more is the capture [E7](experiments.md) already asks for.
+
+  **This is the one result that matters to [S7b](#s7b----cached-dhcp-lease)**,
+  because a failed connect is what that step plans to read as a stale lease. On
+  this network a healthy link produces one roughly every fifteen questions, and
+  S7b would answer it by throwing away an address that was fine.
+
 ## S7b -- Cached DHCP lease
 
 A letter rather than a number because this step did not exist when the order was
@@ -674,6 +810,14 @@ dropped the moment the question it is carrying cannot reach anything.
 
 - The saving is 3.1 s per question: 178-226 ms from the top of `setup()` to a
   usable network, against 3268-3427 ms for DHCP ([E6](experiments.md)).
+- **The detector is not as clean as it looked.** [S7](#s7----upload-and-answer)
+  found that a healthy network on this desk produces a connect that fails
+  outright about once every fifteen questions, for reasons that are
+  [E7](experiments.md)'s to find. A lease dropped on one of those costs the
+  3.2 s this step exists to save, on a wake where nothing was wrong. It does not
+  sink the step -- the cost of a false positive is exactly the cost of not
+  having the cache at all -- but the rule below wants a second failure behind it
+  rather than a first, and E7 comes before this step for that reason.
 - **Failure is the only detector, and it has to be wired to the upload.**
   `StickyWifi` cannot tell a good address from a stale one by itself -- both
   install in 40 ms and neither says anything. So the rule is the one E6's rig
@@ -708,8 +852,9 @@ stop, upload, answer or error chirp, draw, deep sleep.
 - **Decide what the device does between the release and the answer.** The
   vision's step 6, and the one question it leaves open. Until the answer is
   drawn the panel still reads `LISTENING`, which stops being true the moment the
-  button comes up, and nothing else covers the gap -- the answer chirp sounds
-  with the answer. This is the step where it can finally be judged, because it
+  button comes up, and the answer chirp only marks the end of the gap rather
+  than filling it -- [S7](#s7----upload-and-answer) moved it in front of the
+  refresh, which buys back 2.4 s of the wait but none of the rest. This is the step where it can finally be judged, because it
   is the first time a real wait exists to sit through.
 
   It is the only transition that costs the user anything: released, draw,

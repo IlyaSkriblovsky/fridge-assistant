@@ -20,6 +20,7 @@ the firmware grows, so they have to be re-measurable in one command.
 | E4 | Does holding the AI button trigger anything in hardware? | Whether push-to-talk can use GPIO4 at all | Taken 2026-09-15, to 20 s | Nothing happens. GPIO4 is usable |
 | E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered; also [D3](deferred.md) | Not taken | -- |
 | E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Taken 2026-09-17 | 2.1 s waiting for the OFFER, 1.000 s of ARP check. A cached lease gets the device onto the network in 0.18 s instead of 3.3 s |
+| E7 | What does the upload cost, and where do the extra seconds in it come from? | The working screen at [S8](implementation.md#s8----the-flow), and [D4](deferred.md) with it | Not taken | -- |
 
 ---
 
@@ -487,3 +488,58 @@ connect's entire budget, spent before the association even starts. With the
 order right, `WiFi.mode()` takes 33-48 ms. `StickyWifi::begin()` already does it
 in that order; the first version of this rig did not, which is how it was
 found.
+
+## E7 -- What the upload costs
+
+**Why.** [S8](implementation.md#s8----the-flow) has to decide what the device
+shows between the release and the answer, and the number that decides it is how
+long the round trip actually takes.
+[S7](implementation.md#s7----upload-and-answer) measured it over nine questions
+and the answer was "between 260 ms and 7.4 s", which is not a number a decision
+can be taken on.
+
+The spread is not the backend: it answers an empty POST in 4 ms and swallows
+120 KB in the same 4 ms, measured over the LAN. It is not the payload either --
+two 34 KB recordings took 260 ms and 3319 ms.
+
+**What it looks like.** Against the fastest rate seen, 145 KB/s, four of the
+nine questions cost what their size says they should and the other five carry a
+penalty of 1.1, 2.4, 2.6, 3.1 and 5.1 seconds. Penalties near whole seconds are
+what TCP retransmission timeouts look like -- 1 s, then 2 s, then 3 s -- so the
+first hypothesis is that packets are being lost at the front of the connection
+rather than that the link is slow. It is a hypothesis and nothing more: nine
+samples taken while walking an error table are not a measurement of throughput.
+
+**What to measure.**
+
+- The connect, the body write and the wait for the status line, apart.
+  `HTTPClient` reports only their sum, which is why S7's number is one number;
+  a bare `NetworkClient` separates them.
+- The same upload with `WiFi.setSleep(false)`. [E6](#e6----what-the-dhcp-exchange-is-made-of)
+  measured power save against the DHCP exchange and found nothing, but that is
+  two round trips. An upload is hundreds of ACKs, which is where power save is
+  supposed to cost, and a station that sleeps between beacons is one of the few
+  things that would delay a packet by whole seconds.
+- The same upload seen from the backend, with `tcpdump`. A retransmit is only
+  visible as a retransmit from a machine that can see both copies.
+- **The connects that never arrive.** Four of S7's questions could not open a
+  connection to a backend that was running and gave up at the 5 s timeout, with
+  nothing reaching the backend at all and the wakes on either side answered
+  normally. It is very likely the same thing as the penalty above, seen at the
+  handshake instead of in the body, and the same capture settles it. It has to
+  be settled: [S7b](implementation.md#s7b----cached-dhcp-lease) reads a failed
+  connect as a stale lease, and one false reading every fifteen questions would
+  have it throwing away an address that was fine.
+
+**Watch for.** The penalty has to be separated from the association it follows.
+Every question here uploads within a second or two of the address arriving, so
+a cost that belongs to a link that has just come up would look like a cost of
+the upload. Uploading twice per wake, a few seconds apart, answers that in one
+run.
+
+**What it unblocks.** The working screen at S8, and [D6](deferred.md) with it:
+2.4 s of partial refresh is worth arguing about against a 300 ms round trip and
+is noise against a 7 s one. Also [D4](deferred.md) -- a streaming upload is
+worth much more if the cost is per packet than if it is a stall at the front --
+and [E2](#e2----https-overhead), which cannot compare HTTPS against HTTP while
+HTTP varies by a factor of ten by itself.

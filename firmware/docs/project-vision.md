@@ -29,8 +29,9 @@ It is a personal device, built for one user, powered by battery.
    backend runs speech recognition and a language model, which is seconds --
    `kResponseTimeoutMs` allows thirty of them -- and until the answer is drawn
    the panel still reads "Listening", which stops being true the moment the
-   button comes up. Nothing else covers the gap either: the answer chirp sounds
-   with the answer, not before it.
+   button comes up. The answer chirp marks the end of that wait rather than
+   covering it: it sounds when the refresh starts, so it says the answer has
+   arrived and not that it is finished being drawn.
 7. **Upload.** POST the recording to the backend as a WAV.
 8. **Answer.** The backend replies with text. Render it on the e-paper.
 9. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
@@ -277,6 +278,15 @@ it. That is the cheaper trade: chirping first and then starting capture would
 add the chirp's own duration to the dead time at the front of every question.
 The notes are short, and the backend can drop the head of the recording if it
 ever matters.
+
+**Every other chirp sounds before its screen, the answer's included.** The
+buzzer exists because the panel is one to two seconds behind; holding a chirp
+back until the refresh returns spends that advantage and makes the wait feel
+longer than it is. It costs nothing in accuracy, because a full refresh is
+readable well before it ends -- the text appears inverted partway through -- so
+by the time the user has looked up, the answer is already on the glass. Judged
+at the panel during [S7](implementation.md#s7----upload-and-answer), where the
+first real wait existed to sit through.
 
 A press too short to count makes no sound at all -- [D7](deferred.md).
 

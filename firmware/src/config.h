@@ -51,6 +51,17 @@ constexpr uint32_t kMaxRecordSeconds = 30;
 // milliseconds. On expiry the connection is dropped and an error is shown.
 constexpr uint32_t kResponseTimeoutMs = 30000;
 
+// How long the TCP connection to the backend gets before the device decides
+// there is nothing at that address. Separate from the wait above, which is for
+// a backend that is thinking: one is normal and the other is not.
+//
+// It is also the price of being wrong about the network, which is what makes it
+// a constant of ours rather than HTTPClient's own default. From S7b the failed
+// connect is the only thing that can tell a stale cached DHCP lease from a good
+// one, so this number is exactly what the wake that notices costs before it
+// starts DHCP and asks again.
+constexpr uint32_t kBackendConnectTimeoutMs = 5000;
+
 // A press shorter than this is treated as an accidental tap and discarded
 // without contacting the backend.
 constexpr uint32_t kButtonMinHoldMs = 300;

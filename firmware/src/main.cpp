@@ -1,43 +1,48 @@
-// S6 -- WiFi. A temporary driver, the way S1's to S5's were:
-// docs/implementation.md asks for connect times over Serial1, cold and cached,
-// including the first boot after the cache was written and a run with the
-// access point moved to another channel. S8 replaces all of this with the
-// orchestrator.
+// S7 -- Upload and answer. A temporary driver, the way S1's to S6's were:
+// docs/implementation.md asks for the byte count on the screen matching the
+// recording's length, and for each row of the vision's error table provoked
+// deliberately. S8 replaces all of this with the orchestrator.
 //
-// One association per wake, which is the only shape that can measure the thing
-// this step is about: the BSSID and channel cache lives in RTC memory, so it
-// only means anything across a deep sleep. A single boot that connected ten
-// times would measure ten warm reconnects and nothing else.
+// So this is the whole chain for the first time -- record, associate, POST,
+// draw -- with one thing added that the orchestrator will not have: the target
+// changes on every question. Each press walks one row of the table and the next
+// press walks the next, which is what makes the error paths testable without a
+// rebuild between them:
 //
-// So the driver sleeps between cycles, and every wake is one row of a table it
-// keeps in RTC memory and reprints as it grows:
+//   1  the real endpoint             the answer, and the byte count in it
+//   2  a closed port                 NO SERVER, refused at once
+//   3  an address nothing answers    NO SERVER, at the connect timeout
+//   4  /audio/fault/500              SERVER ERROR 500
+//   5  /audio/fault/empty            BAD RESPONSE
+//   6  /audio/fault/slow             TIMED OUT, at kResponseTimeoutMs
 //
-//   1                  the cold connect -- RTC memory is cleared by the reset
-//                      that flashing or opening the monitor causes, so the
-//                      first row of every session has no cache behind it
-//   2 .. kAutoCycles   cached connects, on the timer, unattended
-//   the rest           one per press of the AI button, for the scenarios that
-//                      need a human: move the access point to another channel
-//                      between two presses and watch the cached attempt fail,
-//                      the fallback pick the new channel up, and the press
-//                      after that be fast again
+// The three fault paths are endpoints of the prototype backend that exist for
+// exactly this -- see its README. Rows 2 and 3 need no backend at all.
 //
-// **The board has no off switch**, so nothing here repeats by itself past the
-// timer cycles: after them the sleep is armed on the button alone and the board
-// sits asleep until it is pressed. The same reasoning as S1's listening test
-// and S5's walkthrough.
+// **After the last row every press is row 1 again**, so the table is walked
+// once and the happy path is what the device does from then on. The counter
+// lives in RTC memory, which the reset that flashing or opening the monitor
+// causes clears -- so a session always starts at row 1 and a walk of the table
+// is six presses from a fresh flash.
 //
-// Every cycle ends in a chirp -- ready for an association, error for NO WIFI --
-// so a run is legible on battery, where there is no console at all.
+// A press too short to be a question is discarded without consuming a row, and
+// so is a question that never reached the POST: a row counts as walked when the
+// round trip it was testing actually happened.
 
 #include <Arduino.h>
 #include <esp_timer.h>
+#include <string.h>
 
 #include "config.h"
 #include "secrets.h"
+#include "sticky_audio.h"
+#include "sticky_backend.h"
 #include "sticky_button.h"
 #include "sticky_buzzer.h"
+#include "sticky_capture.h"
+#include "sticky_mic.h"
 #include "sticky_power.h"
+#include "sticky_screen.h"
 #include "sticky_wifi.h"
 
 namespace {
@@ -45,156 +50,228 @@ namespace {
 constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
-// Unattended wakes before the driver hands the pace over to the button. Enough
-// cached connects to see a spread; a single sample is not a measurement.
-constexpr uint32_t kAutoCycles = 6;
-
-// Long enough for the association to be genuinely cold at the radio rather than
-// a re-association the AP was still expecting, short enough to sit through.
-constexpr uint64_t kAutoSleepUs = 5000000;
-
-// How often the association is looked at. The orchestrator will poll at
-// whatever rate its own loop turns; this is also the resolution of linkMs(),
-// which is why it is small.
+// How often the association and the capture task are looked at while the button
+// is held. Small, because it is also the resolution of StickyWifi::linkMs().
 constexpr uint32_t kPollMs = 10;
 
 // A press held through the report would wake the board again the moment it goes
-// to sleep, since ext1 wakes on the level rather than on an edge. So the driver
-// waits the press out first, up to this long.
+// to sleep, since ext1 wakes on the level rather than on an edge.
 constexpr uint32_t kReleaseWaitMs = 30000;
 
+// What a question came to, which is the last column of the table below. The
+// first five are StickyBackend's results; the rest are the ways a question ends
+// before there is anything to send.
+enum class Outcome : uint8_t {
+  Answered,
+  NoServer,
+  ServerError,
+  BadResponse,
+  TimedOut,
+  NoWifi,
+  Broken,  // the microphone, the buffer or the panel
+  Tap,     // too short to be a question
+};
+
+struct Target {
+  const char* what;      // what this press is testing
+  const char* expected;  // what the vision's table says should come of it
+  const char* path;      // appended to config::kBackendBaseUrl...
+  uint16_t port;         // ...with this port instead, when it is not 0
+  const char* url;       // or, when set, the whole URL and the two above unused
+};
+
+// TEST-NET-1 (RFC 5737) is reserved for documentation and is routed nowhere, so
+// row 3 is a connect that gets no answer at all rather than a refusal -- which
+// is the shape S7b's stale lease will have.
+constexpr Target kTargets[] = {
+    {"the real endpoint", "the answer, with the recording's byte count in it",
+     config::kAudioPath, 0, nullptr},
+    {"a closed port", "NO SERVER, refused at once", config::kAudioPath, 1, nullptr},
+    {"an address nothing answers at", "NO SERVER, at the connect timeout", nullptr, 0,
+     "http://192.0.2.1/audio"},
+    {"a backend that fails", "SERVER ERROR 500", "/audio/fault/500", 0, nullptr},
+    {"a reply with no answer in it", "BAD RESPONSE", "/audio/fault/empty", 0, nullptr},
+    {"a backend that never answers", "TIMED OUT, at the response timeout",
+     "/audio/fault/slow", 0, nullptr},
+};
+constexpr uint32_t kTargetCount = sizeof(kTargets) / sizeof(kTargets[0]);
+
 // The log lives in RTC memory, which survives deep sleep but not a power cycle
-// or a reset -- so a session is exactly what this table holds, and the first
-// row of one is always the cold connect.
-constexpr uint32_t kLogRows = 24;
-constexpr uint32_t kMagic = 0x56C0FFEE;
+// or a reset -- so a session is exactly what this table holds.
+constexpr uint32_t kLogRows = 16;
+constexpr uint32_t kMagic = 0x57C0FFEE;
 
 struct Row {
-  uint16_t elapsedMs;  // begin() to an IP, or to giving up
-  uint16_t linkMs;     // begin() to the link coming up, 0 if it was not caught
-  uint16_t bootMs;     // the top of setup() to the same moment as elapsedMs
-  uint32_t ipv4;
-  uint8_t bssid[StickyWifi::kBssidBytes];
-  uint8_t channel;
-  uint8_t cachedChannel;  // what the cache said before the attempt, 0 for none
-  int8_t rssi;
-  uint8_t attempts;
-  uint8_t wakeCause;  // esp_sleep_wakeup_cause_t, as recorded on that wake
-  bool online;
-  bool hadCache;
-  bool usedCache;
+  uint8_t target;
+  uint8_t outcome;
+  uint16_t heldMs;
+  uint16_t recordedMs;
+  uint16_t waitedMs;  // release to a usable network, 0 when it was already up
+  uint16_t answeredMs;  // release to the answer being on the glass
+  uint32_t sentBytes;
+  uint16_t roundTripMs;
+  int16_t status;
 };
 
 RTC_DATA_ATTR uint32_t g_magic;
-RTC_DATA_ATTR uint32_t g_cycles;
+RTC_DATA_ATTR uint32_t g_walked;     // rows of the table walked so far
+RTC_DATA_ATTR uint32_t g_questions;  // rows written, which may exceed kLogRows
 RTC_DATA_ATTR Row g_log[kLogRows];
 
-// Header and rows go through the same format string, so the columns line up.
-// Every field is a string: anything that does not apply prints a dash.
-constexpr const char* kRowFormat = "%3s  %-4s %-8s %8s %8s %8s %4s %6s  %-17s %s\n";
-
 StickyButton button;
+StickyMic mic;
+StickyAudio audio;
+StickyCapture capture;
 StickyWifi wifi;
+StickyScreen screen;
+StickyBackend backend;
 
-void formatBssid(char* out, size_t size, const uint8_t* bssid) {
-  snprintf(out, size, "%02x:%02x:%02x:%02x:%02x:%02x", bssid[0], bssid[1], bssid[2], bssid[3],
-           bssid[4], bssid[5]);
-}
+// Everything a question produced, filled in as it goes and written to the table
+// whichever way it ends.
+Row g_row;
 
-// pwr / tmr / btn, which is all this column has to say: the first row of a
-// session is the cold one, and the rest are the two ways a cycle can be paced.
-const char* wakeShortName(uint8_t cause) {
-  switch (static_cast<esp_sleep_wakeup_cause_t>(cause)) {
-    case ESP_SLEEP_WAKEUP_TIMER: return "tmr";
-    case ESP_SLEEP_WAKEUP_EXT1: return "btn";
-    case ESP_SLEEP_WAKEUP_UNDEFINED: return "pwr";
+// The two moments the question is measured against, and neither is the moment
+// the code reaches them.
+//
+//  * The release is tEntry plus the hold, because the orchestrator can be
+//    inside a two and a half second panel refresh when the button comes up --
+//    the capture task sees it, this thread does not. Measuring from where the
+//    code notices would credit the refresh's own time to the network.
+//  * Online is the first poll that reports it, which is at kPollMs.
+//
+// Both are zero until they happen.
+int64_t g_releaseUs = 0;
+int64_t g_onlineUs = 0;
+
+// The row this question walks: the next one while the table is unfinished, and
+// the real endpoint once it has been walked through.
+uint32_t targetIndex() { return g_walked < kTargetCount ? g_walked : 0; }
+
+const char* outcomeName(uint8_t outcome) {
+  switch (static_cast<Outcome>(outcome)) {
+    case Outcome::Answered: return "answered";
+    case Outcome::NoServer: return "NO SERVER";
+    case Outcome::ServerError: return "SERVER ERROR";
+    case Outcome::BadResponse: return "BAD RESPONSE";
+    case Outcome::TimedOut: return "TIMED OUT";
+    case Outcome::NoWifi: return "NO WIFI";
+    case Outcome::Broken: return "broken";
+    case Outcome::Tap: return "tap, discarded";
     default: return "?";
   }
 }
 
-// What the attempt had to do, which is the whole point of the table: a cached
-// connect and a fallback are the two numbers this step exists to compare.
-const char* pathName(const Row& row) {
-  if (!row.hadCache) return "scan";
-  return row.usedCache ? "cached" : "fallback";
+// The configured base URL with its port replaced. kBackendBaseUrl is
+// "scheme://host[:port]", so the colon to cut at is the last one after the "//"
+// -- the only other colon in the string belongs to the scheme.
+void urlWithPort(char* out, size_t size, uint16_t port, const char* path) {
+  const char* base = config::kBackendBaseUrl;
+  const char* authority = strstr(base, "//");
+  const char* colon = authority != nullptr ? strrchr(authority, ':') : nullptr;
+  const size_t keep = colon != nullptr ? static_cast<size_t>(colon - base) : strlen(base);
+  snprintf(out, size, "%.*s:%u%s", static_cast<int>(keep), base, static_cast<unsigned>(port),
+           path);
+}
+
+void targetUrl(char* out, size_t size, const Target& target) {
+  if (target.url != nullptr) {
+    snprintf(out, size, "%s", target.url);
+  } else if (target.port != 0) {
+    urlWithPort(out, size, target.port, target.path);
+  } else {
+    snprintf(out, size, "%s%s", config::kBackendBaseUrl, target.path);
+  }
 }
 
 void printTable() {
-  Serial1.println();
-  Serial1.printf(kRowFormat, "#", "wake", "path", "link", "online", "boot", "ch", "rssi", "bssid",
-                 "ip");
+  static constexpr const char* kFormat = "%3s  %-30s %8s %8s %9s %11s %10s  %s\n";
 
-  const uint32_t rows = g_cycles < kLogRows ? g_cycles : kLogRows;
+  Serial1.println();
+  Serial1.printf(kFormat, "#", "target", "held", "wait", "wav", "round trip", "to glass",
+                 "outcome");
+
+  const uint32_t rows = g_questions < kLogRows ? g_questions : kLogRows;
   for (uint32_t i = 0; i < rows; ++i) {
     const Row& row = g_log[i];
 
-    char link[12] = "--";
-    char online[12] = "FAILED";
-    char boot[12] = "--";
-    char channel[8] = "--";
-    char rssi[8] = "--";
-    char bssid[18] = "--";
-    char ip[16] = "--";
     char index[8];
+    char held[12] = "--";
+    char wait[12] = "--";
+    char sent[12] = "--";
+    char roundTrip[12] = "--";
+    char answered[12] = "--";
+    char outcome[32];
 
     snprintf(index, sizeof(index), "%lu", static_cast<unsigned long>(i + 1));
-    if (row.linkMs != 0) snprintf(link, sizeof(link), "%u ms", row.linkMs);
-    snprintf(boot, sizeof(boot), "%u ms", row.bootMs);
+    if (row.heldMs != 0) snprintf(held, sizeof(held), "%u ms", row.heldMs);
+    if (row.heldMs != 0) snprintf(wait, sizeof(wait), "%u ms", row.waitedMs);
+    if (row.sentBytes != 0) snprintf(sent, sizeof(sent), "%lu B",
+                                     static_cast<unsigned long>(row.sentBytes));
+    if (row.roundTripMs != 0) snprintf(roundTrip, sizeof(roundTrip), "%u ms", row.roundTripMs);
+    if (row.answeredMs != 0) snprintf(answered, sizeof(answered), "%u ms", row.answeredMs);
 
-    if (row.online) {
-      snprintf(online, sizeof(online), "%u ms", row.elapsedMs);
-      snprintf(channel, sizeof(channel), "%u", row.channel);
-      snprintf(rssi, sizeof(rssi), "%d", row.rssi);
-      formatBssid(bssid, sizeof(bssid), row.bssid);
-      snprintf(ip, sizeof(ip), "%u.%u.%u.%u", static_cast<unsigned>(row.ipv4 & 0xFF),
-               static_cast<unsigned>((row.ipv4 >> 8) & 0xFF),
-               static_cast<unsigned>((row.ipv4 >> 16) & 0xFF),
-               static_cast<unsigned>((row.ipv4 >> 24) & 0xFF));
+    if (static_cast<Outcome>(row.outcome) == Outcome::ServerError) {
+      snprintf(outcome, sizeof(outcome), "SERVER ERROR %d", static_cast<int>(row.status));
     } else {
-      snprintf(online, sizeof(online), "%u ms!", row.elapsedMs);
+      snprintf(outcome, sizeof(outcome), "%s", outcomeName(row.outcome));
     }
 
-    Serial1.printf(kRowFormat, index, wakeShortName(row.wakeCause), pathName(row), link, online,
-                   boot, channel, rssi, bssid, ip);
+    Serial1.printf(kFormat, index, kTargets[row.target].what, held, wait, sent, roundTrip,
+                   answered, outcome);
   }
   Serial1.println();
 }
 
-void record(const Row& row) {
-  if (g_magic != kMagic) {
-    g_magic = kMagic;
-    g_cycles = 0;
-  }
-  if (g_cycles < kLogRows) g_log[g_cycles] = row;
-  ++g_cycles;
-}
-
 // A press held through the report is still down when the sleep is armed, and
-// ext1 wakes on the level: the board would wake again immediately and the next
-// cycle would measure a press nobody made.
+// ext1 wakes on the level. Only the 30 s cap can get here with the button down.
 void waitForRelease() {
-  const int64_t deadlineUs = esp_timer_get_time() + kReleaseWaitMs * 1000LL;
   if (!button.isDown()) return;
 
+  const int64_t deadlineUs = esp_timer_get_time() + kReleaseWaitMs * 1000LL;
   Serial1.println("  waiting for the button to come back up");
   while (button.isDown() && esp_timer_get_time() < deadlineUs) delay(5);
 }
 
-[[noreturn]] void sleepUntilNextCycle() {
+// The one exit. `consumed` says whether the target this question was walking
+// has been walked -- a tap or a failure before the POST leaves it for the next
+// press, because the row it was testing never ran.
+[[noreturn]] void finish(Outcome outcome, bool consumed) {
+  g_row.outcome = static_cast<uint8_t>(outcome);
+
+  // Called straight after whichever screen was drawn, so this is the whole gap
+  // the user sits through: the network, the round trip and the refresh.
+  if (g_releaseUs != 0) {
+    g_row.answeredMs = static_cast<uint16_t>((esp_timer_get_time() - g_releaseUs) / 1000);
+  }
+
+  if (g_magic != kMagic) {
+    g_magic = kMagic;
+    g_questions = 0;
+  }
+  if (g_questions < kLogRows) g_log[g_questions] = g_row;
+  ++g_questions;
+
+  if (consumed) ++g_walked;
+
+  printTable();
+
+  mic.end();
   wifi.end();
   waitForRelease();
 
-  const bool autoCycle = g_cycles < kAutoCycles;
-  if (autoCycle) {
-    Serial1.printf("  sleeping %lu s for cycle %lu\n",
-                   static_cast<unsigned long>(kAutoSleepUs / 1000000),
-                   static_cast<unsigned long>(g_cycles + 1));
-  } else {
-    Serial1.println("  press the AI button for another cycle");
-  }
+  Serial1.printf("  press the AI button for \"%s\"\n", kTargets[targetIndex()].what);
   Serial1.flush();
 
-  stickyPower::deepSleep(autoCycle ? kAutoSleepUs : 0);
+  stickyPower::deepSleep();
+}
+
+// A failure with nothing sent: log it, show it, chirp, sleep. The target stays
+// where it is.
+[[noreturn]] void fail(Outcome outcome, const char* title, const char* detail) {
+  Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
+  stickyBuzzer::error();
+  if (screen.begin()) screen.error(title, detail);
+  finish(outcome, false);
 }
 
 }  // namespace
@@ -209,87 +286,177 @@ void setup() {
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   delay(50);
 
-  const uint8_t wakeCause = static_cast<uint8_t>(esp_sleep_get_wakeup_cause());
-  const uint32_t cycle = (g_magic == kMagic ? g_cycles : 0) + 1;
+  if (g_magic != kMagic) {
+    g_magic = kMagic;
+    g_questions = 0;
+    g_walked = 0;
+  }
+
+  const uint32_t index = targetIndex();
+  const Target& target = kTargets[index];
+  g_row = Row{};
+  g_row.target = static_cast<uint8_t>(index);
+
+  char url[StickyBackend::kMaxUrlChars];
+  targetUrl(url, sizeof(url), target);
 
   Serial1.println();
-  Serial1.printf("S6 wifi driver -- cycle %lu, wake %s, reset %s\n",
-                 static_cast<unsigned long>(cycle), stickyPower::wakeupCauseName(),
+  Serial1.printf("S7 upload driver -- question %lu, wake %s, reset %s\n",
+                 static_cast<unsigned long>(g_questions + 1), stickyPower::wakeupCauseName(),
                  stickyPower::resetReasonName());
+  Serial1.printf("  target %lu/%lu: %s -- %s\n", static_cast<unsigned long>(index + 1),
+                 static_cast<unsigned long>(kTargetCount), target.what, url);
+  Serial1.printf("  expecting %s\n", target.expected);
 
-  Row row = {};
-  row.wakeCause = wakeCause;
-
-  uint8_t cachedBssid[StickyWifi::kBssidBytes];
-  uint8_t cachedChannel = 0;
-  if (StickyWifi::cachedAp(cachedBssid, cachedChannel)) {
-    char text[18];
-    formatBssid(text, sizeof(text), cachedBssid);
-    Serial1.printf("  cache: %s on channel %u\n", text, cachedChannel);
-    row.cachedChannel = cachedChannel;
-  } else {
-    Serial1.println("  cache: empty -- this connect is cold");
+  // The microphone comes first and the chirp comes after it: the chirp means
+  // "the microphone is live", so nothing that can delay capture may sit between
+  // them. E1 and E3, and the vision's step 3.
+  if (!mic.begin()) fail(Outcome::Broken, "NO MICROPHONE", mic.lastError());
+  if (!audio.begin(mic.sampleRate())) fail(Outcome::Broken, "NO MEMORY", audio.lastError());
+  if (!capture.start(mic, audio, button)) {
+    fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
   }
+  stickyBuzzer::ready();
 
   if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
-    Serial1.printf("FAILED: %s\n", wifi.lastError());
-    Serial1.flush();
-    stickyBuzzer::error();
-    stickyPower::deepSleep();
+    capture.abort();
+    capture.wait();
+    fail(Outcome::NoWifi, "NO WIFI", wifi.lastError());
   }
 
-  Serial1.printf("  connecting to \"%s\"...\n", secrets::kWifiSsid);
+  // The one failure with nothing to draw a message on: chirp, log and sleep.
+  if (!screen.begin()) {
+    Serial1.printf("  the panel would not start: %s\n", screen.lastError());
+    stickyBuzzer::error();
+    capture.abort();
+    capture.wait();
+    finish(Outcome::Broken, false);
+  }
+
+  // A cold start is the only time the controller's previous-image RAM has
+  // nothing to do with what is on the glass. On a wake it is one to two seconds
+  // spent flushing a panel the next screen overwrites anyway -- see S8.
+  if (!stickyPower::wokeFromDeepSleep()) screen.clear();
+  screen.listening();
+
+  // Everything from here until the release is the capture task's; this loop
+  // only watches. A drop is the vision's rule that a recording with nowhere to
+  // go is aborted rather than finished.
+  while (!capture.finished()) {
+    const StickyWifi::State state = wifi.poll();
+    if (state == StickyWifi::State::Failed) capture.abort();
+    if (state == StickyWifi::State::Online && g_onlineUs == 0) g_onlineUs = esp_timer_get_time();
+    delay(kPollMs);
+  }
+
+  mic.end();
+
+  g_row.heldMs = static_cast<uint16_t>(button.heldMs());
+  g_row.recordedMs = static_cast<uint16_t>(audio.recordedMs());
+  g_releaseUs = tEntry + static_cast<int64_t>(button.heldMs()) * 1000;
+
+  Serial1.printf("  recording: %s after %lu ms held -- %lu ms of audio, %lu bytes to send\n",
+                 capture.stopName(), static_cast<unsigned long>(button.heldMs()),
+                 static_cast<unsigned long>(audio.recordedMs()),
+                 static_cast<unsigned long>(audio.wavBytes()));
+
+  if (capture.stop() == StickyCapture::Stop::ReadFailed) {
+    fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
+  }
+  if (button.isTap()) {
+    Serial1.println("  too short to be a question -- nothing sent, target unchanged");
+    finish(Outcome::Tap, false);
+  }
+  // **A release that arrives before the address does is not a failure.** The
+  // association has a budget of its own -- config::kWifiConnectTimeoutMs -- and
+  // NO WIFI is what happens when that runs out, not what happens when the
+  // question was shorter than a DHCP exchange. S6 measured the gap and left it
+  // here: a one second hold reaches the release with roughly 2.4 s of connect
+  // still to go, and the recording waits for it rather than being thrown away.
+  //
+  // The vision's abort rule is about the other case, and the loop above is
+  // where it lives: an association that *failed* while the button was down ends
+  // the recording immediately rather than letting the user finish talking into
+  // something with nowhere to go.
   while (wifi.poll() == StickyWifi::State::Connecting) delay(kPollMs);
+  if (g_onlineUs == 0 && wifi.online()) g_onlineUs = esp_timer_get_time();
+  if (g_onlineUs > g_releaseUs) {
+    g_row.waitedMs = static_cast<uint16_t>((g_onlineUs - g_releaseUs) / 1000);
+  }
 
-  const int64_t settledUs = esp_timer_get_time();
-  row.online = wifi.online();
-  row.elapsedMs = static_cast<uint16_t>(wifi.elapsedMs());
-  row.linkMs = static_cast<uint16_t>(wifi.linkMs());
-  row.bootMs = static_cast<uint16_t>((settledUs - tEntry) / 1000);
-  row.hadCache = wifi.hadCache();
-  row.usedCache = wifi.usedCache();
-  row.attempts = static_cast<uint8_t>(wifi.attempts());
+  if (!wifi.online()) {
+    Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
+                   wifi.lastError());
+    fail(Outcome::NoWifi, "NO WIFI", nullptr);
+  }
 
-  if (wifi.online()) {
-    char text[18];
-    formatBssid(text, sizeof(text), wifi.bssid());
-    memcpy(row.bssid, wifi.bssid(), StickyWifi::kBssidBytes);
-    row.channel = wifi.channel();
-    row.rssi = wifi.rssi();
-    row.ipv4 = wifi.ipv4();
+  Serial1.printf("  online in %lu ms (%s), %s -- %lu ms of it waited for after the release\n",
+                 static_cast<unsigned long>(wifi.elapsedMs()),
+                 wifi.usedCache() ? "cached AP" : "scan", wifi.ip(),
+                 static_cast<unsigned long>(g_row.waitedMs));
+  Serial1.printf("  the panel has said LISTENING for %lu ms of that\n",
+                 static_cast<unsigned long>((esp_timer_get_time() - g_releaseUs) / 1000));
 
-    Serial1.printf("  online in %lu ms (%lu ms from boot): %s, ch %u, %d dBm, bssid %s\n",
-                   static_cast<unsigned long>(row.elapsedMs), static_cast<unsigned long>(row.bootMs),
-                   wifi.ip(), static_cast<unsigned>(row.channel), static_cast<int>(row.rssi), text);
-    Serial1.printf("         %s, %lu attempt%s\n", pathName(row),
-                   static_cast<unsigned long>(row.attempts), row.attempts == 1 ? "" : "s");
-    if (row.linkMs != 0) {
-      // The link is the association and the authentication; everything after it
-      // is DHCP, which is the half a static address would remove.
-      Serial1.printf("         link up at %lu ms, so DHCP was %lu ms of it\n",
-                     static_cast<unsigned long>(row.linkMs),
-                     static_cast<unsigned long>(row.elapsedMs - row.linkMs));
-    } else {
-      Serial1.println("         the link coming up fell between two polls");
+  g_row.sentBytes = static_cast<uint32_t>(audio.wavBytes());
+
+  const StickyBackend::Result result = backend.ask(url, audio.wav(), audio.wavBytes());
+
+  g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
+  g_row.status = static_cast<int16_t>(backend.status());
+
+  Serial1.printf("  round trip: %lu ms, first byte at %lu ms",
+                 static_cast<unsigned long>(backend.elapsedMs()),
+                 static_cast<unsigned long>(backend.firstByteMs()));
+  // Bytes per millisecond is kilobytes per second, and for anything that got a
+  // status back the wait is almost all upload -- which is the number S8 needs.
+  if (backend.status() != 0 && backend.firstByteMs() != 0) {
+    Serial1.printf(" (%lu KB/s up)",
+                   static_cast<unsigned long>(audio.wavBytes() / backend.firstByteMs()));
+  }
+  if (result == StickyBackend::Result::Ok) {
+    Serial1.printf(", %lu bytes of JSON\n", static_cast<unsigned long>(backend.bodyBytes()));
+    Serial1.printf("  answer: \"%s\"\n", backend.answer());
+  } else {
+    Serial1.printf("\n  failed: %s\n", backend.lastError());
+  }
+
+  // The vision's error table, in the one place that owns it. **Every outcome
+  // chirps before it draws**, answers included: the buzzer is the channel that
+  // is not one to two seconds behind, and a full refresh is legible long before
+  // it finishes -- the text appears inverted partway through and can already be
+  // read. A chirp held back until the refresh returns lands after the user has
+  // looked, so it reads as extra latency rather than as the answer arriving.
+  switch (result) {
+    case StickyBackend::Result::Ok:
+      stickyBuzzer::answer();
+      screen.answer(backend.answer());
+      finish(Outcome::Answered, true);
+
+    case StickyBackend::Result::NoServer:
+      stickyBuzzer::error();
+      screen.error("NO SERVER", nullptr);
+      finish(Outcome::NoServer, true);
+
+    case StickyBackend::Result::ServerError: {
+      char detail[16];
+      snprintf(detail, sizeof(detail), "%d", backend.status());
+      stickyBuzzer::error();
+      screen.error("SERVER ERROR", detail);
+      finish(Outcome::ServerError, true);
     }
-  } else {
-    Serial1.printf("  NO WIFI after %lu ms: %s (%lu attempts)\n",
-                   static_cast<unsigned long>(row.elapsedMs), wifi.lastError(),
-                   static_cast<unsigned long>(row.attempts));
+
+    case StickyBackend::Result::BadResponse:
+      stickyBuzzer::error();
+      screen.error("BAD RESPONSE", nullptr);
+      finish(Outcome::BadResponse, true);
+
+    case StickyBackend::Result::TimedOut:
+      stickyBuzzer::error();
+      screen.error("TIMED OUT", nullptr);
+      finish(Outcome::TimedOut, true);
   }
 
-  record(row);
-  printTable();
-
-  // The sound the flow makes at this point of a question, so a run is legible
-  // without a console -- which is the only way it is legible on battery.
-  if (row.online) {
-    stickyBuzzer::ready();
-  } else {
-    stickyBuzzer::error();
-  }
-
-  sleepUntilNextCycle();
+  finish(Outcome::Broken, false);
 }
 
 void loop() {

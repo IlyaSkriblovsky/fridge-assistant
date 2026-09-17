@@ -14,7 +14,7 @@ in one place rather than archaeology through commit messages.
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
-| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter |
+| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has, for long questions |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
 | D6 | Full refresh on every transition | Partial refresh where it pays | The working screen at S8, or the UI/UX pass |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
@@ -62,6 +62,30 @@ Acting on a low reading stays a separate question after that, and an open one.
 The recording is sent in one POST after the button is released, which is the
 simplest thing that proves the chain end to end. It costs the whole utterance
 plus the upload before the backend sees anything.
+
+**The trigger has half fired.** [S7](implementation.md#s7----upload-and-answer)
+measured the upload on the device and it is the largest term the device controls:
+400428 bytes took 2876 ms and 331308 took 4782 ms, all of it after the button
+came up, against a backend that swallows the same bytes in 4 ms. Streaming would
+move nearly all of that under the recording, where the user is still talking and
+it costs nothing.
+
+Two things keep it from being obvious, and both say the same thing -- measure
+[E7](experiments.md) first:
+
+- **It buys nothing for a short question.** The network is not usable until
+  about 3.4 s after the press, so a one or two second recording has no window to
+  stream into and would still send everything after the release. The saving
+  scales with the length of the question, which is the opposite of where the
+  device's worst waits are: a short question's 2.4 s of waiting for an address
+  is [S7b](implementation.md#s7b----cached-dhcp-lease)'s to remove, not this
+  step's.
+- **Part of the upload is not upload.** The same run showed 112684 bytes taking
+  6848 ms while three times that went in half the time. Whatever those seconds
+  are, streaming only moves them earlier if they are spread through the body; if
+  they sit at the front of the connection, opening it earlier is exactly what
+  removes them, and if they are per packet it removes nothing. E7 is what tells
+  the two apart, and it decides how much this step is worth.
 
 Two things have to be settled when this changes:
 
