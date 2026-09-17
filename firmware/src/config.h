@@ -9,7 +9,7 @@ namespace config {
 
 // Backend that takes the recording and answers with text. Plain HTTP for now --
 // see docs/experiments.md, E2, before switching to HTTPS.
-constexpr const char* kBackendBaseUrl = "http://192.168.10.178:8000";
+constexpr const char* kBackendBaseUrl = "http://192.168.10.75:8000";
 
 // POST target for the recording: base URL + this path, Content-Type audio/wav.
 constexpr const char* kAudioPath = "/audio";
