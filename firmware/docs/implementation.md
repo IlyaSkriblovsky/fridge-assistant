@@ -1032,6 +1032,16 @@ stop, upload, answer or error chirp, draw, deep sleep.
   any of them, and this is the first step where all three are visible at once.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
+- **Two things come across from [S7b](#s7b----cached-dhcp-lease)'s driver rather
+  than dying with it.** The stale-lease rule lives in `askAbout()` in the file
+  S8 rewrites -- ask again, then drop the lease, take an address and ask once
+  more -- and it belongs in the orchestrator because it spans `StickyBackend`
+  and `StickyWifi` and neither half can see it alone. The pre-clear branch on
+  `stickyPower::wokeFromDeepSleep()` is the other.
+- **`StickyWifi::spoilLease()` goes when the driver does**, and not before. It
+  is the one seam in a permanent module that the firmware never calls, kept
+  through this step because the rule it tests is moving into new code and wants
+  walking once in its new home. Delete it with the driver, once it has.
 
 **Verified by** the whole interaction, on battery, with the cable out.
 

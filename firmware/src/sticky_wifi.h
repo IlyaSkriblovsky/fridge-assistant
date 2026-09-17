@@ -185,11 +185,10 @@ class StickyWifi {
   bool usedLease() const { return _usedLease; }
   bool hadLease() const { return _hadLease; }
 
-  // How old the installed lease was when this wake started with it, and how
-  // long the server said it would live. Both zero when nothing was installed --
-  // and leaseSeconds() alone is zero after a DHCP wake whose client never said,
-  // which is the one way the cache can quietly fail to fill.
-  uint32_t leaseAgeS() const { return _leaseAgeS; }
+  // The life the server put on the address this wake is running on. Zero after
+  // a DHCP wake whose client never said, which is the one way the cache can
+  // quietly fail to fill -- how old the entry is belongs to cachedLease(),
+  // which is read before begin() and is where the log line comes from.
   uint32_t leaseSeconds() const { return _leaseSeconds; }
 
   // renewAddress() to the address in hand. Zero until one has been asked for.
@@ -241,7 +240,6 @@ class StickyWifi {
 
   bool _hadLease = false;
   bool _usedLease = false;
-  uint32_t _leaseAgeS = 0;
   uint32_t _leaseSeconds = 0;
 
   bool _renewing = false;

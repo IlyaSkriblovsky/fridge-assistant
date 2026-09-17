@@ -214,7 +214,6 @@ bool StickyWifi::begin(const char* ssid, const char* password) {
   _usedCache = false;
   _usedLease = false;
   _hadLease = false;
-  _leaseAgeS = 0;
   _leaseSeconds = 0;
   _renewing = false;
   _renewStartUs = 0;
@@ -256,10 +255,7 @@ bool StickyWifi::begin(const char* ssid, const char* password) {
   if (_hadLease && leaseIsYoung(ageS)) {
     _usedLease = WiFi.config(IPAddress(g_lease.ip), IPAddress(g_lease.gateway),
                              IPAddress(g_lease.mask), IPAddress(g_lease.dns));
-    if (_usedLease) {
-      _leaseAgeS = ageS;
-      _leaseSeconds = g_lease.seconds;
-    }
+    if (_usedLease) _leaseSeconds = g_lease.seconds;
   }
 
   _hadCache = cacheHolds(ssidHash);
@@ -472,7 +468,6 @@ void StickyWifi::recordSuccess() {
   // else's address this cache is built not to make.
   const struct dhcp* client = stationDhcp();
   _leaseSeconds = client != nullptr ? client->offered_t0_lease : 0;
-  _leaseAgeS = 0;
   if (_ipv4 == 0 || _leaseSeconds == 0) return;
 
   g_lease.magic = kCacheMagic;
