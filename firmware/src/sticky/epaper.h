@@ -10,9 +10,13 @@
 #include "driver/epaper/Driver_SSD1677.h"
 #include "panel/Panel_EPaper.h"
 
-// Two corrections to the stock SSD1677 path, both applied where the mismatch
-// actually is -- on the way to the controller -- so the library's frame buffer
-// keeps its own conventions.
+// Two corrections to the stock SSD1677 path and one wait taken off it, all
+// applied where the mismatch actually is -- on the way to the controller -- so
+// the library's frame buffer keeps its own conventions.
+//
+// The first two are bugs and the third is a cost: removing either correction
+// brings back a broken image, while removing the third only makes every screen
+// a tenth of a second later.
 //
 // 1. Polarity.
 //    Seeed_GFX2's 1bpp frame buffer stores 1 = black, 0 = white
@@ -42,6 +46,22 @@
 //    0x26 ahead of the next partial update. The shadow is kept in controller
 //    storage order -- already mirrored and row-reversed exactly as the panel
 //    handed the bytes over -- so it stays correct whatever the window is.
+//
+// 3. The hundred milliseconds after the controller is already asleep.
+//    Driver_SSD1677::sleep() writes 0x10/0x01 and then delay(100), and
+//    Panel_EPaper::ePaperSleep() calls it and adds a second delay(100) of its
+//    own -- E8 in docs/experiments.md measured both, on every refresh, with the
+//    final image on the glass for all 200 ms of it. Nothing waits on the
+//    driver's half. Deep sleep mode 1 can only be left through the reset pin,
+//    so the only thing that ever follows this command is the hardwareReset()
+//    at the top of the next refresh, which does not care what state it is
+//    resetting; and on the way to the board's own sleep,
+//    stickyPower::prepareDeepSleep() parks EPD_EN low and takes the panel's
+//    rail with it, by which point the analog side has been off since the
+//    power-down steps of 0x22 that the refresh waited out in full.
+//
+//    The panel's half of the wait cannot be reached from here: ePaperSleep()
+//    is private and non-virtual. It stays, and it stays measured.
 class Driver_SSD1677_Sticky : public Driver_SSD1677 {
 public:
     Driver_SSD1677_Sticky(uint16_t w = 800, uint16_t h = 480, int8_t busyPin = -1)
@@ -54,6 +74,13 @@ public:
     ~Driver_SSD1677_Sticky() override { heap_caps_free(_shadow); }
 
     const char* name() const override { return "SSD1677 (inverted)"; }
+
+    // 0x10/0x01 without the library's delay(100) after it. See note 3 above.
+    void sleep() override {
+        if (!_bus) return;
+        _bus->writeCommand(0x10);
+        _bus->writeData(0x01);
+    }
 
     // Panel_EPaper enters partial mode through wakePartial() and only ever
     // pushes a previous plane itself on the full-refresh path, so this pair of

@@ -71,9 +71,11 @@ their process.
 - **Don't touch GPIO19/20 for anything else.** They are the microphone, and they
   are also the native USB-Serial-JTAG pads that `StickyMic::begin()` has to take
   away from the USB PHY.
-- **Don't "simplify" `src/sticky/epaper.h`.** Both overrides work around real
-  library bugs -- inverted polarity and a missing previous-image plane on partial
-  refresh. Removing either brings back an inverted or smearing display.
+- **Don't "simplify" `src/sticky/epaper.h`.** Two of its overrides work around
+  real library bugs -- inverted polarity and a missing previous-image plane on
+  partial refresh. Removing either brings back an inverted or smearing display.
+  The third, `sleep()`, drops a `delay(100)` nothing waits on; removing it only
+  puts 100 ms back on every screen, measured in [E8](docs/experiments.md).
 - **Don't edit `.pio/libdeps/`.** It is wiped by package updates. Library fixes
   belong in `src/` as subclasses, which is what `src/sticky/epaper.h` does.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;

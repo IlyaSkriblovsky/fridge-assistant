@@ -24,6 +24,7 @@ for the same reason -- an analysis nobody can repeat is not a measurement.
 | E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered; also [D3](deferred.md) | Not taken | -- |
 | E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Taken 2026-09-17 | 2.1 s waiting for the OFFER, 1.000 s of ARP check. A cached lease gets the device onto the network in 0.18 s instead of 3.3 s |
 | E7 | What does the upload cost, and where do the extra seconds in it come from? | The working screen at [S8](implementation.md#s8----the-flow), and [D4](deferred.md) with it | Taken 2026-09-17 | 128 KB goes up in 660 ms. One ACK in 110 is lost on the way back, and with 5744 bytes in flight there is no later ACK to cover it, so the window stops for a whole retransmission timeout: 1.0-2.5 s, on one upload in four |
+| E8 | What is the 2.4 s of a full refresh made of, and how much of it is paid after the image is drawn? | [D6](deferred.md)'s partial refresh and [D4](deferred.md)'s display task, both of which argue against 2.4 s as if it were one number | Taken 2026-09-17 | The waveform is 1514 ms of a 2115 ms full refresh. 338 ms of every refresh runs with the final image already on the glass; 100 ms of that has been taken off in `src/sticky/epaper.h`, leaving a question 3787 ms of panel instead of 4087 |
 
 ---
 
@@ -752,3 +753,195 @@ capture running during a session that reproduces it.
 
   Nothing about this belongs in the firmware today. It is a build-system change
   with its own risk, and the measurement above is what would justify it.
+
+---
+
+## E8 -- What a refresh is made of
+
+**Why.** [S5](implementation.md#s5----screens) timed the three screens from the
+outside -- 2373 ms for a clear, 2386 for Listening, 2375-2446 for the rest,
+deterministic to the millisecond -- and every decision since has argued about
+that number as one thing. It is not one thing. Between `refresh()` and its
+return the panel is reset and re-initialised, two 48000-byte planes go out over
+SPI at 10 MHz, a waveform runs, the controller powers its analog side down, and
+then two separate `delay(100)` calls run with the image already on the glass.
+
+What started this is the panel looking finished well before the firmware thinks
+it is. S5 wrote the same thing down and left it unmeasured -- *"the image is on
+the glass before `refresh()` returns"* -- with a window of roughly half a second
+guessed at from a button press the walkthrough lost inside a refresh.
+
+**What the library already says, before any measurement.** Reading
+`Panel_EPaper::refreshFull()` and `Driver_SSD1677`:
+
+- `Driver_SSD1677::sleep()` is `0x10/0x01` **plus `delay(100)`**, and
+  `Panel_EPaper::ePaperSleep()` calls it and then adds **another `delay(100)`**.
+  Two hundred milliseconds per refresh, after the image is drawn, unconditional.
+  At three refreshes a question that is 0.6 s. The driver's half is ours to
+  remove; the panel's half is private and non-virtual, so it can only be
+  measured and then argued about upstream.
+- Every refresh begins with `wake()` -> `init()`: `hardwareReset(10, 10)`, a
+  software reset and the whole register block, before a single byte of image.
+- `0x22 = 0xF7` bundles the waveform and the controller's power-down into one
+  command, so the library's single busy wait covers both.
+
+**What to measure.** Seven phases per refresh, timed from inside the driver,
+for each of the firmware's three shapes -- a full refresh, a partial over the
+word band, a partial over the whole panel:
+
+| | |
+| --- | --- |
+| `cpu` | Panel_EPaper's frame-buffer work: padding, the horizontal-mirror flip of both planes, allocations, the previous-frame memcpy |
+| `wake` | `wake()` or `wakePartial()`: reset, software reset, register block |
+| `push` | the plane or planes going out over SPI |
+| `drive` | `0x22` without its power-down steps, then `0x20`, then BUSY |
+| `power` | `0x22 = 0x03`, then `0x20`, then BUSY: disable analog, disable OSC |
+| `sleep` | the driver's own `sleep()` and its `delay(100)` |
+| `tail` | from that sleep to the return of `refresh()`: the panel's second `delay(100)` |
+
+Plus BUSY traced by interrupt on both edges, which the library's 1 ms poll
+cannot do: if the controller drops BUSY between phases, that says more about the
+inside of the waveform than anything else here can.
+
+**How.** `src/experiments/e8_refresh_phases.cpp`:
+
+```
+~/.platformio/penv/bin/pio run -e exp_e8 -t upload --upload-port <port>
+```
+
+Six passes over the three shapes in one boot, then the table and the medians,
+then deep sleep with the AI button as the only way back. One boot is one run
+because a partial refresh has to follow a full one in the same boot -- which is
+the shape of a question anyway.
+
+The rig subclasses the firmware's own `Driver_SSD1677_Sticky` and puts the
+timestamps in the overrides, so the library is not touched and the two
+corrections in `src/sticky/epaper.h` stay in force. It is the one rig that does
+not build the firmware's module for what it measures: `StickyScreen` names its
+driver through `Config_Sticky_SSD1677_Fixed`, and the whole point is to put a
+different driver under the same panel. It draws the three screens' geometry
+itself, with the same faces and the same band. The drawing happens before the
+clock starts, so the words on the screen cost nothing and every column is the
+panel's own work.
+
+**The split is checked rather than believed.** Taking the last two steps out of
+`0x22` -- `0xF7` to `0xF4` full, `0xFF` to `0xFC` partial -- is what separates
+the waveform from the power-down. That reading of the bits comes from the
+SSD168x family and has not been confirmed against an SSD1677 datasheet, so every
+shape is run both ways, alternating, and the rig reports whether the split total
+matches the unsplit one. If it does not, the decomposition is wrong and the
+`power` column is not a number.
+
+**What this rig deliberately does not measure** is when the pixels become
+readable. That is the optical half and it needs a human, a camera or a
+photodiode. It was left out because it has no lever attached: the chirp already
+precedes every refresh ([S7](implementation.md#s7----upload-and-answer)), so the
+user is told to look up before the panel starts, and the only use for an early
+`T_visible` would be aborting a waveform mid-flight -- which costs DC balance
+and ghosting. It becomes worth taking only if the `drive` column turns out to
+hold a second nobody needs.
+
+**What it unblocks.** [D6](deferred.md) and [D4](deferred.md) both weigh a
+refresh against a round trip, and [E7](#e7----what-the-upload-costs) has since
+measured the round trip at 0.5 s three times in four. If a third of a refresh is
+reset, SPI and two `delay(100)`s, then the display task is not the whole answer:
+the panel is a serial resource, three screens a question queue on it, and what
+is paid between them is paid on the panel's own timeline where no thread can
+help. The numbers say how much of that is removable without touching the
+waveform.
+
+### Result
+
+Eighteen refreshes in one boot, six passes over the three shapes, alternating
+unsplit and split. The panel is as deterministic as S5 said: every row of a
+shape lands within 2 ms of every other, cold first refresh included.
+
+| shape | cpu | wake | push | waveform | power-down | driver sleep | panel tail | total |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| full | 15 ms | 24 ms | 222 ms | 1514 ms | 139 ms | 99 ms | 100 ms | 2115 ms |
+| band (136 rows) | 3 ms | 24 ms | 62 ms | 472 ms | 139 ms | 100 ms | 100 ms | 901 ms |
+| whole, partial | 12 ms | 23 ms | 222 ms | 472 ms | 139 ms | 99 ms | 100 ms | 1071 ms |
+
+**The split is honest.** Issuing `0x22` twice instead of once cost +1, +1 and
++0 ms against the same refresh in one go, so `0xF4`/`0xFC` plus `0x03` is the
+same sequence with a busy wait in the middle, and the power-down column is a
+measurement rather than an artefact of the byte.
+
+**338 ms of every refresh runs after the image is drawn.** The waveform ends,
+and then: 139 ms of the controller disabling its analog side and its oscillator,
+99 ms of `Driver_SSD1677::sleep()`'s `delay(100)`, and 100 ms of
+`Panel_EPaper::ePaperSleep()` adding a second one on top. It is the same 338 ms
+for all three shapes, because none of it has anything to do with how much of the
+panel was refreshed.
+
+**A question spends 4.1 s on the panel, and only 2.5 s of it is waveform.**
+Listening plus working plus the answer is 2115 + 901 + 1071 ms. Of that,
+**1014 ms is after the image is drawn** and 607 ms is before the waveform
+starts. That is the answer to the question this rig was built for: the panel is
+finished long before the firmware is, and by a bound that needed no camera.
+
+**BUSY has nothing to say about the inside of the waveform.** Traced by
+interrupt on both edges: four edges during the reset and register block, then
+one rise when `0x20` lands and one fall 1652 ms later, and nothing in between.
+The rise 3 ms after that is the controller acknowledging `0x10/0x01`. So there
+is no electrical marker for the phases of the waveform, and the optical half of
+the question -- when the pixels become readable -- stays optical. It now has a
+bound, though: the image is on the glass no later than 1514 ms into a call that
+lasts 2115 ms.
+
+**The planes go out at about a third of the bus.** 96000 bytes in 222 ms is
+3.5 Mbit/s against a `SpiBusConfig` of 10 MHz; the band's 27200 bytes in 62 ms
+is the same rate, so it is per byte and not per transfer. Nobody has looked at
+this: ~145 ms of a full-panel refresh is unexplained overhead in the bus layer,
+`src/sticky/epaper.h`'s inversion loop included.
+
+**What S5 measured was the panel plus the drawing.** S5 saw 2373-2446 ms around
+`screen.listening()` and this rig sees 2115 ms around `refresh()` alone, having
+drawn before it starts the clock. The ~260 ms difference is `fillScreen()` and
+`drawString()` -- CPU on the orchestrator's thread, before the panel is touched
+at all, and never separated from the panel until now.
+
+### What it changes
+
+- **The display task is not the whole answer, which is what this was for.**
+  [D4](deferred.md)'s task takes the refresh off the orchestrator's thread, and
+  the four numbers above are all on the *panel's* timeline, where a thread
+  cannot help. Three screens a question queue on one controller, and 1.0 s of
+  that queue is the controller finishing work whose result is already visible.
+- **Three things are removable without touching the waveform**, in order of how
+  easy they are to defend:
+  1. **Taken.** `Driver_SSD1677::sleep()`'s `delay(100)`, 99 ms a refresh, is
+     now a `sleep()` override in `src/sticky/epaper.h` -- note 3 in that file
+     has why nothing waits on it. Re-running this rig against the changed driver
+     puts the column at 34-44 *micro*seconds and takes exactly 100 ms off each
+     of the three shapes: 2015, 801 and 971 ms, so 3787 ms of panel a question
+     instead of 4087. Nothing else moved by more than a millisecond.
+  2. The power-down between two refreshes of the same question, 140 ms each, and
+     with it the `0x10/0x01` that follows: the controller is shut down and woken
+     twice inside one wake for no reason the flow needs, and only the last screen
+     of a question has to be left powered down. **Not taken**, and not on time
+     grounds -- it needs the driver to be told when a question is over, which is
+     a fifth call on an interface `screen.h` keeps four wide on purpose, and it
+     leaves the panel's analog side up across a round trip that
+     [E7](#e7----what-the-upload-costs) puts anywhere between 0.5 and 5.5 s.
+     What that costs is [E5](#e5----deep-sleep-idle-current)'s question and E5 is
+     not taken. Worth revisiting once [D4](deferred.md)'s display task lands and
+     the panel's own timeline is all that is left.
+  3. `Panel_EPaper::ePaperSleep()`'s own `delay(100)`, 100 ms a refresh. Out of
+     reach: it is private and non-virtual, and everything `refreshFull()` touches
+     is private too, so there is no subclass that reaches it -- only an upstream
+     fix or a panel driven by hand. Worth costing out alongside the bus finding
+     above, which lives in the same layer.
+
+  Together that was roughly a second of the four; 300 ms of it is now gone and
+  none of it was the waveform.
+- **[D6](deferred.md) and [D4](deferred.md) still say 2.4 s.** Both weigh a
+  refresh against a round trip that [E7](#e7----what-the-upload-costs) has since
+  measured at 0.5 s, and both quote a number that is now known to be a full
+  refresh *plus* its drawing. The arithmetic in those deferrals wants redoing
+  against what a refresh costs with item 1 taken: 2015 ms, 801 ms and 971 ms.
+- **The optical experiment is still not worth taking.** The chirp precedes every
+  refresh, so nothing the user waits for depends on when the pixels appear; and
+  the only lever an early `T_visible` would offer is aborting a waveform, which
+  costs DC balance and ghosting. The 338 ms after the waveform is the part with
+  levers on it, and it has now been measured without anyone looking at a screen.
