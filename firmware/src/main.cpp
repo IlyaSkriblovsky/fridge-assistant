@@ -1,161 +1,200 @@
-// S5 -- the screens. A temporary driver, the way S1's to S4's were:
-// docs/implementation.md asks for all three screens driven before the flow
-// exists, because this is the one step whose failure mode is cosmetic and only
-// a human can see it. S8 replaces all of this with the orchestrator.
+// S6 -- WiFi. A temporary driver, the way S1's to S5's were:
+// docs/implementation.md asks for connect times over Serial1, cold and cached,
+// including the first boot after the cache was written and a run with the
+// access point moved to another channel. S8 replaces all of this with the
+// orchestrator.
 //
-// So the driver is a walkthrough: one screen per press of the AI button, in an
-// order that puts every question S5 has to answer on the panel.
+// One association per wake, which is the only shape that can measure the thing
+// this step is about: the BSSID and channel cache lives in RTC memory, so it
+// only means anything across a deep sleep. A single boot that connected ten
+// times would measure ten warm reconnects and nothing else.
 //
-//   1  LISTENING                     the word, at the size it is meant to be read
-//   2  a short answer                the phrase the backend actually returns
-//   3  a long answer                 D2: it runs off the right edge, on purpose
-//   4  an answer with Cyrillic in it D1: '?' per character, not garbage
-//   5  NO WIFI                       an error title on its own
-//   6  SERVER ERROR, status 500      a title with the detail under it
-//   7  NO MICROPHONE                 the widest title in the vision's table
+// So the driver sleeps between cycles, and every wake is one row of a table it
+// keeps in RTC memory and reprints as it grows:
 //
-// Seven full refreshes back to back is also a ghosting test the flow itself
-// never performs: whatever the panel keeps of screen 6 is visible on screen 7.
+//   1                  the cold connect -- RTC memory is cleared by the reset
+//                      that flashing or opening the monitor causes, so the
+//                      first row of every session has no cache behind it
+//   2 .. kAutoCycles   cached connects, on the timer, unattended
+//   the rest           one per press of the AI button, for the scenarios that
+//                      need a human: move the access point to another channel
+//                      between two presses and watch the cached attempt fail,
+//                      the fallback pick the new channel up, and the press
+//                      after that be fast again
 //
-// **The press is latched in hardware, not polled.** A full refresh blocks this
-// task for two and a half seconds and the image is on the glass before the call
-// returns -- the waveform is still finishing, and the library then spends
-// 200 ms in delay() putting the controller to sleep (100 ms in
-// Driver_SSD1677::sleep() and 100 ms more in Panel_EPaper::ePaperSleep()). A
-// press that starts and ends inside that window never existed as far as a poll
-// is concerned, which is exactly what someone pressing as soon as the screen
-// appears does. So the falling edge sets a counter from an interrupt and the
-// wait compares against a snapshot taken before the refresh.
+// **The board has no off switch**, so nothing here repeats by itself past the
+// timer cycles: after them the sleep is armed on the button alone and the board
+// sits asleep until it is pressed. The same reasoning as S1's listening test
+// and S5's walkthrough.
 //
-// The flow has no such gap: from S4 the capture task polls the button every
-// 16 ms right through the Listening refresh, which is the whole reason the two
-// tasks are split.
-//
-// **The board has no off switch**, so nothing here repeats. The walkthrough
-// ends in deep sleep, five idle minutes end it early, and the AI button starts it
-// again -- the same reasoning as S1's listening test, which could otherwise
-// only be stopped by pulling the battery.
+// Every cycle ends in a chirp -- ready for an association, error for NO WIFI --
+// so a run is legible on battery, where there is no console at all.
 
 #include <Arduino.h>
 #include <esp_timer.h>
 
+#include "config.h"
+#include "secrets.h"
 #include "sticky_button.h"
 #include "sticky_buzzer.h"
 #include "sticky_power.h"
-#include "sticky_screen.h"
+#include "sticky_wifi.h"
 
 namespace {
 
 constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
-// Nobody is watching any more; go to sleep rather than sit on the battery.
-// Long enough to walk away from the desk mid-screen and come back, which one
-// minute was not: the walkthrough is paced by a human looking at a panel.
-constexpr uint32_t kIdleTimeoutMs = 300000;
+// Unattended wakes before the driver hands the pace over to the button. Enough
+// cached connects to see a spread; a single sample is not a measurement.
+constexpr uint32_t kAutoCycles = 6;
 
-// How close together two falling edges have to be to be the same press. The
-// walkthrough is not the flow -- the flow's 40 ms release debounce is
-// config::kButtonDebounceMs and lives in StickyButton.
-constexpr uint32_t kPressDebounceMs = 40;
+// Long enough for the association to be genuinely cold at the radio rather than
+// a re-association the AP was still expecting, short enough to sit through.
+constexpr uint64_t kAutoSleepUs = 5000000;
 
-StickyScreen screen;
+// How often the association is looked at. The orchestrator will poll at
+// whatever rate its own loop turns; this is also the resolution of linkMs(),
+// which is why it is small.
+constexpr uint32_t kPollMs = 10;
+
+// A press held through the report would wake the board again the moment it goes
+// to sleep, since ext1 wakes on the level rather than on an edge. So the driver
+// waits the press out first, up to this long.
+constexpr uint32_t kReleaseWaitMs = 30000;
+
+// The log lives in RTC memory, which survives deep sleep but not a power cycle
+// or a reset -- so a session is exactly what this table holds, and the first
+// row of one is always the cold connect.
+constexpr uint32_t kLogRows = 24;
+constexpr uint32_t kMagic = 0x56C0FFEE;
+
+struct Row {
+  uint16_t elapsedMs;  // begin() to an IP, or to giving up
+  uint16_t linkMs;     // begin() to the link coming up, 0 if it was not caught
+  uint16_t bootMs;     // the top of setup() to the same moment as elapsedMs
+  uint32_t ipv4;
+  uint8_t bssid[StickyWifi::kBssidBytes];
+  uint8_t channel;
+  uint8_t cachedChannel;  // what the cache said before the attempt, 0 for none
+  int8_t rssi;
+  uint8_t attempts;
+  uint8_t wakeCause;  // esp_sleep_wakeup_cause_t, as recorded on that wake
+  bool online;
+  bool hadCache;
+  bool usedCache;
+};
+
+RTC_DATA_ATTR uint32_t g_magic;
+RTC_DATA_ATTR uint32_t g_cycles;
+RTC_DATA_ATTR Row g_log[kLogRows];
+
+// Header and rows go through the same format string, so the columns line up.
+// Every field is a string: anything that does not apply prints a dash.
+constexpr const char* kRowFormat = "%3s  %-4s %-8s %8s %8s %8s %4s %6s  %-17s %s\n";
+
 StickyButton button;
+StickyWifi wifi;
 
-enum class Kind : uint8_t { Listening, Answer, Error };
+void formatBssid(char* out, size_t size, const uint8_t* bssid) {
+  snprintf(out, size, "%02x:%02x:%02x:%02x:%02x:%02x", bssid[0], bssid[1], bssid[2], bssid[3],
+           bssid[4], bssid[5]);
+}
 
-struct Step {
-  Kind kind;
-  const char* a;     // the answer's text, or the error's title
-  const char* b;     // the error's detail
-  const char* what;  // what this step is here to show, for the log
-};
+// pwr / tmr / btn, which is all this column has to say: the first row of a
+// session is the cold one, and the rest are the two ways a cycle can be paced.
+const char* wakeShortName(uint8_t cause) {
+  switch (static_cast<esp_sleep_wakeup_cause_t>(cause)) {
+    case ESP_SLEEP_WAKEUP_TIMER: return "tmr";
+    case ESP_SLEEP_WAKEUP_EXT1: return "btn";
+    case ESP_SLEEP_WAKEUP_UNDEFINED: return "pwr";
+    default: return "?";
+  }
+}
 
-const Step kSteps[] = {
-    {Kind::Listening, nullptr, nullptr, "the Listening screen"},
-    {Kind::Answer, "Received 160044 bytes", nullptr, "the answer the backend really returns"},
-    {Kind::Answer, "Sorry, I did not catch that -- could you say it again, closer?", nullptr,
-     "an answer too long for the line: D2, it runs off the right edge"},
-    {Kind::Answer, "Privet is \xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 in Russian", nullptr,
-     "non-ASCII: D1, one '?' per character and nothing drawn wrong"},
-    {Kind::Error, "NO WIFI", nullptr, "an error title on its own"},
-    {Kind::Error, "SERVER ERROR", "status 500", "an error title with its detail"},
-    {Kind::Error, "NO MICROPHONE", nullptr, "the widest title in the vision's table"},
-};
+// What the attempt had to do, which is the whole point of the table: a cached
+// connect and a fallback are the two numbers this step exists to compare.
+const char* pathName(const Row& row) {
+  if (!row.hadCache) return "scan";
+  return row.usedCache ? "cached" : "fallback";
+}
 
-// Everything that goes wrong here ends the same way the vision says a display
-// failure ends: there is nothing to draw the message on, so chirp, log, sleep.
-[[noreturn]] void fail(const char* what, const char* detail) {
-  Serial1.printf("FAILED: %s -- %s\n", what, detail);
+void printTable() {
+  Serial1.println();
+  Serial1.printf(kRowFormat, "#", "wake", "path", "link", "online", "boot", "ch", "rssi", "bssid",
+                 "ip");
+
+  const uint32_t rows = g_cycles < kLogRows ? g_cycles : kLogRows;
+  for (uint32_t i = 0; i < rows; ++i) {
+    const Row& row = g_log[i];
+
+    char link[12] = "--";
+    char online[12] = "FAILED";
+    char boot[12] = "--";
+    char channel[8] = "--";
+    char rssi[8] = "--";
+    char bssid[18] = "--";
+    char ip[16] = "--";
+    char index[8];
+
+    snprintf(index, sizeof(index), "%lu", static_cast<unsigned long>(i + 1));
+    if (row.linkMs != 0) snprintf(link, sizeof(link), "%u ms", row.linkMs);
+    snprintf(boot, sizeof(boot), "%u ms", row.bootMs);
+
+    if (row.online) {
+      snprintf(online, sizeof(online), "%u ms", row.elapsedMs);
+      snprintf(channel, sizeof(channel), "%u", row.channel);
+      snprintf(rssi, sizeof(rssi), "%d", row.rssi);
+      formatBssid(bssid, sizeof(bssid), row.bssid);
+      snprintf(ip, sizeof(ip), "%u.%u.%u.%u", static_cast<unsigned>(row.ipv4 & 0xFF),
+               static_cast<unsigned>((row.ipv4 >> 8) & 0xFF),
+               static_cast<unsigned>((row.ipv4 >> 16) & 0xFF),
+               static_cast<unsigned>((row.ipv4 >> 24) & 0xFF));
+    } else {
+      snprintf(online, sizeof(online), "%u ms!", row.elapsedMs);
+    }
+
+    Serial1.printf(kRowFormat, index, wakeShortName(row.wakeCause), pathName(row), link, online,
+                   boot, channel, rssi, bssid, ip);
+  }
+  Serial1.println();
+}
+
+void record(const Row& row) {
+  if (g_magic != kMagic) {
+    g_magic = kMagic;
+    g_cycles = 0;
+  }
+  if (g_cycles < kLogRows) g_log[g_cycles] = row;
+  ++g_cycles;
+}
+
+// A press held through the report is still down when the sleep is armed, and
+// ext1 wakes on the level: the board would wake again immediately and the next
+// cycle would measure a press nobody made.
+void waitForRelease() {
+  const int64_t deadlineUs = esp_timer_get_time() + kReleaseWaitMs * 1000LL;
+  if (!button.isDown()) return;
+
+  Serial1.println("  waiting for the button to come back up");
+  while (button.isDown() && esp_timer_get_time() < deadlineUs) delay(5);
+}
+
+[[noreturn]] void sleepUntilNextCycle() {
+  wifi.end();
+  waitForRelease();
+
+  const bool autoCycle = g_cycles < kAutoCycles;
+  if (autoCycle) {
+    Serial1.printf("  sleeping %lu s for cycle %lu\n",
+                   static_cast<unsigned long>(kAutoSleepUs / 1000000),
+                   static_cast<unsigned long>(g_cycles + 1));
+  } else {
+    Serial1.println("  press the AI button for another cycle");
+  }
   Serial1.flush();
-  stickyBuzzer::error();
-  stickyPower::deepSleep();
-}
 
-// Presses seen so far, counted from the interrupt so one cannot be missed
-// while the panel has this task. Bounce is rejected on the timestamp: a real
-// press is one falling edge, and a hold is still one.
-volatile uint32_t pressCount = 0;
-volatile int64_t lastEdgeUs = 0;
-
-void ARDUINO_ISR_ATTR onButtonEdge() {
-  const int64_t nowUs = esp_timer_get_time();
-  if (nowUs - lastEdgeUs < kPressDebounceMs * 1000LL) return;
-  lastEdgeUs = nowUs;
-  ++pressCount;
-}
-
-// Waits until the counter moves past `seen`, which is read before the refresh
-// starts, so a press made while the screen was appearing already counts.
-// Returns false if the idle timeout ran out first.
-//
-// The press that woke the board never lands here: it was already down when
-// setup() ran, so its falling edge happened before there was an interrupt
-// handler to see it, and its release is a rising edge.
-bool waitForPress(uint32_t seen) {
-  const int64_t deadlineUs = esp_timer_get_time() + kIdleTimeoutMs * 1000LL;
-
-  while (esp_timer_get_time() < deadlineUs) {
-    if (pressCount != seen) return true;
-    delay(5);
-  }
-
-  return false;
-}
-
-// Draws one step and says how long the panel took over it, returning the moment
-// the panel handed this task back. The refresh is the whole cost of a screen --
-// the drawing into the frame buffer is memory writes and rounds to nothing next
-// to it.
-int64_t drawStep(const Step& step) {
-  const int64_t startUs = esp_timer_get_time();
-
-  switch (step.kind) {
-    case Kind::Listening:
-      screen.listening();
-      break;
-    case Kind::Answer:
-      screen.answer(step.a);
-      break;
-    case Kind::Error:
-      screen.error(step.a, step.b);
-      break;
-  }
-
-  const int64_t doneUs = esp_timer_get_time();
-  Serial1.printf("     drawn in %lu ms\n",
-                 static_cast<unsigned long>((doneUs - startUs) / 1000));
-  return doneUs;
-}
-
-// The last falling edge, read without an interrupt landing in the middle of it.
-// A 64-bit load is two instructions on this core, so a press arriving between
-// them would hand back half of one timestamp and half of another.
-int64_t lastEdgeAt() {
-  noInterrupts();
-  const int64_t us = lastEdgeUs;
-  interrupts();
-  return us;
+  stickyPower::deepSleep(autoCycle ? kAutoSleepUs : 0);
 }
 
 }  // namespace
@@ -166,70 +205,91 @@ void setup() {
   // First thing on boot -- everything below depends on the board staying alive.
   stickyPower::holdLatch();
   button.begin(tEntry);  // takes GPIO4 back from the RTC pad and pulls it up
-  attachInterrupt(digitalPinToInterrupt(StickyButton::kPin), onButtonEdge, FALLING);
 
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   delay(50);
 
+  const uint8_t wakeCause = static_cast<uint8_t>(esp_sleep_get_wakeup_cause());
+  const uint32_t cycle = (g_magic == kMagic ? g_cycles : 0) + 1;
+
   Serial1.println();
-  Serial1.println("S5 screen driver -- one screen per press, then back to sleep");
-  Serial1.printf("  wake %s, reset %s\n", stickyPower::wakeupCauseName(),
+  Serial1.printf("S6 wifi driver -- cycle %lu, wake %s, reset %s\n",
+                 static_cast<unsigned long>(cycle), stickyPower::wakeupCauseName(),
                  stickyPower::resetReasonName());
 
-  if (!screen.begin()) fail("display", screen.lastError());
+  Row row = {};
+  row.wakeCause = wakeCause;
 
-  // The pre-clear S8 will make conditional, exercised here in the case that
-  // needs it: after a power-on the controller's previous-image RAM has nothing
-  // to do with what is on the glass. On a wake the first screen overwrites the
-  // panel anyway, so the second and a half is not spent.
-  if (!stickyPower::wokeFromDeepSleep()) {
-    Serial1.println("  cold start: clearing the panel first");
-    const int64_t startUs = esp_timer_get_time();
-    screen.clear();
-    Serial1.printf("     cleared in %lu ms\n",
-                   static_cast<unsigned long>((esp_timer_get_time() - startUs) / 1000));
+  uint8_t cachedBssid[StickyWifi::kBssidBytes];
+  uint8_t cachedChannel = 0;
+  if (StickyWifi::cachedAp(cachedBssid, cachedChannel)) {
+    char text[18];
+    formatBssid(text, sizeof(text), cachedBssid);
+    Serial1.printf("  cache: %s on channel %u\n", text, cachedChannel);
+    row.cachedChannel = cachedChannel;
+  } else {
+    Serial1.println("  cache: empty -- this connect is cold");
   }
 
-  // The chirp the flow makes at this point, so the walkthrough sounds like the
-  // device it is testing.
-  stickyBuzzer::ready();
-
-  const size_t count = sizeof(kSteps) / sizeof(kSteps[0]);
-  for (size_t i = 0; i < count; ++i) {
-    Serial1.printf("  %u/%u  %s\n", static_cast<unsigned>(i + 1), static_cast<unsigned>(count),
-                   kSteps[i].what);
+  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
+    Serial1.printf("FAILED: %s\n", wifi.lastError());
     Serial1.flush();
+    stickyBuzzer::error();
+    stickyPower::deepSleep();
+  }
 
-    // Read before drawing, not after: the press that advances past this screen
-    // is very often made while this screen is still being refreshed.
-    const uint32_t seen = pressCount;
-    const int64_t doneUs = drawStep(kSteps[i]);
+  Serial1.printf("  connecting to \"%s\"...\n", secrets::kWifiSsid);
+  while (wifi.poll() == StickyWifi::State::Connecting) delay(kPollMs);
 
-    if (i + 1 == count) break;
+  const int64_t settledUs = esp_timer_get_time();
+  row.online = wifi.online();
+  row.elapsedMs = static_cast<uint16_t>(wifi.elapsedMs());
+  row.linkMs = static_cast<uint16_t>(wifi.linkMs());
+  row.bootMs = static_cast<uint16_t>((settledUs - tEntry) / 1000);
+  row.hadCache = wifi.hadCache();
+  row.usedCache = wifi.usedCache();
+  row.attempts = static_cast<uint8_t>(wifi.attempts());
 
-    Serial1.println("     press the AI button for the next one");
-    Serial1.flush();
-    if (!waitForPress(seen)) {
-      Serial1.println("  nobody pressed anything for five minutes -- sleeping");
-      break;
+  if (wifi.online()) {
+    char text[18];
+    formatBssid(text, sizeof(text), wifi.bssid());
+    memcpy(row.bssid, wifi.bssid(), StickyWifi::kBssidBytes);
+    row.channel = wifi.channel();
+    row.rssi = wifi.rssi();
+    row.ipv4 = wifi.ipv4();
+
+    Serial1.printf("  online in %lu ms (%lu ms from boot): %s, ch %u, %d dBm, bssid %s\n",
+                   static_cast<unsigned long>(row.elapsedMs), static_cast<unsigned long>(row.bootMs),
+                   wifi.ip(), static_cast<unsigned>(row.channel), static_cast<int>(row.rssi), text);
+    Serial1.printf("         %s, %lu attempt%s\n", pathName(row),
+                   static_cast<unsigned long>(row.attempts), row.attempts == 1 ? "" : "s");
+    if (row.linkMs != 0) {
+      // The link is the association and the authentication; everything after it
+      // is DHCP, which is the half a static address would remove.
+      Serial1.printf("         link up at %lu ms, so DHCP was %lu ms of it\n",
+                     static_cast<unsigned long>(row.linkMs),
+                     static_cast<unsigned long>(row.elapsedMs - row.linkMs));
+    } else {
+      Serial1.println("         the link coming up fell between two polls");
     }
-
-    // Where the press fell relative to the moment the panel gave this task
-    // back. A negative number is the case the poll used to lose outright: the
-    // screen was already readable, the refresh had not returned yet, and
-    // nothing but the interrupt was in a position to notice.
-    Serial1.printf("     pressed %ld ms after the refresh returned%s\n",
-                   static_cast<long>((lastEdgeAt() - doneUs) / 1000),
-                   lastEdgeAt() < doneUs ? " -- i.e. during it" : "");
+  } else {
+    Serial1.printf("  NO WIFI after %lu ms: %s (%lu attempts)\n",
+                   static_cast<unsigned long>(row.elapsedMs), wifi.lastError(),
+                   static_cast<unsigned long>(row.attempts));
   }
 
-  // The sound the flow makes once the answer is on the panel, and the end of
-  // the walkthrough. The last screen stays up: that is the point of e-paper.
-  stickyBuzzer::answer();
+  record(row);
+  printTable();
 
-  Serial1.println("  done -- the last screen stays on the panel. Press to run again.");
-  Serial1.flush();
-  stickyPower::deepSleep();
+  // The sound the flow makes at this point of a question, so a run is legible
+  // without a console -- which is the only way it is legible on battery.
+  if (row.online) {
+    stickyBuzzer::ready();
+  } else {
+    stickyBuzzer::error();
+  }
+
+  sleepUntilNextCycle();
 }
 
 void loop() {

@@ -19,6 +19,7 @@ the firmware grows, so they have to be re-measurable in one command.
 | E3 | How long does the microphone actually need to settle? | How much of the first word is lost | Taken 2026-09-15 | Only the first 8 ms is above speech level; discard cut from 200 ms to 24 ms |
 | E4 | Does holding the AI button trigger anything in hardware? | Whether push-to-talk can use GPIO4 at all | Taken 2026-09-15, to 20 s | Nothing happens. GPIO4 is usable |
 | E5 | What does the board draw asleep? | Whether the button pull-up can keep the RTC domain powered; also [D3](deferred.md) | Not taken | -- |
+| E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Not taken | -- |
 
 ---
 
@@ -363,3 +364,44 @@ still wakes the board at all.
   screen needs exactly that code anyway, which is why it waits for this
   experiment rather than bringing the bus up on the path where a failure costs
   the user their answer ([D3](deferred.md)).
+
+## E6 -- What the DHCP exchange is made of
+
+**Why.** [S6](implementation.md#s6----wifi) measured a connect on the home
+network and found the association is nothing and the address is everything: the
+link comes up 77-158 ms after `WiFi.begin()` and the IP arrives 3.14-3.24 s
+later, over thirty times as long. Every question pays it between the release and
+the upload, so it is the largest single number in the flow that is not the
+panel -- and the BSSID cache the vision asks for, which does work, saves about
+100 ms of it.
+
+The figure is also too stable to be a busy server: six consecutive wakes came
+back within 100 ms of each other. That is the shape of a fixed timer, and a
+timer is something firmware can usually stop waiting for.
+
+**What to measure.** Where the 3.15 s actually goes, and what each candidate
+removes:
+
+1. The exchange itself -- DISCOVER, OFFER, REQUEST, ACK -- timed from the
+   station's side, which needs either a capture on the network or the lwIP DHCP
+   client's own state transitions.
+2. lwIP's ARP check on the offered address. `CONFIG_LWIP_DHCP_DOES_ARP_CHECK` is
+   on by default in ESP-IDF and costs a probe plus a wait before the address is
+   handed over. It cannot be turned off from `framework = arduino` without
+   moving to `arduino, espidf`, so its share is worth knowing before anyone
+   pays that price.
+3. The address kept in RTC memory across the sleep and set with `WiFi.config()`
+   before `begin()`, which skips the client altogether. This is the cheap
+   candidate and the one most likely to work; it needs a fallback to DHCP when
+   the lease has gone stale, and a rule for what "stale" means.
+
+**Already ruled out.** WiFi power save: `WiFi.setSleep(false)` before the
+association changed nothing at all (3.11-3.15 s against 3.14-3.24 s), so the
+station is not asleep through an answer that has already arrived. Measured, no
+change needed, and the line was taken back out.
+
+**Watch for.** A fixed address is a claim on someone else's network, so a device
+that keeps one has to notice when the network disagrees -- another client on the
+same address, or a different network entirely behind the same SSID. The safe
+version is a cached lease that is tried first and dropped the moment anything
+about it fails, which is the same shape as the BSSID cache S6 already has.

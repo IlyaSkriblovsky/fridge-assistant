@@ -135,8 +135,15 @@ which 57 ms was the boot itself and 101 ms a latch delay that has since been
 taken off the wake path -- [E1](experiments.md).
 
 Caching the BSSID and channel in RTC memory across sleeps and passing them to
-`WiFi.begin(ssid, pass, channel, bssid)` cuts reconnect time substantially, and
-reconnect time is what the buffer exists to cover.
+`WiFi.begin(ssid, pass, channel, bssid)` removes the scan, and reconnect time is
+what the buffer exists to cover.
+
+It is worth less than this document assumed, and for an instructive reason. On
+the home network the cache is the difference between an 87 ms link and a scan of
+100 ms to 1.3 s, while the address behind it takes 3.15 s of DHCP every time --
+so the connect is 3.2 s either way and the cache saves a tenth of it
+([S6](implementation.md#s6----wifi)). The association was never the expensive
+half. What to do about the other one is [E6](experiments.md).
 
 ### Framework: stay on Arduino
 

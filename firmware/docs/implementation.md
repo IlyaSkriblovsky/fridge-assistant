@@ -23,7 +23,7 @@ which means asking.
 | S3 | Capture into PSRAM | A recording, as a WAV in memory | Done |
 | S4 | Capture task | Recording that survives WiFi and the panel | Done |
 | S5 | Screens | Listening, answer, error | Done |
-| S6 | WiFi | Association without blocking, BSSID cached | Not started |
+| S6 | WiFi | Association without blocking, BSSID cached | Done |
 | S7 | Upload and answer | The backend round trip | Not started |
 | S8 | The flow | Wake, record, ask, show, sleep | Not started |
 | S9 | Re-run E1 | Wake latency of the real firmware | Not started |
@@ -511,6 +511,126 @@ the button is released.
 **Verified by** connect times over Serial1, cold and cached, including the first
 boot after the cache was written and a run with the access point moved to
 another channel.
+
+### What it turned out to involve
+
+`src/sticky_wifi.h/.cpp`. `StickyWifi` is `begin()`, `poll()` and `end()`, and
+the orchestrator's half of it is three lines:
+
+```
+wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword);
+...                                     // the Listening screen, the recording
+if (wifi.poll() != StickyWifi::State::Online) capture.abort();
+```
+
+**The class is a clock, not a state machine over `WiFi.status()`.** The attempt
+is a series of windows inside one budget: the cached AP gets
+`config::kWifiCachedAttemptMs`, and after that each fresh scan gets 6 s, until
+`config::kWifiConnectTimeoutMs` ends the question with `NO WIFI`. With the
+numbers as they stand that is 3 + 6 + 6, which is the timeout exactly.
+
+**A window only runs while there is no link**, which is what the first run on
+the device taught. A window is for an association that is not happening; once
+the link is up the attempt has done the hard part and is waiting for DHCP, which
+on this network is over three seconds and is not made faster by throwing the
+association away and starting again. The first build did throw it away: every
+cached connect came back as `fallback, 2 attempts` and took 6.3 s instead of
+3.9 s, because the cache's 3 s window expired in the middle of a DHCP exchange
+that was going perfectly well. Past the link the budget is the only thing left
+that can end an attempt.
+
+Deciding a retry on the status instead is the obvious design and it is wrong
+here, for two reasons that only show up on the device:
+
+- **The status is history until the next event.** `WL_NO_SSID_AVAIL` and
+  `WL_CONNECT_FAILED` survive into the following attempt and are only overwritten
+  when that attempt produces an event of its own, so a healthy association would
+  be torn down on the strength of the previous one's result. `WL_DISCONNECTED`
+  cannot stand in for "failed" either -- it is also what the status reads for
+  most of a connect that is going to work.
+- **The library retries the first failure by itself**, whatever
+  `setAutoReconnect(false)` was told: WiFiSTA keeps a `first_connect` static and
+  reconnects once on the first disconnect event, reusing the config it was given
+  -- cached BSSID included. So a stale cache is retried with the same stale
+  cache, and the only thing that can end it is a clock.
+
+A window several times longer than a connect that works cannot cut a good
+attempt short, which is what makes the arithmetic above the whole mechanism.
+
+**`WL_CONNECTED` means an IP, not an association.** The status reaches
+`WL_IDLE_STATUS` when the link comes up and `WL_CONNECTED` only on DHCP's reply,
+so `linkMs()` and `elapsedMs()` report the two halves apart: the gap between
+them is DHCP and nothing else, which is the number that decides whether a static
+address is worth taking. It is an observation at the caller's polling
+resolution rather than an event timestamp, and a DHCP server that answers inside
+one poll leaves `linkMs()` at zero.
+
+**The cache is keyed on a hash of the SSID**, so editing `src/secrets.h`
+invalidates it without anything having to remember to. It holds BSSID and
+channel in RTC memory, which survives deep sleep but neither a reset nor a power
+cycle -- the right boundary, since a board that has been switched off may well
+be somewhere else. Every success rewrites it, so an access point that moved
+fixes itself in one question; a failed attempt clears it, because an entry that
+has just cost a full timeout is worth less than no entry at all.
+
+**A drop after the association is a failure too.** `poll()` keeps watching once
+it is `Online`, which is what lets the orchestrator apply the vision's rule that
+a recording with nowhere to go is aborted rather than finished.
+
+The driver is one association per wake, because the cache only means anything
+across a deep sleep -- a single boot that connected ten times would measure ten
+warm reconnects. Each wake is a row of a table kept in RTC memory and reprinted
+as it grows: row one is always cold, since the reset that flashing or opening
+the monitor causes clears RTC memory; then six timer cycles; then one cycle per
+press, which is the pace the channel-move test needs. Every cycle chirps, ready
+or error, so a run is legible on battery where there is no console at all.
+
+### What it measured
+
+Eleven wakes on the home network: one cold, five on the timer, then five by
+hand, with the router switched off between the seventh and the eighth.
+
+| Wake | Path | Link | Online | Boot to online |
+| --- | --- | --- | --- | --- |
+| 1, cold | scan | 101 ms | 3301 ms | 3454 ms |
+| 2-7 | cached | 77-97 ms | 3208-3318 ms | 3261-3371 ms |
+| 8, router off | cached, then two scans | -- | `NO WIFI` at 15005 ms | 15056 ms |
+| 9, router back | scan | 1298 ms | 4408 ms | 4461 ms |
+| 10-11 | cached | 78-88 ms | 3208-3258 ms | 3261-3311 ms |
+
+- **The association is nothing and the address is everything.** A cached link
+  comes up 77-97 ms after `begin()` and the IP arrives 3.11-3.24 s later, over
+  thirty times as long, on every single wake. The BSSID cache the vision asks
+  for does work and is worth having -- it is the difference between 87 ms and a
+  scan, which was 101 ms once and 1298 ms when the network had just come back --
+  but it is buying back a tenth of what the connect actually costs. The rest is
+  [E6](experiments.md), written up from this run.
+- **The budget arithmetic held to five milliseconds.** With the router off,
+  cycle 8 spent 3 s on the cached AP and 6 s on each of two scans and reported
+  `NO WIFI` at 15005 ms against a 15000 ms timeout, having made exactly the
+  three attempts the windows allow.
+- **A failed attempt clears the cache, and the next one pays for it.** Cycle 9
+  is a cold scan rather than a fallback because cycle 8 had already thrown the
+  entry away -- which is the intended trade: 1298 ms of scanning once beats 3 s
+  of believing an access point that is no longer there on every wake.
+- **The channel-move case arrived by itself.** The router came back up on
+  channel 11 rather than the channel 1 it had been on, so cycle 9 found it by
+  scanning, wrote channel 11 to the cache, and cycles 10 and 11 were fast again
+  on the new channel. That is the scenario the step asked for, without anyone
+  having to reconfigure a router.
+- **Power save is not the DHCP wait.** `WiFi.setSleep(false)` before the
+  association was measured over six wakes and changed nothing (3.11-3.15 s
+  against 3.14-3.24 s), so the line came back out. Recorded under
+  [E6](experiments.md) as a candidate ruled out.
+
+**What this leaves for [S8](#s8----the-flow).** The association starts at the
+wake and runs under the recording, so a question held for more than about three
+and a half seconds finds the network already there and pays nothing. A short
+one does not: a one-second hold reaches the release with roughly 2.4 s of
+connect still to go, and that is time the user spends looking at a panel that
+still says `LISTENING` before the upload has even started. It is the same gap
+S8 has to decide what to fill, and now it has a number in it that is not the
+backend's.
 
 ## S7 -- Upload and answer
 
