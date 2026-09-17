@@ -33,6 +33,7 @@ StickyBackend::Result StickyBackend::ask(const char* url, const uint8_t* wav, si
   _firstByteMs = 0;
   _status = 0;
   _bodyBytes = 0;
+  _unreachable = false;
   _answer[0] = '\0';
   _error[0] = '\0';
 
@@ -80,6 +81,7 @@ StickyBackend::Result StickyBackend::ask(const char* url, const uint8_t* wav, si
   // cached lease will have from S7b, and it is the one that costs five seconds.
   if (code == HTTPC_ERROR_CONNECTION_REFUSED &&
       _firstByteMs >= config::kBackendConnectTimeoutMs) {
+    _unreachable = true;
     return finish(Result::NoServer, "nothing answered at the address in %lu ms",
                   static_cast<unsigned long>(config::kBackendConnectTimeoutMs));
   }

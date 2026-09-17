@@ -73,13 +73,17 @@ it costs nothing.
 One thing kept it from being obvious and [E7](experiments.md) has now settled
 it, in this step's favour:
 
-- **It buys nothing for a short question.** The network is not usable until
-  about 3.4 s after the press, so a one or two second recording has no window to
-  stream into and would still send everything after the release. The saving
-  scales with the length of the question, which is the opposite of where the
-  device's worst waits are: a short question's 2.4 s of waiting for an address
-  is [S7b](implementation.md#s7b----cached-dhcp-lease)'s to remove, not this
-  step's.
+- **It bought nothing for a short question, and that has changed.** The
+  objection was that the network is not usable until about 3.4 s after the
+  press, so a one or two second recording has no window to stream into and would
+  still send everything after the release.
+  [S7b](implementation.md#s7b----cached-dhcp-lease) has removed the premise: a
+  cached lease puts the device on a usable network 300 ms after the wake, so
+  every question has a window now and the saving no longer scales only with
+  length. What is in the way instead is the second point below -- the panel
+  refresh holds the orchestrator's thread for 2.4 s of that window -- which
+  makes the display task a precondition for this step rather than a tidying-up
+  afterwards.
 - **Part of the upload is not upload, and it is spread through the body.** The
   same run showed 112684 bytes taking 6848 ms while three times that went in
   half the time, and [E7](experiments.md) found what those seconds are: the
@@ -99,7 +103,8 @@ Two things have to be settled when this changes:
   body switches to raw PCM with the format moved into request headers.
 - Display gets its own task. With a single POST after release, rendering and
   uploading never overlap; with a streaming upload, a one-to-two second panel
-  refresh would stall it.
+  refresh would stall it -- and since S7b that refresh is the *only* thing
+  between the wake and a network that is ready to take bytes.
 
 **That task is close to free, which was not obvious.** A full refresh takes
 2.4 s on this panel ([S5](implementation.md#s5----screens)), but almost none of

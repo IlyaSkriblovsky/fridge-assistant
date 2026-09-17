@@ -144,7 +144,21 @@ the home network the cache is the difference between an 87 ms link and a scan of
 100 ms to 1.3 s, while the address behind it takes 3.15 s of DHCP every time --
 so the connect is 3.2 s either way and the cache saves a tenth of it
 ([S6](implementation.md#s6----wifi)). The association was never the expensive
-half. What to do about the other one is [E6](experiments.md).
+half.
+
+**So the address is cached beside it**, which is the other nine tenths.
+[E6](experiments.md) took the 3.2 s apart -- 2.1 s of the router thinking about
+its first answer, a full second of lwIP's ARP check -- and none of it is ours to
+make faster; what is ours is not asking. The lease the last wake was given is
+kept in RTC memory and installed with `WiFi.config()` before the association, and
+the device is on a usable network 300 ms after the wake instead of 3.5 s
+([S7b](implementation.md#s7b----cached-dhcp-lease)).
+
+It is not a claim on a fixed address. The device only ever reuses what this
+network gave it, for less than half the life the server put on it, and a lease
+that has outlived its network is dropped by the first question that cannot reach
+anything through it -- which costs that one question and nothing afterwards. The
+upload is the probe, so nothing on the happy path pays for the check.
 
 ### Framework: stay on Arduino
 

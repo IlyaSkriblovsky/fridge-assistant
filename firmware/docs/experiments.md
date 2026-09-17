@@ -484,6 +484,21 @@ things make it cheaper than it looks in the firmware:
 - **The lease has a known life.** 86400 s from the server, and the RTC counter
   survives deep sleep, so an entry can be aged out rather than trusted forever.
 
+**The firmware now carries it, and the numbers held.**
+[S7b](implementation.md#s7b----cached-dhcp-lease) is this result as a step:
+3546 ms from the top of `setup()` to a usable network on a DHCP wake against
+302-307 ms on a cached one, measured on the firmware rather than on this rig, for
+a saving of 3.24 s a question. Two corrections came back with it:
+
+- **The rig's 178-226 ms and the firmware's 302-307 ms are the same number.**
+  The difference is the 214-228 ms of microphone, buffer, capture task and ready
+  chirp the firmware does before `WiFi.begin()` and the rig did not.
+- **A stale lease costs 13.2 s in the firmware, not 6.3 s.** The rule the
+  firmware settled on drops the lease on the *second* connect that answers
+  nothing rather than the first, so the probe half is paid twice: 10007 ms of
+  connects plus 3151 ms of DHCP. The extra 5 s buys not throwing away a working
+  address on a connect that failed for its own reasons.
+
 **A trap found on the way.** `WiFi.persistent(false)` has to be called *before*
 `WiFi.mode(WIFI_STA)`. Arduino's default storage is FLASH, so a mode set while
 that is still true goes through NVS and costs 1.6 s -- a full half of a cached

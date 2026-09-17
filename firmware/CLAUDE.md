@@ -18,7 +18,7 @@ the hardware traps.
 | `src/sticky_mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
 | `src/sticky_audio.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/sticky_capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
-| `src/sticky_wifi.h/.cpp` | The association: polled, never waited on, with the AP cached across sleeps |
+| `src/sticky_wifi.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/sticky_backend.h/.cpp` | The round trip: the recording up as a POST, the answer back as JSON |
 | `src/sticky_screen.h/.cpp` | The three screens, and the only place the panel is touched |
 | `src/sticky_power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
@@ -72,6 +72,13 @@ their process.
   belong in `src/` as subclasses, which is what `sticky_epaper.h` does.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;
   a blocking WiFi connect drops audio.
+- **A number read off a poll is a number about the poller.** The orchestrator
+  sits inside a 2.4 s panel refresh between one `wifi.poll()` and the next, so
+  anything timed by when a poll noticed has the panel in it -- S7b's first run
+  reported an address that arrives in 40 ms as costing 2642 ms, four wakes
+  running. `StickyWifi::linkMs()` and `onlineMs()` are timestamps from the WiFi
+  task for that reason; `elapsedMs()` is deliberately the polling thread's own
+  view. Time anything else that happens off this thread the same way.
 - **`WiFi.persistent(false)` goes before `WiFi.mode()`.** Arduino's default
   storage is FLASH, so a mode set before that call goes through NVS and costs
   1.6 s on every wake -- measured in [E6](docs/experiments.md). `StickyWifi`

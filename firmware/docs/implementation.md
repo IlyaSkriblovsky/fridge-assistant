@@ -25,7 +25,7 @@ which means asking.
 | S5 | Screens | Listening, answer, error | Done |
 | S6 | WiFi | Association without blocking, BSSID cached | Done |
 | S7 | Upload and answer | The backend round trip | Done |
-| S7b | Cached DHCP lease | Three seconds off every question | Not started |
+| S7b | Cached DHCP lease | Three seconds off every question | Done |
 | S8 | The flow | Wake, record, ask, show, sleep | Not started |
 | S9 | Re-run E1 | Wake latency of the real firmware | Not started |
 
@@ -854,6 +854,122 @@ dropped the moment the question it is carrying cannot reach anything.
 **Verified by** the E6 numbers coming back from the firmware rather than a rig,
 and by a question that starts with a stale lease still getting its answer.
 
+### What it turned out to involve
+
+`StickyWifi` gains a second entry in RTC memory beside the AP: the address, the
+gateway, the mask, the DNS server, the life the server offered and the RTC
+counter at the moment it was granted. `begin()` installs it with
+`WiFi.config()` in the window between `WiFi.mode()` and the association -- the
+netif has to exist, and the station has to know it is not asking for an address
+before it associates -- and that two-line window is the whole saving.
+
+**The entry is tied to the SSID and not to the BSSID**, and it is a separate
+entry rather than a wider one. A lease belongs to the network behind the radio,
+so the same subnet reached through a different access point of the same network
+is still the right subnet; and the two are dropped for different reasons at
+different moments -- an association that failed says nothing about the address,
+an address that reaches nothing says nothing about the radio.
+
+**Half the offered life is the ceiling, and it is DHCP's own T1** -- the point
+at which a client that had one running would be renewing rather than using the
+address. The firmware has no client running between questions, so the same
+boundary is where it stops reusing and asks properly, which keeps the device
+inside the contract the server wrote rather than inside an interval invented
+here. The number comes from the lwIP client's `offered_t0_lease` through
+`netif_dhcp_data()`, because arduino-esp32 exposes no accessor for it; a wake
+whose client never said is not written to the cache at all, and says so in the
+log rather than guessing. The age is counted on the RTC counter, since
+`esp_timer` restarts on every wake -- [S2](#s2----button)'s correction to
+[E1](experiments.md), reused.
+
+**Failure is the only detector, and `StickyBackend` had to learn to report it.**
+The module already knew the difference -- HTTPClient calls every failed connect
+"connection refused", so the clock is what separates a port that said no from an
+address that said nothing -- but it kept the difference in a log string.
+`unreachable()` is that same test as a value, and it is the only distinction
+inside `NO SERVER` the device can act on: a refusal proves something is at the
+address and therefore that the address works, while silence is also the shape of
+a lease that has outlived its network.
+
+**The rule asks twice.** A lease is dropped on the second unanswered connect,
+not the first, which is what the step planned against [S7](#s7----upload-and-answer)'s
+one-failure-in-fifteen. It costs one connect timeout on a wake that was already
+going to be slow and it keeps a false positive from throwing away a working
+address. The rule lives in the orchestrator, because it spans both modules and
+neither half can see it alone.
+
+**The renewal cannot be waited on by the status or by the address.**
+`WiFi.config(INADDR_NONE, ...)` restarts the client without touching the
+association, but `WiFi.status()` is still the `WL_CONNECTED` the discarded
+address set and has no event coming to replace it -- and the address the server
+hands back is usually the one just dropped, so "it changed" waits for something
+that is not going to happen. E6's rig got away with the second test because its
+stale lease was from a subnet that could never come back. The client's own
+`DHCP_STATE_BOUND` is the only witness that answers the question being asked.
+
+**The first run of the driver measured the panel.** Four wakes reported an
+installed lease as costing 2642, 2643, 2642 and 2643 ms -- a fixed timer, not a
+network. Between `wifi.begin()` and the loop that polls it stands the LISTENING
+refresh, and `poll()` cannot time something that happens while its caller is
+busy for two and a half seconds. [S7](#s7----upload-and-answer) never saw it
+because 2.4 s of panel fits inside 3.2 s of DHCP. So `linkMs()` and the new
+`onlineMs()` are now timestamps taken in the WiFi task from
+`ARDUINO_EVENT_WIFI_STA_CONNECTED` and `..._STA_GOT_IP`, `elapsedMs()` is kept
+as what the polling thread believed, and the driver prints both. **A number read
+off a poll is a number about the poller.**
+
+The driver walks five rows, one per press, and two of them exist to keep the
+detector honest: a closed port, which must be refused and must leave the lease
+alone, and the row after it, which has to still find the lease there. The stale
+row is the one failure in the step that cannot be reached by waiting -- a lease
+only goes stale when the network changes underneath it -- so
+`StickyWifi::spoilLease()` moves the cached entry onto a subnet the device is
+not on, on the wake before. It is the one seam in the module that the firmware
+never calls, and it is deliberately not a lease setter: it can only spoil what
+the server already gave.
+
+### What it measured
+
+Two runs of six wakes, the second after the instrument was fixed. The table is
+the second.
+
+| Mode | Link | Address | Top of `setup()` to a usable network |
+| --- | --- | --- | --- |
+| DHCP | 85 ms | 3332 ms | 3546 ms |
+| cached lease | 78-83 ms | the same millisecond | 302-307 ms |
+| stale lease | 78 ms | the same millisecond | 302 ms, and then 13.2 s |
+
+- **The saving is 3.24 s a question**, which is [E6](experiments.md)'s 3.1 s
+  arriving intact. The firmware's 302-307 ms against the rig's 178-226 ms is not
+  the network: it is the 214-228 ms of microphone, buffer, capture task and
+  ready chirp that the firmware does before `wifi.begin()` and the rig did not.
+- **With the address installed there is no DHCP step at all.** The link and the
+  address are the same millisecond on every cached wake -- 79/79, 82/82, 83/83 --
+  while the DHCP wake has 85 ms of link and then 3.2 s of exchange. That is E6's
+  decomposition seen from the firmware: the association was never the expensive
+  half.
+- **The lease's own numbers came back right.** 86400 s read from the client, and
+  an age that counted 4, 6, 16, 25, 26 and 35 s across six deep sleeps -- so the
+  entry can be aged out rather than trusted until it fails.
+- **A refusal leaves the lease alone.** The closed port was refused in 58 ms and
+  the next wake found the same lease, ten seconds older. The detector is the
+  connect timeout and not `NO SERVER`, which is the distinction the step
+  depended on.
+- **A stale lease costs 13.2 s and still answers.** 10007 ms of two connects
+  that answered nothing, 3151 ms of DHCP, and then the question went up and came
+  back normally. E6 predicted 6.3 s for a rule that drops on the first failure;
+  the second ask is the other half, and it is the price of not throwing away a
+  working address.
+- **What the polling thread believed was 2641-2644 ms on every cached wake**, to
+  the millisecond, which is the LISTENING refresh and nothing else. It is now
+  printed beside the real number rather than instead of it.
+- **The address has stopped being what a question waits for.** `wait` -- release
+  to a usable network -- is 0 ms on every cached wake against 278 ms on the DHCP
+  one, and the release-to-upload gap is 69-76 ms. Those holds were 3.3 to 4.6 s,
+  so the refresh had finished long before the button came up; a question shorter
+  than about 2.6 s would now wait for the panel instead, which is
+  [S8](#s8----the-flow)'s problem and is written up there.
+
 ## S8 -- The flow
 
 `main.cpp` becomes the orchestrator and the demo code goes: wake, latch, button,
@@ -898,6 +1014,22 @@ stop, upload, answer or error chirp, draw, deep sleep.
   cheap ones, and says the choice cannot be made on an average. What it does not
   cover is a model: the backend still answers a fixed phrase, so the thinking
   time that will dominate this wait in the end is still unmeasured.
+
+  **[S7b](#s7b----cached-dhcp-lease) has moved the other end of the gap**, and
+  it is now the panel's. The network used to be what a question waited for and
+  is not any more: with the address installed it is usable 300 ms into the wake
+  and the release-to-network wait is zero. What is left in front of the upload is
+  the LISTENING refresh, which this thread sits inside for 2641-2644 ms while
+  the recording goes on without it -- measured to the millisecond on four
+  consecutive wakes. A hold longer than that pays nothing, and every question
+  shorter than about 2.6 s now waits for the panel instead of the radio. So the
+  screen this step has to choose is in front of a wait it is itself creating,
+  which is an argument the cheap shapes did not have before.
+- **The LISTENING refresh is now the largest single number between the wake and
+  the upload**, at 2.4 s against 300 ms of network and 500 ms of round trip. It
+  is the same 2.4 s as the pre-clear above and the same as the answer's own
+  refresh; [D6](deferred.md)'s partial refresh is the only thing that touches
+  any of them, and this is the first step where all three are visible at once.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
 

@@ -86,6 +86,15 @@ class StickyBackend {
   // far, which is every NoServer and every TimedOut.
   int status() const { return _status; }
 
+  // True when the round trip ended because nothing at all answered at the
+  // address -- a connect that ran out of its own budget rather than one that
+  // was refused. It is the one distinction inside NoServer that the device can
+  // act on, and S7b is what acts on it: a refusal proves something is at the
+  // address and therefore that the address works, while silence is also the
+  // shape of a cached DHCP lease that has outlived its network. HTTPClient
+  // reports both as "connection refused", so the clock is what separates them.
+  bool unreachable() const { return _unreachable; }
+
   // What the reply weighed, for the log.
   size_t bodyBytes() const { return _bodyBytes; }
 
@@ -109,6 +118,7 @@ class StickyBackend {
   uint32_t _firstByteMs = 0;
   int _status = 0;
   size_t _bodyBytes = 0;
+  bool _unreachable = false;
 
   char _answer[kMaxAnswerChars] = {0};
   char _error[80] = {0};
