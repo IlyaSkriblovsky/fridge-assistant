@@ -159,7 +159,7 @@ Two pieces:
 - `StickyMic` gets a raw-sample read alongside `readLevel()` -- one I2S read,
   no averaging, straight into a caller's buffer. `readLevel()` stays: the E1/E3
   rig uses it and levels are still worth logging.
-- `src/sticky_audio.h/.cpp` owns the buffer: one `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`
+- `src/recording.h/.cpp` owns the buffer: one `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`
   of 44 bytes + `kMaxRecordSeconds` x 32 KB, which is 960 KB of audio. **The
   44-byte WAV header is reserved at the front** and filled in once the length is
   known, so sending never copies a megabyte to prepend it.
@@ -183,7 +183,7 @@ buffer to the backend, once S7 exists, is what actually proves it is audio.
 
 ### What it turned out to involve
 
-`StickyAudio` is `begin(sampleRate)`, three lines per chunk, and `wav()`:
+`Recording` is `begin(sampleRate)`, three lines per chunk, and `wav()`:
 
 ```
 const uint32_t want = audio.nextChunkSamples();          // 0 at the cap
@@ -272,7 +272,7 @@ split exists for, so a clean recording under both loads is the result.
 
 ### What it turned out to involve
 
-`src/sticky_capture.h/.cpp`. `StickyCapture` is `start()`, `abort()`,
+`src/capture.h/.cpp`. `Capture` is `start()`, `abort()`,
 `finished()`, `wait()` and `stop()`, and the orchestrator's half of it is five
 lines:
 
@@ -515,13 +515,13 @@ another channel.
 
 ### What it turned out to involve
 
-`src/sticky_wifi.h/.cpp`. `StickyWifi` is `begin()`, `poll()` and `end()`, and
+`src/wifi_link.h/.cpp`. `WifiLink` is `begin()`, `poll()` and `end()`, and
 the orchestrator's half of it is three lines:
 
 ```
 wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword);
 ...                                     // the Listening screen, the recording
-if (wifi.poll() != StickyWifi::State::Online) capture.abort();
+if (wifi.poll() != WifiLink::State::Online) capture.abort();
 ```
 
 **The class is a clock, not a state machine over `WiFi.status()`.** The attempt
@@ -660,16 +660,16 @@ for `NO SERVER`, a backend returning 500, a backend returning `{}`.
 
 ### What it turned out to involve
 
-`src/sticky_backend.h/.cpp`. `StickyBackend` is one call -- `ask(wav, bytes)`
-returning one of five results -- and the orchestrator's half of it is two lines:
+`src/backend.h/.cpp`. `Backend` is one call -- `ask(wav, bytes)` returning one
+of five results -- and the orchestrator's half of it is two lines:
 
 ```
-const StickyBackend::Result result = backend.ask(audio.wav(), audio.wavBytes());
-if (result == StickyBackend::Result::Ok) screen.answer(backend.answer());
+const Backend::Result result = backend.ask(audio.wav(), audio.wavBytes());
+if (result == Backend::Result::Ok) screen.answer(backend.answer());
 ```
 
 The body goes from PSRAM by pointer and length, as
-[S3](#s3----capture-into-psram) arranged: `StickyAudio` reserved the 44 header
+[S3](#s3----capture-into-psram) arranged: `Recording` reserved the 44 header
 bytes at the front of its own allocation, so what goes on the wire is that
 allocation and nothing copies a megabyte. `HTTPClient::POST()` takes a non-const
 pointer although it only reads through it, so there is one `const_cast`, and it
@@ -678,7 +678,7 @@ is what keeps the copy from happening.
 **The screen strings are not in the module.** `lastError()` returns a line for
 Serial1 and the orchestrator maps the five results onto the vision's titles,
 which is the division [S6](#s6----wifi) already drew between `NO WIFI` and
-`StickyWifi`'s own strings. It keeps the vision's error table in one place
+`WifiLink`'s own strings. It keeps the vision's error table in one place
 rather than in two halves that can drift apart.
 
 **Two timeouts, because the two waits are different questions.** A backend that
@@ -766,7 +766,7 @@ all, across the runs that found the two bugs below.
   happens before the wait starts.
 - **The network is usable about 3.4 s after the press**, of which 3.2 s is the
   address ([E6](experiments.md)) and 190 ms is everything before
-  `StickyWifi::begin()` gets called. So the wait after the release is 3.4 s
+  `WifiLink::begin()` gets called. So the wait after the release is 3.4 s
   minus the hold and nothing else: 1.11 s measured for a 2.34 s hold, 0.33 s for
   a 3.18 s hold, zero past about 3.4 s. A one-second question waits about 2.4 s,
   which is [S6](#s6----wifi)'s prediction arriving intact.
@@ -839,7 +839,7 @@ dropped the moment the question it is carrying cannot reach anything.
   first**, and it is cheap: the cost of asking twice is one extra connect
   timeout on a wake that was already going to be slow.
 - **Failure is the only detector, and it has to be wired to the upload.**
-  `StickyWifi` cannot tell a good address from a stale one by itself -- both
+  `WifiLink` cannot tell a good address from a stale one by itself -- both
   install in 40 ms and neither says anything. So the rule is the one E6's rig
   demonstrated: when the connection to the backend fails, drop the lease, start
   DHCP, and let the question have its answer 3.2 s later. A stale lease costs
@@ -856,7 +856,7 @@ and by a question that starts with a stale lease still getting its answer.
 
 ### What it turned out to involve
 
-`StickyWifi` gains a second entry in RTC memory beside the AP: the address, the
+`WifiLink` gains a second entry in RTC memory beside the AP: the address, the
 gateway, the mask, the DNS server, the life the server offered and the RTC
 counter at the moment it was granted. `begin()` installs it with
 `WiFi.config()` in the window between `WiFi.mode()` and the association -- the
@@ -882,7 +882,7 @@ log rather than guessing. The age is counted on the RTC counter, since
 `esp_timer` restarts on every wake -- [S2](#s2----button)'s correction to
 [E1](experiments.md), reused.
 
-**Failure is the only detector, and `StickyBackend` had to learn to report it.**
+**Failure is the only detector, and `Backend` had to learn to report it.**
 The module already knew the difference -- HTTPClient calls every failed connect
 "connection refused", so the clock is what separates a port that said no from an
 address that said nothing -- but it kept the difference in a log string.
@@ -923,7 +923,7 @@ detector honest: a closed port, which must be refused and must leave the lease
 alone, and the row after it, which has to still find the lease there. The stale
 row is the one failure in the step that cannot be reached by waiting -- a lease
 only goes stale when the network changes underneath it -- so
-`StickyWifi::spoilLease()` moves the cached entry onto a subnet the device is
+`WifiLink::spoilLease()` moves the cached entry onto a subnet the device is
 not on, on the wake before. It is the one seam in the module that the firmware
 never calls, and it is deliberately not a lease setter: it can only spoil what
 the server already gave.
@@ -1035,10 +1035,10 @@ stop, upload, answer or error chirp, draw, deep sleep.
 - **Two things come across from [S7b](#s7b----cached-dhcp-lease)'s driver rather
   than dying with it.** The stale-lease rule lives in `askAbout()` in the file
   S8 rewrites -- ask again, then drop the lease, take an address and ask once
-  more -- and it belongs in the orchestrator because it spans `StickyBackend`
-  and `StickyWifi` and neither half can see it alone. The pre-clear branch on
+  more -- and it belongs in the orchestrator because it spans `Backend` and
+  `WifiLink` and neither half can see it alone. The pre-clear branch on
   `stickyPower::wokeFromDeepSleep()` is the other.
-- **`StickyWifi::spoilLease()` goes when the driver does**, and not before. It
+- **`WifiLink::spoilLease()` goes when the driver does**, and not before. It
   is the one seam in a permanent module that the firmware never calls, kept
   through this step because the rule it tests is moving into new code and wants
   walking once in its new home. Delete it with the driver, once it has.

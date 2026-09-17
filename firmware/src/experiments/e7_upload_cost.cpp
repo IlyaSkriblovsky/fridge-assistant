@@ -33,8 +33,8 @@
 //                  question; uploads 2 and 3 are the same upload on a link that
 //                  has settled.
 //   the firmware's own path
-//                  upload 4 goes through StickyBackend, unchanged. It anchors
-//                  the rig's four clocks to the one number S7 reported, so the
+//                  upload 4 goes through Backend, unchanged. It anchors the
+//                  rig's four clocks to the one number S7 reported, so the
 //                  finding transfers to the firmware rather than to the rig.
 //
 // **The connects that never arrive are the other half of the question.** Four of
@@ -45,7 +45,7 @@
 // immediately: a lost SYN and a path that is not there look the same from one
 // attempt and different from two.
 //
-// The payload is StickyAudio's own buffer, filled with a tone rather than by the
+// The payload is Recording's own buffer, filled with a tone rather than by the
 // microphone -- 4 s at 16 kHz mono, 128044 bytes with the WAV header, in the
 // middle of the 34-400 KB S7 actually saw. It is the firmware's allocation, sent
 // from PSRAM by pointer, so nothing about the body's shape is the rig's
@@ -65,9 +65,9 @@
 #include "sticky/buzzer.h"
 #include "sticky/power.h"
 
-#include "sticky_audio.h"
-#include "sticky_backend.h"
-#include "sticky_wifi.h"
+#include "backend.h"
+#include "recording.h"
+#include "wifi_link.h"
 
 namespace {
 
@@ -121,7 +121,7 @@ struct Row {
   uint8_t cycle;
   uint8_t index;   // 1..kUploadsPerWake
   bool sleepOff;   // this wake ran with WiFi.setSleep(false)
-  bool viaHttp;    // upload 4: the firmware's own StickyBackend
+  bool viaHttp;    // upload 4: the firmware's own Backend
   uint16_t connectMs;
   uint16_t retryMs;  // a second connect, after the first gave up; 0 if not needed
   uint16_t headerMs;
@@ -141,9 +141,9 @@ RTC_DATA_ATTR uint32_t g_cycles;
 RTC_DATA_ATTR uint32_t g_rows;
 RTC_DATA_ATTR Row g_log[kLogRows];
 
-StickyWifi wifi;
-StickyAudio audio;
-StickyBackend backend;
+WifiLink wifi;
+Recording audio;
+Backend backend;
 
 uint16_t g_chunkMs[kMaxChunks];
 uint32_t g_chunkCount = 0;
@@ -334,7 +334,7 @@ Row postBare(const uint8_t* body, size_t bytes) {
 }
 
 // Upload 4: the firmware's own path, so the four clocks above have something to
-// be checked against. StickyBackend reports two numbers rather than six, which
+// be checked against. Backend reports two numbers rather than six, which
 // is the whole reason this experiment exists.
 Row postViaFirmware(const uint8_t* body, size_t bytes) {
   Row row = {};
@@ -342,20 +342,20 @@ Row postViaFirmware(const uint8_t* body, size_t bytes) {
   row.rssi = static_cast<int8_t>(WiFi.RSSI());
   g_chunkCount = 0;
 
-  const StickyBackend::Result result = backend.ask(body, bytes);
+  const Backend::Result result = backend.ask(body, bytes);
   row.totalMs = static_cast<uint16_t>(backend.elapsedMs());
   row.waitMs = static_cast<uint16_t>(backend.firstByteMs());
   row.status = static_cast<uint16_t>(backend.status());
 
   switch (result) {
-    case StickyBackend::Result::Ok: row.outcome = kOk; break;
-    case StickyBackend::Result::NoServer: row.outcome = kConnectFailed; break;
-    case StickyBackend::Result::ServerError: row.outcome = kBadStatus; break;
-    case StickyBackend::Result::BadResponse: row.outcome = kBadStatus; break;
-    case StickyBackend::Result::TimedOut: row.outcome = kNoAnswer; break;
+    case Backend::Result::Ok: row.outcome = kOk; break;
+    case Backend::Result::NoServer: row.outcome = kConnectFailed; break;
+    case Backend::Result::ServerError: row.outcome = kBadStatus; break;
+    case Backend::Result::BadResponse: row.outcome = kBadStatus; break;
+    case Backend::Result::TimedOut: row.outcome = kNoAnswer; break;
   }
-  if (result != StickyBackend::Result::Ok) {
-    Serial1.printf("       StickyBackend: %s\n", backend.lastError());
+  if (result != Backend::Result::Ok) {
+    Serial1.printf("       Backend: %s\n", backend.lastError());
   }
   return row;
 }
@@ -382,7 +382,7 @@ void describe(const Row& row, size_t bytes) {
                             : 0;
 
   if (row.viaHttp) {
-    Serial1.printf("  up %u  StickyBackend: %lu ms to the first byte, %lu ms in all -> %u (%s)\n",
+    Serial1.printf("  up %u  Backend: %lu ms to the first byte, %lu ms in all -> %u (%s)\n",
                    row.index, static_cast<unsigned long>(row.waitMs),
                    static_cast<unsigned long>(row.totalMs), row.status, outcomeName(row.outcome));
     return;
@@ -518,7 +518,7 @@ void setup() {
     stickyBuzzer::error();
     stickyPower::deepSleep();
   }
-  while (wifi.poll() == StickyWifi::State::Connecting) delay(2);
+  while (wifi.poll() == WifiLink::State::Connecting) delay(2);
 
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),

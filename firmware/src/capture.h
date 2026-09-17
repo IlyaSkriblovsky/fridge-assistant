@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-class StickyAudio;
+class Recording;
 class StickyButton;
 class StickyMic;
 
@@ -37,7 +37,7 @@ class StickyMic;
 //
 // Nothing in the task prints. Serial1 is the orchestrator's, and a line of log
 // at 115200 is a millisecond that the reads do not have to spare.
-class StickyCapture {
+class Capture {
  public:
   // Core 1 is where Arduino's loopTask runs and where there is nothing else:
   // the WiFi and lwIP tasks are pinned to core 0, and that split is what makes
@@ -64,7 +64,7 @@ class StickyCapture {
     ReadFailed,  // the microphone stopped delivering
   };
 
-  ~StickyCapture();
+  ~Capture();
 
   // Starts recording into `audio` from `mic`, stopping when `button` reports a
   // debounced release. The microphone must already be up: begin() powers a rail
@@ -73,7 +73,7 @@ class StickyCapture {
   //
   // Returns false only if the task could not be created, which leaves nothing
   // running and nothing recorded.
-  bool start(StickyMic& mic, StickyAudio& audio, StickyButton& button);
+  bool start(StickyMic& mic, Recording& audio, StickyButton& button);
 
   // Asks the task to stop and returns immediately -- the vision's "a network
   // failure during recording aborts rather than letting the user finish talking
@@ -98,7 +98,7 @@ class StickyCapture {
   const char* lastError() const { return _lastError; }
 
   // What the run cost, for the log. The wall clock the task spent reading is
-  // the drop detector: audio that was captured is StickyAudio::recordedMs(),
+  // the drop detector: audio that was captured is Recording::recordedMs(),
   // and anything the clock has beyond it is audio the DMA threw away while
   // nobody was reading. They should differ by a chunk or two, no more.
   uint32_t elapsedMs() const { return static_cast<uint32_t>(_elapsedUs / 1000); }
@@ -126,7 +126,7 @@ class StickyCapture {
   bool join(TickType_t ticks);
 
   StickyMic* _mic = nullptr;
-  StickyAudio* _audio = nullptr;
+  Recording* _audio = nullptr;
   StickyButton* _button = nullptr;
 
   TaskHandle_t _task = nullptr;

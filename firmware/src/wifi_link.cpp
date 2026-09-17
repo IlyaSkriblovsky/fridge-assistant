@@ -1,4 +1,4 @@
-#include "sticky_wifi.h"
+#include "wifi_link.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -26,7 +26,7 @@ constexpr uint32_t kCacheMagic = 0x571FCA01;
 struct ApCache {
   uint32_t magic;
   uint32_t ssid;  // hash of the SSID the entry belongs to
-  uint8_t bssid[StickyWifi::kBssidBytes];
+  uint8_t bssid[WifiLink::kBssidBytes];
   uint8_t channel;
 };
 
@@ -158,16 +158,16 @@ bool leaseIsYoung(uint32_t ageS) { return ageS < g_lease.seconds / 2; }
 
 }  // namespace
 
-bool StickyWifi::cachedAp(uint8_t bssid[kBssidBytes], uint8_t& channel) {
+bool WifiLink::cachedAp(uint8_t bssid[kBssidBytes], uint8_t& channel) {
   if (g_ap.magic != kCacheMagic) return false;
   memcpy(bssid, g_ap.bssid, kBssidBytes);
   channel = g_ap.channel;
   return true;
 }
 
-void StickyWifi::forgetAp() { g_ap.magic = 0; }
+void WifiLink::forgetAp() { g_ap.magic = 0; }
 
-bool StickyWifi::cachedLease(Lease& lease) {
+bool WifiLink::cachedLease(Lease& lease) {
   if (g_lease.magic != kCacheMagic || g_lease.ip == 0) return false;
   lease.ip = g_lease.ip;
   lease.gateway = g_lease.gateway;
@@ -178,9 +178,9 @@ bool StickyWifi::cachedLease(Lease& lease) {
   return true;
 }
 
-void StickyWifi::forgetLease() { g_lease.magic = 0; }
+void WifiLink::forgetLease() { g_lease.magic = 0; }
 
-bool StickyWifi::spoilLease() {
+bool WifiLink::spoilLease() {
   if (g_lease.magic != kCacheMagic || g_lease.ip == 0) return false;
 
   // The host part is kept and everything in front of it replaced, so what comes
@@ -194,7 +194,7 @@ bool StickyWifi::spoilLease() {
   return true;
 }
 
-bool StickyWifi::begin(const char* ssid, const char* password) {
+bool WifiLink::begin(const char* ssid, const char* password) {
   if (ssid == nullptr || ssid[0] == '\0') {
     _state = State::Failed;
     _lastError = "no WiFi credentials in src/secrets.h";
@@ -263,7 +263,7 @@ bool StickyWifi::begin(const char* ssid, const char* password) {
   return true;
 }
 
-StickyWifi::State StickyWifi::poll() {
+WifiLink::State WifiLink::poll() {
   switch (_state) {
     case State::Idle:
     case State::Failed:
@@ -328,7 +328,7 @@ StickyWifi::State StickyWifi::poll() {
   return _state;
 }
 
-void StickyWifi::renewAddress() {
+void WifiLink::renewAddress() {
   if (_state != State::Online || _renewing) return;
 
   // The entry goes first, so that a wake which ends badly from here -- no
@@ -361,7 +361,7 @@ void StickyWifi::renewAddress() {
   }
 }
 
-StickyWifi::State StickyWifi::pollRenew() {
+WifiLink::State WifiLink::pollRenew() {
   const uint32_t ms = static_cast<uint32_t>((esp_timer_get_time() - _renewStartUs) / 1000);
 
   // **WiFi.status() is history here and the address is not a witness either.**
@@ -390,28 +390,28 @@ StickyWifi::State StickyWifi::pollRenew() {
   return _state;
 }
 
-void StickyWifi::end() {
+void WifiLink::end() {
   WiFi.disconnect(true, false, 0);  // stop the station, keep the config
   _state = State::Idle;
 }
 
-uint32_t StickyWifi::elapsedMs() const {
+uint32_t WifiLink::elapsedMs() const {
   if (_state == State::Idle) return 0;
   if (_settledMs != 0) return _settledMs;
   return static_cast<uint32_t>((esp_timer_get_time() - _startUs) / 1000);
 }
 
-uint32_t StickyWifi::linkMs() const {
+uint32_t WifiLink::linkMs() const {
   if (g_linkUs == 0 || _startUs == 0) return 0;
   return static_cast<uint32_t>((g_linkUs - _startUs) / 1000);
 }
 
-uint32_t StickyWifi::onlineMs() const {
+uint32_t WifiLink::onlineMs() const {
   if (g_gotIpUs == 0 || _startUs == 0) return 0;
   return static_cast<uint32_t>((g_gotIpUs - _startUs) / 1000);
 }
 
-void StickyWifi::startAttempt(bool useCache) {
+void WifiLink::startAttempt(bool useCache) {
   // Whatever the library still has in flight has to go first, or
   // esp_wifi_connect() refuses the new attempt -- and after the first failure
   // there is always something in flight, because WiFiSTA retries once on its
@@ -436,7 +436,7 @@ void StickyWifi::startAttempt(bool useCache) {
   _beginFailed = (started == WL_CONNECT_FAILED && before != WL_CONNECT_FAILED);
 }
 
-void StickyWifi::recordSuccess() {
+void WifiLink::recordSuccess() {
   WiFi.BSSID(_bssid);
   _channel = static_cast<uint8_t>(WiFi.channel());
   _rssi = WiFi.RSSI();

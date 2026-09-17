@@ -1,13 +1,13 @@
-#include "sticky_capture.h"
+#include "capture.h"
 
 #include <esp_timer.h>
 
 #include "sticky/button.h"
 #include "sticky/mic.h"
 
-#include "sticky_audio.h"
+#include "recording.h"
 
-StickyCapture::~StickyCapture() {
+Capture::~Capture() {
   if (_task != nullptr) {
     abort();
     wait();
@@ -15,7 +15,7 @@ StickyCapture::~StickyCapture() {
   if (_done != nullptr) vSemaphoreDelete(_done);
 }
 
-bool StickyCapture::start(StickyMic& mic, StickyAudio& audio, StickyButton& button) {
+bool Capture::start(StickyMic& mic, Recording& audio, StickyButton& button) {
   if (_task != nullptr) {
     _lastError = "capture already running";
     return false;
@@ -51,15 +51,15 @@ bool StickyCapture::start(StickyMic& mic, StickyAudio& audio, StickyButton& butt
   return true;
 }
 
-void StickyCapture::abort() { _abort = true; }
+void Capture::abort() { _abort = true; }
 
-bool StickyCapture::finished() { return join(0); }
+bool Capture::finished() { return join(0); }
 
-bool StickyCapture::wait(uint32_t timeoutMs) {
+bool Capture::wait(uint32_t timeoutMs) {
   return join(timeoutMs == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs));
 }
 
-bool StickyCapture::join(TickType_t ticks) {
+bool Capture::join(TickType_t ticks) {
   if (_joined) return true;
   if (_done == nullptr) return true;  // never started: nothing to wait for
   if (xSemaphoreTake(_done, ticks) != pdTRUE) return false;
@@ -72,7 +72,7 @@ bool StickyCapture::join(TickType_t ticks) {
   return true;
 }
 
-const char* StickyCapture::stopName() const {
+const char* Capture::stopName() const {
   switch (_stop) {
     case Stop::Released: return "released";
     case Stop::Full: return "cap reached";
@@ -83,9 +83,9 @@ const char* StickyCapture::stopName() const {
   return "still running";
 }
 
-void StickyCapture::trampoline(void* self) { static_cast<StickyCapture*>(self)->run(); }
+void Capture::trampoline(void* self) { static_cast<Capture*>(self)->run(); }
 
-void StickyCapture::run() {
+void Capture::run() {
   const int64_t startUs = esp_timer_get_time();
   int64_t previousUs = startUs;
 
@@ -94,7 +94,7 @@ void StickyCapture::run() {
   // jitter a 240-frame DMA block puts on a 256-sample read and well below the
   // 90 ms at which audio actually starts going missing.
   const uint32_t nominalUs =
-      static_cast<uint32_t>(StickyAudio::kChunkSamples * 1000000ULL / _mic->sampleRate());
+      static_cast<uint32_t>(Recording::kChunkSamples * 1000000ULL / _mic->sampleRate());
   const uint32_t slowUs = nominalUs + nominalUs / 2;
 
   for (;;) {

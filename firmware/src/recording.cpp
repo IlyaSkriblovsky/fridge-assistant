@@ -1,4 +1,4 @@
-#include "sticky_audio.h"
+#include "recording.h"
 
 #include <esp_heap_caps.h>
 #include <string.h>
@@ -31,7 +31,7 @@ struct HeaderWriter {
 
 }  // namespace
 
-bool StickyAudio::begin(uint32_t sampleRate, uint32_t maxSeconds) {
+bool Recording::begin(uint32_t sampleRate, uint32_t maxSeconds) {
   if (sampleRate == 0 || maxSeconds == 0) {
     _lastError = "zero-length buffer requested";
     return false;
@@ -60,7 +60,7 @@ bool StickyAudio::begin(uint32_t sampleRate, uint32_t maxSeconds) {
   return true;
 }
 
-void StickyAudio::end() {
+void Recording::end() {
   if (_buffer != nullptr) {
     heap_caps_free(_buffer);
     _buffer = nullptr;
@@ -70,39 +70,39 @@ void StickyAudio::end() {
   _sampleRate = 0;
 }
 
-int16_t* StickyAudio::writeHead() {
+int16_t* Recording::writeHead() {
   if (_buffer == nullptr) return nullptr;
   return reinterpret_cast<int16_t*>(_buffer + kHeaderBytes) + _samples;
 }
 
-uint32_t StickyAudio::nextChunkSamples() const {
+uint32_t Recording::nextChunkSamples() const {
   if (_buffer == nullptr) return 0;
   const uint32_t room = _capacity - _samples;
   return room < kChunkSamples ? room : kChunkSamples;
 }
 
-void StickyAudio::commit(uint32_t samples) {
+void Recording::commit(uint32_t samples) {
   if (_buffer == nullptr) return;
   const uint32_t room = _capacity - _samples;
   _samples += samples < room ? samples : room;
 }
 
-uint32_t StickyAudio::recordedMs() const {
+uint32_t Recording::recordedMs() const {
   if (_sampleRate == 0) return 0;
   return static_cast<uint32_t>(static_cast<uint64_t>(_samples) * 1000 / _sampleRate);
 }
 
-const int16_t* StickyAudio::samples() const {
+const int16_t* Recording::samples() const {
   if (_buffer == nullptr) return nullptr;
   return reinterpret_cast<const int16_t*>(_buffer + kHeaderBytes);
 }
 
-size_t StickyAudio::allocatedBytes() const {
+size_t Recording::allocatedBytes() const {
   if (_buffer == nullptr) return 0;
   return kHeaderBytes + static_cast<size_t>(_capacity) * sizeof(int16_t);
 }
 
-const uint8_t* StickyAudio::wav() {
+const uint8_t* Recording::wav() {
   if (_buffer == nullptr) return nullptr;
 
   // Mono 16-bit, which is what the PDM path delivers and what the vision's

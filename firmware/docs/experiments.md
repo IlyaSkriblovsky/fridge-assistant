@@ -405,7 +405,7 @@ removes:
 ~/.platformio/penv/bin/pio run -e exp_e6 -t upload --upload-port <port>
 ```
 
-It associates through `StickyWifi`, so the association half is the firmware's
+It associates through `WifiLink`, so the association half is the firmware's
 own code, and alternates wake by wake: an ordinary DHCP wake, then one that
 installs the previous wake's lease with `WiFi.config()`. On DHCP wakes the lwIP
 client's state machine is sampled every 2 ms through `netif_dhcp_data()`, which
@@ -503,7 +503,7 @@ a saving of 3.24 s a question. Two corrections came back with it:
 `WiFi.mode(WIFI_STA)`. Arduino's default storage is FLASH, so a mode set while
 that is still true goes through NVS and costs 1.6 s -- a full half of a cached
 connect's entire budget, spent before the association even starts. With the
-order right, `WiFi.mode()` takes 33-48 ms. `StickyWifi::begin()` already does it
+order right, `WiFi.mode()` takes 33-48 ms. `WifiLink::begin()` already does it
 in that order; the first version of this rig did not, which is how it was
 found.
 
@@ -556,11 +556,11 @@ samples taken while walking an error table are not a measurement of throughput.
 ```
 
 Sixteen wakes, four uploads each, all of them the same 128044-byte payload --
-`StickyAudio`'s own buffer filled with a tone instead of by the microphone, so
+`Recording`'s own buffer filled with a tone instead of by the microphone, so
 the body is the firmware's allocation and not the rig's invention. Uploads 1 to
 3 go through a bare `NetworkClient` at 0, +3 and +6 s after the address arrives,
 with the body written in 4 KB chunks so a stall has an offset as well as a
-duration. Upload 4 goes through `StickyBackend` unchanged, which anchors the
+duration. Upload 4 goes through `Backend` unchanged, which anchors the
 rig's six clocks to the one number S7 reported. `WiFi.setSleep(false)` on even
 wakes.
 
@@ -679,7 +679,7 @@ is why about one upload in four pays and the payload has nothing to do with it.
 It is also exactly S7's spread: 238 ms to 6.8 s, unrelated to size.
 
 **Power save is not it.** 9 of 32 uploads retransmitted with power save on, 8 of
-32 with `WiFi.setSleep(false)`. The `StickyBackend` numbers came out worse with
+32 with `WiFi.setSleep(false)`. The `Backend` numbers came out worse with
 it off (median 1085 ms against 532 ms), which is the opposite direction and the
 size of the noise. E6 found nothing on two round trips and E7 finds nothing on
 two thousand: **measured twice, no change needed.**

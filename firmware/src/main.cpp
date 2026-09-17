@@ -23,7 +23,7 @@
 // fine and the lease must survive it. Row 5 is the one failure in this step
 // that cannot be reached by waiting -- a lease only goes stale when the network
 // changes underneath it -- so the driver makes one, through
-// StickyWifi::spoilLease(), on the wake before.
+// WifiLink::spoilLease(), on the wake before.
 //
 // A press too short to be a question is discarded without consuming a row, and
 // so is a question that never reached the POST.
@@ -42,10 +42,10 @@
 #include "sticky/power.h"
 #include "sticky/screen.h"
 
-#include "sticky_audio.h"
-#include "sticky_backend.h"
-#include "sticky_capture.h"
-#include "sticky_wifi.h"
+#include "backend.h"
+#include "capture.h"
+#include "recording.h"
+#include "wifi_link.h"
 
 namespace {
 
@@ -53,7 +53,7 @@ constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
 // How often the association and the capture task are looked at while the button
-// is held. Small, because it is also the resolution of StickyWifi::linkMs().
+// is held. Small, because it is also the resolution of WifiLink::linkMs().
 constexpr uint32_t kPollMs = 10;
 
 // A press held through the report would wake the board again the moment it goes
@@ -61,7 +61,7 @@ constexpr uint32_t kPollMs = 10;
 constexpr uint32_t kReleaseWaitMs = 30000;
 
 // What a question came to, which is the last column of the table below. The
-// first five are StickyBackend's results; the rest are the ways a question ends
+// first five are Backend's results; the rest are the ways a question ends
 // before there is anything to send.
 enum class Outcome : uint8_t {
   Answered,
@@ -136,11 +136,11 @@ RTC_DATA_ATTR Row g_log[kLogRows];
 
 StickyButton button;
 StickyMic mic;
-StickyAudio audio;
-StickyCapture capture;
-StickyWifi wifi;
+Recording audio;
+Capture capture;
+WifiLink wifi;
 StickyScreen screen;
-StickyBackend backend;
+Backend backend;
 
 // Everything a question produced, filled in as it goes and written to the table
 // whichever way it ends.
@@ -154,7 +154,7 @@ Row g_row;
 //  * The release is tEntry plus the hold, because the orchestrator can be
 //    inside that refresh when the button comes up -- the capture task sees it,
 //    this thread does not.
-//  * Online is begin() plus StickyWifi::onlineMs(), which is the WiFi task's
+//  * Online is begin() plus WifiLink::onlineMs(), which is the WiFi task's
 //    own timestamp of the address arriving. The first run of this driver used
 //    the first poll that reported it and measured the panel instead: four wakes
 //    reported an installed lease as 2642, 2643, 2642, 2643 ms.
@@ -193,7 +193,7 @@ const char* modeName(uint8_t mode) {
   }
 }
 
-// StickyWifi hands addresses back in IPAddress's byte order -- first octet in
+// WifiLink hands addresses back in IPAddress's byte order -- first octet in
 // the low byte -- so that its header does not have to include WiFi.h.
 void ipText(char* out, size_t size, uint32_t address) {
   snprintf(out, size, "%u.%u.%u.%u", static_cast<unsigned>(address & 0xFF),
@@ -304,7 +304,7 @@ void waitForRelease() {
     // and only when it actually ran: a tap leaves the table where it was, and
     // spoiling on the way past would put the next wake on a row it was not
     // walking.
-    if (kPlans[g_row.plan].spoilAfter) g_spoiled = StickyWifi::spoilLease();
+    if (kPlans[g_row.plan].spoilAfter) g_spoiled = WifiLink::spoilLease();
     ++g_walked;
   }
 
@@ -344,12 +344,12 @@ void waitForRelease() {
 // Everything else the backend can do -- refuse the connection, answer 500,
 // answer nothing, answer nonsense -- proves there is something at the address
 // and therefore that the address works, and leaves the lease alone.
-StickyBackend::Result askAbout(const char* url) {
-  StickyBackend::Result result = backend.ask(url, audio.wav(), audio.wavBytes());
+Backend::Result askAbout(const char* url) {
+  Backend::Result result = backend.ask(url, audio.wav(), audio.wavBytes());
   g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
 
   const bool couldBeStale =
-      result == StickyBackend::Result::NoServer && backend.unreachable() && wifi.usedLease();
+      result == Backend::Result::NoServer && backend.unreachable() && wifi.usedLease();
   if (!couldBeStale) return result;
 
   Serial1.printf("  nothing answered in %lu ms, and this question is on a reused address"
@@ -360,7 +360,7 @@ StickyBackend::Result askAbout(const char* url) {
   result = backend.ask(url, audio.wav(), audio.wavBytes());
   g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
   g_row.lostMs = static_cast<uint16_t>(g_row.lostMs + backend.elapsedMs());
-  if (result != StickyBackend::Result::NoServer || !backend.unreachable()) {
+  if (result != Backend::Result::NoServer || !backend.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
     return result;
   }
@@ -368,7 +368,7 @@ StickyBackend::Result askAbout(const char* url) {
   Serial1.println("  twice, so the address is the suspect -- dropping the lease and asking DHCP");
   const uint32_t stale = wifi.ipv4();
   wifi.renewAddress();
-  while (wifi.poll() == StickyWifi::State::Connecting) delay(kPollMs);
+  while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
   g_row.renewMs = static_cast<uint16_t>(wifi.renewMs());
 
   if (!wifi.online()) {
@@ -422,7 +422,7 @@ void setup() {
   g_row = Row{};
   g_row.plan = static_cast<uint8_t>(index);
 
-  char url[StickyBackend::kMaxUrlChars];
+  char url[Backend::kMaxUrlChars];
   planUrl(url, sizeof(url), plan);
 
   Serial1.println();
@@ -433,8 +433,8 @@ void setup() {
                  static_cast<unsigned long>(kPlanCount), plan.what, url);
   Serial1.printf("  expecting %s\n", plan.expected);
 
-  StickyWifi::Lease lease;
-  if (StickyWifi::cachedLease(lease)) {
+  WifiLink::Lease lease;
+  if (WifiLink::cachedLease(lease)) {
     char ip[16];
     char gateway[16];
     ipText(ip, sizeof(ip), lease.ip);
@@ -489,7 +489,7 @@ void setup() {
   // only watches. A drop is the vision's rule that a recording with nowhere to
   // go is aborted rather than finished.
   while (!capture.finished()) {
-    if (wifi.poll() == StickyWifi::State::Failed) capture.abort();
+    if (wifi.poll() == WifiLink::State::Failed) capture.abort();
     delay(kPollMs);
   }
 
@@ -503,7 +503,7 @@ void setup() {
                  static_cast<unsigned long>(audio.recordedMs()),
                  static_cast<unsigned long>(audio.wavBytes()));
 
-  if (capture.stop() == StickyCapture::Stop::ReadFailed) {
+  if (capture.stop() == Capture::Stop::ReadFailed) {
     fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
   }
   if (button.isTap()) {
@@ -514,7 +514,7 @@ void setup() {
   // A release that arrives before the address does is not a failure: the
   // association has a budget of its own and NO WIFI is what happens when that
   // runs out. S7 found this the hard way and the note is there.
-  while (wifi.poll() == StickyWifi::State::Connecting) delay(kPollMs);
+  while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
 
   if (!wifi.online()) {
     Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
@@ -568,7 +568,7 @@ void setup() {
                  static_cast<unsigned long>(g_row.toPostMs),
                  static_cast<unsigned long>(g_row.waitedMs));
 
-  const StickyBackend::Result result = askAbout(url);
+  const Backend::Result result = askAbout(url);
 
   g_row.status = static_cast<int16_t>(backend.status());
 
@@ -579,7 +579,7 @@ void setup() {
     Serial1.printf(" (%lu KB/s up)",
                    static_cast<unsigned long>(audio.wavBytes() / backend.firstByteMs()));
   }
-  if (result == StickyBackend::Result::Ok) {
+  if (result == Backend::Result::Ok) {
     Serial1.printf(", %lu bytes of JSON\n", static_cast<unsigned long>(backend.bodyBytes()));
     Serial1.printf("  answer: \"%s\"\n", backend.answer());
   } else {
@@ -589,17 +589,17 @@ void setup() {
   // The vision's error table, in the one place that owns it. Every outcome
   // chirps before it draws, answers included -- S7's note has why.
   switch (result) {
-    case StickyBackend::Result::Ok:
+    case Backend::Result::Ok:
       stickyBuzzer::answer();
       screen.answer(backend.answer());
       finish(Outcome::Answered, true);
 
-    case StickyBackend::Result::NoServer:
+    case Backend::Result::NoServer:
       stickyBuzzer::error();
       screen.error("NO SERVER", nullptr);
       finish(Outcome::NoServer, true);
 
-    case StickyBackend::Result::ServerError: {
+    case Backend::Result::ServerError: {
       char detail[16];
       snprintf(detail, sizeof(detail), "%d", backend.status());
       stickyBuzzer::error();
@@ -607,12 +607,12 @@ void setup() {
       finish(Outcome::ServerError, true);
     }
 
-    case StickyBackend::Result::BadResponse:
+    case Backend::Result::BadResponse:
       stickyBuzzer::error();
       screen.error("BAD RESPONSE", nullptr);
       finish(Outcome::BadResponse, true);
 
-    case StickyBackend::Result::TimedOut:
+    case Backend::Result::TimedOut:
       stickyBuzzer::error();
       screen.error("TIMED OUT", nullptr);
       finish(Outcome::TimedOut, true);

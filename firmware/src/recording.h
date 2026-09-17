@@ -36,7 +36,7 @@
 // One task owns the object at a time. S4 hands it to the capture task and takes
 // it back on release rather than sharing it, so there is no locking here.
 
-class StickyAudio {
+class Recording {
  public:
   // A canonical PCM WAV header: RIFF/WAVE, one fmt chunk, one data chunk, no
   // extensions. Also a multiple of 4, so the samples behind it stay aligned.

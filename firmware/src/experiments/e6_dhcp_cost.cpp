@@ -52,7 +52,7 @@
 #include "sticky/buzzer.h"
 #include "sticky/power.h"
 
-#include "sticky_wifi.h"
+#include "wifi_link.h"
 
 namespace {
 
@@ -123,7 +123,7 @@ uint8_t g_lastState = 0xFF;
 uint8_t g_tries = 0;
 uint32_t g_leaseSeconds = 0;
 
-StickyWifi wifi;
+WifiLink wifi;
 
 constexpr const char* kRowFormat = "%3s  %-6s %7s %8s %8s %8s %5s  %-8s %s\n";
 
@@ -368,12 +368,12 @@ void setup() {
   row.mode = poisoned ? 2 : cached ? 1 : 0;
 
   // The netif has to exist before a static address will take, and WiFi.mode()
-  // is what creates it. StickyWifi::begin() calls it again, which is free.
+  // is what creates it. WifiLink::begin() calls it again, which is free.
   //
   // **persistent(false) goes first**, and the first run of this rig is how that
   // was learned: with it after the mode, every wake spent over a second more
   // before the association even started. Arduino's default storage is FLASH, so
-  // a mode set while that is still true goes through NVS. StickyWifi does it in
+  // a mode set while that is still true goes through NVS. WifiLink does it in
   // this order already; the rig has to as well, or it measures a different
   // firmware than the one it is reporting on.
   const int64_t tSerial = esp_timer_get_time();
@@ -409,7 +409,7 @@ void setup() {
     stickyPower::deepSleep();
   }
 
-  while (wifi.poll() == StickyWifi::State::Connecting) {
+  while (wifi.poll() == WifiLink::State::Connecting) {
     sampleDhcp(wifi.elapsedMs());
     delay(kPollMs);
   }

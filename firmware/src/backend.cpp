@@ -1,4 +1,4 @@
-#include "sticky_backend.h"
+#include "backend.h"
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -17,17 +17,17 @@
 static_assert(config::kResponseTimeoutMs <= UINT16_MAX,
               "config::kResponseTimeoutMs does not fit HTTPClient::setTimeout()");
 
-void StickyBackend::endpoint(char* out, size_t size) {
+void Backend::endpoint(char* out, size_t size) {
   snprintf(out, size, "%s%s", config::kBackendBaseUrl, config::kAudioPath);
 }
 
-StickyBackend::Result StickyBackend::ask(const uint8_t* wav, size_t bytes) {
+Backend::Result Backend::ask(const uint8_t* wav, size_t bytes) {
   char url[kMaxUrlChars];
   endpoint(url, sizeof(url));
   return ask(url, wav, bytes);
 }
 
-StickyBackend::Result StickyBackend::ask(const char* url, const uint8_t* wav, size_t bytes) {
+Backend::Result Backend::ask(const char* url, const uint8_t* wav, size_t bytes) {
   _startUs = esp_timer_get_time();
   _elapsedMs = 0;
   _firstByteMs = 0;
@@ -126,7 +126,7 @@ StickyBackend::Result StickyBackend::ask(const char* url, const uint8_t* wav, si
   return finish(Result::Ok, "");
 }
 
-StickyBackend::Result StickyBackend::finish(Result result, const char* format, ...) {
+Backend::Result Backend::finish(Result result, const char* format, ...) {
   _elapsedMs = static_cast<uint32_t>((esp_timer_get_time() - _startUs) / 1000);
 
   va_list args;

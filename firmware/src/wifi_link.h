@@ -69,7 +69,7 @@
 //    the config it was given, cached BSSID included, so a stale cache costs two
 //    attempts rather than one -- which is the reason the fallback is decided on
 //    a clock rather than on a status code.
-class StickyWifi {
+class WifiLink {
  public:
   enum class State : uint8_t {
     Idle,        // begin() has not been called, or end() has

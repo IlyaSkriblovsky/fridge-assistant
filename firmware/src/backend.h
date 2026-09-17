@@ -19,7 +19,7 @@
 // rate and the format in the WAV header rather than in headers of our own. It
 // carries no credentials (D8) and goes over plain HTTP (D5).
 //
-// **The body is sent from PSRAM by pointer and length.** StickyAudio reserved
+// **The body is sent from PSRAM by pointer and length.** Recording reserved
 // the 44 header bytes at the front of its allocation, so what goes on the wire
 // is that allocation itself and nothing copies a megabyte. It is also why
 // Arduino's own HTTPClient is enough here: it can send a body only when the
@@ -33,13 +33,13 @@
 // ERROR), something there that answered with a body that is not an answer (BAD
 // RESPONSE), and something that took the question and never came back (TIMED
 // OUT). Anything finer belongs in the log, which is what lastError() is for --
-// the same division StickyWifi draws between NO WIFI and its own strings.
+// the same division WifiLink draws between NO WIFI and its own strings.
 //
 // **ask() blocks for the whole round trip**, up to config::kResponseTimeoutMs,
 // and that is allowed here and nowhere else in the firmware: by the time it is
 // called the button is up, the recording is over and the capture task has been
 // joined, so there is nothing left for this thread to be late for.
-class StickyBackend {
+class Backend {
  public:
   // How the round trip ended. The orchestrator turns these into the vision's
   // screens; nothing here knows what they are called.
