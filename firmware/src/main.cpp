@@ -36,7 +36,6 @@
 #include <esp_timer.h>
 #include <stdio.h>
 
-#include "config.h"
 #include "secrets.h"
 
 #include "sticky/button.h"
@@ -467,7 +466,7 @@ void setup() {
   Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- %lu ms from the wake, the"
                  " address landed %lu ms after the release\n",
                  static_cast<unsigned long>(wifi.onlineMs()),
-                 wifi.usedCache() ? "cached" : "scanned",
+                 wifi.usedCachedAp() ? "cached" : "scanned",
                  wifi.usedLease() ? "installed" : "leased", wifi.ip(),
                  static_cast<unsigned long>((onlineUs - g_entryUs) / 1000),
                  static_cast<unsigned long>(addressAfterReleaseMs));

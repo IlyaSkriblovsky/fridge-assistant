@@ -528,7 +528,7 @@ if (wifi.poll() != WifiLink::State::Online) capture.abort();
 
 **The class is a clock, not a state machine over `WiFi.status()`.** The attempt
 is a series of windows inside one budget: the cached AP gets
-`config::kWifiCachedAttemptMs`, and after that each fresh scan gets 6 s, until
+`config::kWifiCachedApAttemptMs`, and after that each fresh scan gets 6 s, until
 `config::kWifiConnectTimeoutMs` ends the question with `NO WIFI`. With the
 numbers as they stand that is 3 + 6 + 6, which is the timeout exactly.
 

@@ -84,14 +84,15 @@ uint32_t hashOf(const char* text) {
   return hash;
 }
 
-bool cacheHolds(uint32_t ssid) {
+bool apCacheHolds(uint32_t ssid) {
   return g_ap.magic == kCacheMagic && g_ap.ssid == ssid && g_ap.channel >= 1 &&
          g_ap.channel <= 14;
 }
 
-// How long an attempt that is not using the cache gets before it is started
-// again from scratch. With config.h's numbers the budget is spent as one cached
-// attempt of 3 s and then two fresh scans of 6 s -- 15 s, the timeout exactly.
+// How long an attempt that is not using the cached AP gets before it is started
+// again from scratch. With config.h's numbers the budget is spent as one attempt
+// on the cached AP of 3 s and then two fresh scans of 6 s -- 15 s, the timeout
+// exactly.
 //
 // The window is what decides a retry, rather than WiFi.status() saying the
 // attempt has ended, because the status is not a reliable answer to that
@@ -151,13 +152,6 @@ bool leaseIsYoung(uint32_t ageS) { return ageS < g_lease.seconds / 2; }
 
 }  // namespace
 
-bool WifiLink::cachedAp(uint8_t bssid[kBssidBytes], uint8_t& channel) {
-  if (g_ap.magic != kCacheMagic) return false;
-  memcpy(bssid, g_ap.bssid, kBssidBytes);
-  channel = g_ap.channel;
-  return true;
-}
-
 void WifiLink::forgetAp() { g_ap.magic = 0; }
 
 bool WifiLink::cachedLease(Lease& lease) {
@@ -190,9 +184,8 @@ bool WifiLink::begin(const char* ssid, const char* password) {
   _retryAtMs = 0;
   _attempts = 0;
   _beginFailed = false;
-  _usedCache = false;
+  _usedCachedAp = false;
   _usedLease = false;
-  _hadLease = false;
   _leaseSeconds = 0;
   _renewing = false;
   _renewStartUs = 0;
@@ -230,15 +223,13 @@ bool WifiLink::begin(const char* ssid, const char* password) {
   // already know it is not asking for an address by the time it associates --
   // otherwise the client starts, and then the whole 3.2 s is spent anyway.
   uint32_t ageS = 0;
-  _hadLease = leaseHolds(ssidHash, ageS);
-  if (_hadLease && leaseIsYoung(ageS)) {
+  if (leaseHolds(ssidHash, ageS) && leaseIsYoung(ageS)) {
     _usedLease = WiFi.config(IPAddress(g_lease.ip), IPAddress(g_lease.gateway),
                              IPAddress(g_lease.mask), IPAddress(g_lease.dns));
     if (_usedLease) _leaseSeconds = g_lease.seconds;
   }
 
-  _hadCache = cacheHolds(ssidHash);
-  startAttempt(_hadCache);
+  startAttempt(apCacheHolds(ssidHash));
   return true;
 }
 
@@ -284,11 +275,11 @@ WifiLink::State WifiLink::poll() {
     return _state;
   }
 
-  // The attempt in flight has had its window. For the cached one that means the
-  // cache has had its chance and the scan the firmware would have done without
-  // a cache starts instead; for a scan it means starting over. Either way it is
-  // inside the same budget, so the fallback costs the user no time beyond what
-  // the cache was given.
+  // The attempt in flight has had its window. For one on the cached AP that
+  // means the AP cache has had its chance and the scan the firmware would have
+  // done without it starts instead; for a scan it means starting over. Either
+  // way it is inside the same budget, so the fallback costs the user no time
+  // beyond what the cached AP was given.
   //
   // **Only while there is no link.** A window is for an association that is not
   // happening; once the link is up the attempt has done the hard part and is
@@ -390,7 +381,7 @@ uint32_t WifiLink::onlineMs() const {
   return static_cast<uint32_t>((g_gotIpUs - _startUs) / 1000);
 }
 
-void WifiLink::startAttempt(bool useCache) {
+void WifiLink::startAttempt(bool useCachedAp) {
   // Whatever the library still has in flight has to go first, or
   // esp_wifi_connect() refuses the new attempt -- and after the first failure
   // there is always something in flight, because WiFiSTA retries once on its
@@ -398,9 +389,9 @@ void WifiLink::startAttempt(bool useCache) {
   if (_attempts > 0) WiFi.disconnect(false, false, 0);
 
   const uint32_t ms = elapsedMs();
-  _usedCache = useCache;
+  _usedCachedAp = useCachedAp;
   ++_attempts;
-  _attemptEndsAtMs = ms + (useCache ? config::kWifiCachedAttemptMs : kScanAttemptMs);
+  _attemptEndsAtMs = ms + (useCachedAp ? config::kWifiCachedApAttemptMs : kScanAttemptMs);
   _retryAtMs = ms + kRetryDelayMs;
 
   // WiFi.begin() reports a refusal as WL_CONNECT_FAILED, but on the way out it
@@ -409,7 +400,7 @@ void WifiLink::startAttempt(bool useCache) {
   // before the call is news, or a wrong password would have this restarting
   // every kRetryDelayMs for the whole budget.
   const wl_status_t before = WiFi.status();
-  const wl_status_t started = useCache
+  const wl_status_t started = useCachedAp
                                   ? WiFi.begin(_ssid, _password, g_ap.channel, g_ap.bssid)
                                   : WiFi.begin(_ssid, _password);
   _beginFailed = (started == WL_CONNECT_FAILED && before != WL_CONNECT_FAILED);
@@ -425,7 +416,7 @@ void WifiLink::recordSuccess() {
   snprintf(_ip, sizeof(_ip), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 
   // The AP that just worked, for the next wake. Written on every success rather
-  // than only when the cache was empty, so a network that moved channel fixes
+  // than only when the AP cache was empty, so a network that moved channel fixes
   // itself in one question instead of staying wrong.
   g_ap.magic = kCacheMagic;
   g_ap.ssid = hashOf(_ssid);
@@ -444,7 +435,7 @@ void WifiLink::recordSuccess() {
   // has just finished. Without it there is nothing to age the entry against, so
   // the entry is not written at all and the next wake asks properly: a lease
   // reused on a guess about its life would be exactly the claim on someone
-  // else's address this cache is built not to make.
+  // else's address the lease cache is built not to make.
   const struct dhcp* client = stationDhcp();
   _leaseSeconds = client != nullptr ? client->offered_t0_lease : 0;
   if (_ipv4 == 0 || _leaseSeconds == 0) return;

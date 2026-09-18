@@ -26,18 +26,18 @@ constexpr const char* kAudioPath = "/audio";
 // because nothing has yet measured an association that is slow and still
 // succeeds, and shortening it would be a guess in the other direction. See S6
 // in docs/implementation.md.
-constexpr uint32_t kWifiCachedAttemptMs = 3000;
+constexpr uint32_t kWifiCachedApAttemptMs = 3000;
 
-// The whole association budget, the cached attempt included. Past this the
-// question is over and the screen says NO WIFI.
+// The whole association budget, the attempt on the cached AP included. Past
+// this the question is over and the screen says NO WIFI.
 //
 // The 30 s recording cap is the ceiling this sits under: an association that
 // has not happened by then has nowhere to go anyway. It is well short of it
 // because the user is holding a button throughout, and a question that takes
 // longer to send than to ask is a failure whatever the radio thinks.
 //
-// The budget is spent as one cached attempt and then fresh scans of 6 s each,
-// which is 3 + 6 + 6 -- this number exactly. With the network switched off it
+// The budget is spent as one attempt on the cached AP and then fresh scans of
+// 6 s each, which is 3 + 6 + 6 -- this number exactly. With the network switched off it
 // came out at 15005 ms and three attempts, so the arithmetic is real rather
 // than decorative: changing either constant changes how many attempts fit.
 constexpr uint32_t kWifiConnectTimeoutMs = 15000;

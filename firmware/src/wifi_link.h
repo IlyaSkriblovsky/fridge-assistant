@@ -17,16 +17,16 @@
 // the next wake connects to a known radio on a known channel instead of
 // scanning all of them. The vision counts this as load-bearing rather than an
 // optimisation: reconnect time is what the 30 s recording buffer is covering,
-// and every question pays it. The cache survives deep sleep and a reset but not
-// a power cycle, which is the right boundary -- a board that has been off may
-// well be somewhere else.
+// and every question pays it. The AP cache survives deep sleep and a reset but
+// not a power cycle, which is the right boundary -- a board that has been off
+// may well be somewhere else.
 //
-// A cached attempt can be wrong: the AP may have moved channel, or be a
-// different radio of the same network, or be gone. So it is time-boxed to
-// config::kWifiCachedAttemptMs and then the attempt starts again with a plain
-// scan, which is what the firmware would have done without a cache at all. Both
-// halves share one deadline, config::kWifiConnectTimeoutMs, so NO WIFI arrives
-// at a predictable time whichever path it took.
+// An attempt on the cached AP can be wrong: the AP may have moved channel, or
+// be a different radio of the same network, or be gone. So it is time-boxed to
+// config::kWifiCachedApAttemptMs and then the attempt starts again with a plain
+// scan, which is what the firmware would have done without an AP cache at all.
+// Both halves share one deadline, config::kWifiConnectTimeoutMs, so NO WIFI
+// arrives at a predictable time whichever path it took.
 //
 // **The address is cached next to the AP, and it is the larger saving of the
 // two.** The association was never the expensive half: the link comes up in
@@ -92,20 +92,10 @@ class WifiLink {
     uint32_t ageS;     // how long ago it was granted, across however many sleeps
   };
 
-  // What the last successful connect left in RTC memory, for a log line before
-  // the attempt starts. False when there is nothing cached, which is every
-  // cold start.
-  static bool cachedAp(uint8_t bssid[kBssidBytes], uint8_t& channel);
+  // The lease the last successful connect left in RTC memory, for a log line
+  // before the attempt starts. False when there is none, which is every cold
+  // start.
   static bool cachedLease(Lease& lease);
-
-  // Drops the cache, so the next begin() scans. Called for the caller when an
-  // attempt fails outright -- an entry that has just cost a full timeout is
-  // worse than no entry.
-  static void forgetAp();
-
-  // Drops the address, so the next begin() asks for one. renewAddress() calls
-  // it; the orchestrator does not have to.
-  static void forgetLease();
 
   // Starts the association and returns immediately. False means nothing was
   // started: no credentials, which is a build-time mistake rather than a
@@ -121,9 +111,7 @@ class WifiLink {
   // recording with nowhere to go is aborted rather than finished.
   State poll();
 
-  State state() const { return _state; }
   bool online() const { return _state == State::Online; }
-  bool failed() const { return _state == State::Failed; }
 
   // Throws the installed lease away and asks the server for an address, after a
   // question that reached nothing at all. Drops the RTC entry with it, so a
@@ -165,44 +153,44 @@ class WifiLink {
   uint32_t onlineMs() const;
 
   // Whether the attempt that is running, or the one that won, used the cached
-  // AP; and whether there was a cache to try in the first place.
-  bool usedCache() const { return _usedCache; }
-  bool hadCache() const { return _hadCache; }
+  // AP.
+  bool usedCachedAp() const { return _usedCachedAp; }
 
-  // The same two questions about the address. hadLease() is about the entry --
-  // there was one, for this network, whatever its age. usedLease() is about the
-  // address in hand, and goes false again the moment renewAddress() drops it:
-  // it answers "is what this wake is running on a reused address" rather than
-  // "did this wake start with one".
+  // The same question about the address. It is about the address in hand, and
+  // goes false again the moment renewAddress() drops it: it answers "is what
+  // this wake is running on a reused address" rather than "did this wake start
+  // with one".
   bool usedLease() const { return _usedLease; }
-  bool hadLease() const { return _hadLease; }
 
   // The life the server put on the address this wake is running on. Zero after
-  // a DHCP wake whose client never said, which is the one way the cache can
-  // quietly fail to fill -- how old the entry is belongs to cachedLease(),
+  // a DHCP wake whose client never said, which is the one way the lease cache
+  // can quietly fail to fill -- how old the entry is belongs to cachedLease(),
   // which is read before begin() and is where the log line comes from.
   uint32_t leaseSeconds() const { return _leaseSeconds; }
 
   // renewAddress() to the address in hand. Zero until one has been asked for.
   uint32_t renewMs() const { return _renewMs; }
 
-  // How many times WiFi.begin() was called this wake. One is the happy path;
-  // two is the fallback after a cached attempt; more means the library refused
-  // to start an attempt and it was tried again.
-  uint32_t attempts() const { return _attempts; }
-
-  // Meaningful once online(). The BSSID and channel are also what went into the
-  // cache, so a log line from them is a log line about the next wake too.
-  const uint8_t* bssid() const { return _bssid; }
+  // Meaningful once online(). The channel is also what went into the AP cache,
+  // so a log line from it is a log line about the next wake too.
   uint8_t channel() const { return _channel; }
   int8_t rssi() const { return _rssi; }
   uint32_t ipv4() const { return _ipv4; }
   const char* ip() const { return _ip; }
 
  private:
+  // Drops the cached AP, so the next begin() scans. Called when an attempt fails
+  // outright -- an entry that has just cost a full timeout is worse than no
+  // entry.
+  static void forgetAp();
+
+  // Drops the cached lease, so the next begin() asks for an address.
+  // renewAddress() is what calls it.
+  static void forgetLease();
+
   // Calls WiFi.begin(), with the cached AP or without it. Everything that
   // decides *when* to do that is in poll().
-  void startAttempt(bool useCache);
+  void startAttempt(bool useCachedAp);
 
   // The second half of poll(), for the wakes that have thrown a lease away.
   // Separate because it waits on a different witness: the DHCP client's own
@@ -210,8 +198,8 @@ class WifiLink {
   State pollRenew();
 
   // Reads what the association ended up with and writes the AP -- and, when the
-  // address came from the server rather than from the cache, the lease -- to
-  // RTC memory.
+  // address came from the server rather than from the lease cache, the lease --
+  // to RTC memory.
   void recordSuccess();
 
   const char* _ssid = nullptr;
@@ -225,12 +213,10 @@ class WifiLink {
   uint32_t _attemptEndsAtMs = 0;
   uint32_t _retryAtMs = 0;
 
-  bool _hadCache = false;
-  bool _usedCache = false;
+  bool _usedCachedAp = false;
   bool _beginFailed = false;
   uint32_t _attempts = 0;
 
-  bool _hadLease = false;
   bool _usedLease = false;
   uint32_t _leaseSeconds = 0;
 
