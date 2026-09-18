@@ -46,9 +46,13 @@ constexpr uint32_t kWifiConnectTimeoutMs = 15000;
 // 16-bit that is 32 KB/s, so 30 s is 960 KB of PSRAM.
 constexpr uint32_t kMaxRecordSeconds = 30;
 
-// How long to wait for the backend to answer after the upload finishes. The
-// backend runs speech recognition and a language model, so this is seconds, not
-// milliseconds. On expiry the connection is dropped and an error is shown.
+// How long to wait for the backend to answer once the terminating chunk is
+// written. The backend runs speech recognition and a language model, so this is
+// seconds, not milliseconds. On expiry the connection is dropped and an error is
+// shown.
+//
+// It is the backend's thinking time and nothing else: since S11 the body goes up
+// while the button is held, and a 30 s hold must not spend it.
 constexpr uint32_t kResponseTimeoutMs = 30000;
 
 // How long the TCP connection to the backend gets before the device decides
@@ -56,11 +60,26 @@ constexpr uint32_t kResponseTimeoutMs = 30000;
 // a backend that is thinking: one is normal and the other is not.
 //
 // It is also the price of being wrong about the network, which is what makes it
-// a constant of ours rather than HTTPClient's own default. From S7b the failed
+// a constant of ours rather than the HTTP client's own default. From S7b the failed
 // connect is the only thing that can tell a stale cached DHCP lease from a good
 // one, so this number is exactly what the wake that notices costs before it
 // starts DHCP and asks again.
 constexpr uint32_t kBackendConnectTimeoutMs = 5000;
+
+// How long the open connection may go without taking a byte of the body before
+// the device decides the backend has gone. It is a third wait with a third
+// question: the connection answered, so the address works, and a backend that
+// has not started thinking cannot be slow at it.
+//
+// It has to be longer than a stall a working connection recovers from. E7
+// measured those: the device keeps 5744 bytes in flight, a lost ACK stops the
+// window for a retransmission timeout, and the longest stall in 64 uploads was
+// 4243 ms. The slowest first retransmit it saw was 2539 ms, and lwIP doubles
+// the timeout for the next one, so a second loss straight behind that first
+// would come to 7.6 s. This is past both. Under the hold a stall costs the user
+// nothing, so the only price of a long wait is a dead backend noticed that much
+// later.
+constexpr uint32_t kBackendStallTimeoutMs = 10000;
 
 // A press shorter than this is treated as an accidental tap and discarded
 // without contacting the backend.

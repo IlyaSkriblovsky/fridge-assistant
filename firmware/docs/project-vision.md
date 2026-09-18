@@ -23,7 +23,9 @@ It is a personal device, built for one user, powered by battery.
    [E1](experiments.md) and [E3](experiments.md) exist to shrink.
 4. **Connect.** Bring up WiFi concurrently with recording, in a separate task.
    Draw the "Listening" screen whenever the panel gets round to it; it will be
-   late and that is accepted.
+   late and that is accepted. Once the network is up and the press has lasted
+   long enough to count, open the request and stream the recording into it as
+   it is captured.
 5. **Release.** Debounce, then stop capturing.
 6. **Working.** Say that the question was taken and is being answered, twice
    over: a chirp the moment the button comes up, and the word on the panel
@@ -38,7 +40,8 @@ It is a personal device, built for one user, powered by battery.
    answer chirp then marks the end of the wait rather than covering it: it
    sounds when the refresh starts, so it says the answer has arrived and not that
    it is finished being drawn.
-7. **Upload.** POST the recording to the backend as a WAV.
+7. **Upload.** Send what is left of the recording -- the last few chunks,
+   which is milliseconds -- and end the body.
 8. **Answer.** The backend replies with text. Render it on the e-paper.
 9. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
    screen until the next question.
@@ -58,28 +61,32 @@ envelope protocol, pings and reconnect logic -- all for a single request and a
 single response per session. It is not worth it here. `esp_websocket_client` is
 not even shipped with the Arduino framework, so it would be an added dependency.
 
-**Now:** POST the whole recording once the button is released. Simplest thing
-that proves the chain end to end. Latency cost is the utterance duration plus
-the upload, paid before the backend sees anything.
+One POST with `Transfer-Encoding: chunked`. The request opens while the button
+is held, the body streams as audio is captured, and the terminating chunk *is*
+the "transmission over" signal, so there is no separate protocol and the
+response body is just the answer. What the user waits for after the release is
+the last few chunks and the backend: the answer chirp sounds 115 to 154 ms after
+the release whatever the hold, 60 of them the taken chirp, against the
+prototype backend that answers a fixed phrase
+([S11](implementation.md#s11----streaming-upload)). Until S11 the whole
+recording went up after the release, and the upload was the largest term the
+device controlled -- 2.9 s for 400 KB, with a retransmission timeout in one
+upload in four ([E7](experiments.md)).
 
-**Later:** the same POST with `Transfer-Encoding: chunked` -- [D4](deferred.md).
-The request opens on button press, the body streams as audio is captured, and
-the terminating chunk *is* the "transmission over" signal, so there is still no
-separate protocol and the response body is still just the answer.
-
-Worth knowing now, because it shapes where the code goes: `esp_http_client`
-supports chunked request bodies (`esp_http_client_open()` with a negative
-length) and is available from the Arduino framework, while Arduino's own
-`HTTPClient` only sends bodies of known length. Servers and proxies also tend to
-buffer a whole chunked request body before handing it to the application, which
-turns streaming silently back into a plain POST; since the backend is ours, that
-is a configuration matter (in nginx, `proxy_request_buffering off`).
+`esp_http_client` is what sends it, from the IDF underneath Arduino: it opens a
+chunked body with `esp_http_client_open()` and a negative length, and leaves the
+chunk framing to the caller. Arduino's own `HTTPClient` sends only bodies of
+known length. Servers and proxies also tend to buffer a whole chunked request
+body before handing it to the application, which turns streaming silently back
+into a plain POST; since the backend is ours, that is a configuration matter (in
+nginx, `proxy_request_buffering off`).
 
 ### The request contract
 
 ```
 POST {config::kBackendBaseUrl}{config::kAudioPath}      ->  POST /audio
 Content-Type: audio/wav
+Transfer-Encoding: chunked
 
 <WAV: PCM, 16 kHz, mono, signed 16-bit little-endian>
 ```
@@ -87,6 +94,29 @@ Content-Type: audio/wav
 Sample rate and format travel in the WAV header rather than in custom headers,
 so the body is self-describing and can be saved and played back as a file on the
 backend side.
+
+**The header says `0xFFFFFFFF` in both of its length fields**, because it goes
+up before the recording has a length. The transport carries the length instead:
+the terminating chunk is where the body ends, so the backend takes the length
+from there and rewrites or strips the header as it needs -- the prototype
+rewrites both fields, so the file it keeps is an ordinary WAV. `0xFFFFFFFF`
+rather than zero because Python's `wave`, which the prototype reads its uploads
+with, takes the first as a file of unknown length and reads every sample in it,
+and refuses the second outright as `not a WAVE file` -- checked with a
+one-second tone, both ways.
+
+Raw PCM with the format in request headers was the other way, and it buys
+nothing. The header would only move to the backend, which needs the format
+either way -- to save a file that plays now, and to hand the audio on later --
+and there is no standard type for little-endian PCM to carry it in:
+`audio/L16` is big-endian by RFC 2586. So it would mean swapping a megabyte on
+the device or headers of our own, and the second is the bespoke protocol the
+transport decision above exists to avoid.
+
+A stream that dies mid-question leaves the backend a truncated body. The
+prototype keeps it, with its lengths filled in from what arrived; the real
+backend will forward the stream to an external API rather than keep
+recordings, so nothing has to be done about it.
 
 The request carries no credentials -- [D8](deferred.md). The backend is on the
 LAN and answers anyone who can reach it, which is the same trust boundary the
@@ -121,8 +151,15 @@ a write pointer overtaking a drain pointer.
 the cap whether or not the button is still held.
 
 The buffer holds raw signed 16-bit little-endian PCM and is sent as a WAV. The
-44-byte header should be reserved at the front of the allocation and filled in
-once the length is known, so that sending never copies a megabyte to prepend it.
+44-byte header is at the front of the allocation, written when the buffer is,
+so that sending never copies a megabyte to prepend it; it declares no length
+(the request contract above has why), so it never has to be written again.
+
+The buffer is written by the capture task and read by the upload at the same
+time. The capture task publishes how much of it has landed, with the ordering
+that makes everything below the count safe to read, and samples never move
+once they have landed -- so the count is all the two share, and the capture
+task never waits for the reader.
 
 ### Power: deep sleep
 
@@ -217,9 +254,12 @@ The third task came before the streaming upload rather than with it.
 user waited through after the release -- the rest of the Listening refresh on a
 short question, the working screen on every one -- and none of it needed the
 orchestrator's thread; [S10](implementation.md#s10----display-task) took it
-off, and the wait became the round trip. [D4](deferred.md)'s streaming upload
-runs on the orchestrator, which now has nothing else to do while the button is
-held.
+off, and the wait became the round trip. The streaming upload that
+[S11](implementation.md#s11----streaming-upload) then took off the round trip
+runs on the orchestrator, which had nothing else to do while the button is
+held. Its writes block that thread, through a stall if there is one, and that
+is allowed: the release is timed by the capture task, and the buffer is linear,
+so there is nothing for a late write to overrun.
 
 ### Buttons
 
@@ -415,7 +455,9 @@ Every failure does the same three things: chirp, draw the message, sleep.
 A network failure during recording aborts immediately rather than letting the
 user finish talking into a recording that has nowhere to go. It costs an
 interrupted sentence, but the alternative is a long silence followed by the same
-error.
+error. Since the upload streams under the hold, the backend can fail there too
+-- a connection refused, a stream that dies -- and it is the same failure on
+the same terms: the error screen comes while the button is still down.
 
 If the display itself fails to initialise there is nothing to draw on; that case
 chirps, logs to Serial1 and sleeps.

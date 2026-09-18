@@ -12,6 +12,7 @@ void StickyButton::begin(int64_t pressStartUs) {
   _highSinceUs = 0;
   _heldUs = 0;
   _released = false;
+  _pastMinimumHold = false;
 
   // ext1 leaves GPIO4 as an RTC pad, and while it is one the digital
   // peripheral reads nothing: gpio_get_level() would report a level the pin is
@@ -31,8 +32,14 @@ bool StickyButton::poll() {
   if (isDown()) {
     // Any low restarts the window, so a bounce mid-release does not end the
     // press. This is also what makes a press that is still held cost a single
-    // register read per call.
+    // register read per call -- and a clock read as well, until the minimum
+    // hold has been seen.
     _highSinceUs = 0;
+    if (!_pastMinimumHold &&
+        esp_timer_get_time() - _pressStartUs >=
+            static_cast<int64_t>(config::kButtonMinHoldMs) * 1000) {
+      _pastMinimumHold = true;
+    }
     return false;
   }
 

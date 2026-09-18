@@ -375,6 +375,20 @@ and must not be counted inside the measurement.
 the first. Since every question starts from deep sleep, only the cold number
 matters unless the session ticket is cached in RTC memory.
 
+**Since [S11](implementation.md#s11----streaming-upload) the handshake is not in
+the wait on most questions.** The request opens while the button is held -- at
+about 400 ms into the wake on a cached lease -- so the handshake is paid under
+the hold, where the user is still talking, and what the scheme can still add to
+the wait after the release is the encryption of the last few chunks and of the
+answer. The handshake reaches the wait only when the release comes before the
+request could open: a question shorter than the network, or one whose stale
+lease is being renewed. So the comparison wants three numbers rather than one:
+the handshake itself (`Backend::connectedUs()` against `openUs()`), the tail
+after the release, and the heap. The first-byte time is the wrong instrument
+for now -- the firmware reads the answer after the taken chirp, so a backend
+that answers within 60 ms reads as 62 ms whatever the scheme; see
+`Backend::firstByteUs()`.
+
 ## E3 -- Microphone settle window
 
 **Why.** `StickyMic::begin()` discards 200 ms of audio so the MEMS element and
@@ -888,6 +902,15 @@ capture running during a session that reproduces it.
   where the user is already waiting. That is the strongest argument the deferral
   has, and it scales the right way for once: a long question has more bursts and
   so more chances to stall, and a long question is the one with room to stream.
+
+  *Taken at [S11](implementation.md#s11----streaming-upload), 2026-09-18, and
+  the stalls did more than move.* 2.5 MB went up in fifteen streamed requests
+  and no single write took longer than 316 ms. At the rate above -- 17 uploads
+  in 64 paying a timeout of a second or more -- that much body would have paid
+  about five. The likely reason is the shape of the stream rather than the
+  network: a chunk goes out every 10 to 16 ms, so a lost ACK has a later one
+  behind it long before a retransmission timeout comes round, which is exactly
+  what the 5744-byte bursts above never had. No capture was taken to prove it.
 - **[E2](#e2----https-overhead) can be taken now,** but only against the clean
   column. HTTP does not vary by a factor of ten by itself; it varies by a factor
   of ten one time in four, for a reason that has nothing to do with the scheme.

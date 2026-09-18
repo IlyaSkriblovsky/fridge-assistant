@@ -40,7 +40,7 @@ bool Recording::begin(uint32_t sampleRate, uint32_t maxSeconds) {
   const uint32_t capacity = sampleRate * maxSeconds;
   if (_buffer != nullptr) {
     if (capacity == _capacity && sampleRate == _sampleRate) {
-      _samples = 0;
+      _samples.store(0, std::memory_order_relaxed);
       return true;
     }
     end();
@@ -55,8 +55,9 @@ bool Recording::begin(uint32_t sampleRate, uint32_t maxSeconds) {
 
   _capacity = capacity;
   _sampleRate = sampleRate;
-  _samples = 0;
+  _samples.store(0, std::memory_order_relaxed);
   _lastError = "";
+  writeHeader();
   return true;
 }
 
@@ -66,51 +67,53 @@ void Recording::end() {
     _buffer = nullptr;
   }
   _capacity = 0;
-  _samples = 0;
+  _samples.store(0, std::memory_order_relaxed);
   _sampleRate = 0;
 }
 
+// The writer is the only task that stores to the count, so its own loads can be
+// relaxed: nobody else moves it between the load and the store. The store is the
+// release that the readers' acquire pairs with.
 int16_t* Recording::writeHead() {
   if (_buffer == nullptr) return nullptr;
-  return reinterpret_cast<int16_t*>(_buffer + kHeaderBytes) + _samples;
+  return reinterpret_cast<int16_t*>(_buffer + kHeaderBytes) +
+         _samples.load(std::memory_order_relaxed);
 }
 
 uint32_t Recording::nextChunkSamples() const {
   if (_buffer == nullptr) return 0;
-  const uint32_t room = _capacity - _samples;
+  const uint32_t room = _capacity - _samples.load(std::memory_order_relaxed);
   return room < kChunkSamples ? room : kChunkSamples;
 }
 
 void Recording::commit(uint32_t samples) {
   if (_buffer == nullptr) return;
-  const uint32_t room = _capacity - _samples;
-  _samples += samples < room ? samples : room;
+  const uint32_t now = _samples.load(std::memory_order_relaxed);
+  const uint32_t room = _capacity - now;
+  _samples.store(now + (samples < room ? samples : room), std::memory_order_release);
 }
 
 uint32_t Recording::recordedMs() const {
   if (_sampleRate == 0) return 0;
-  return static_cast<uint32_t>(static_cast<uint64_t>(_samples) * 1000 / _sampleRate);
+  return static_cast<uint32_t>(static_cast<uint64_t>(committed()) * 1000 / _sampleRate);
 }
 
-const int16_t* Recording::samples() const {
-  if (_buffer == nullptr) return nullptr;
-  return reinterpret_cast<const int16_t*>(_buffer + kHeaderBytes);
-}
-
-const uint8_t* Recording::wav() {
-  if (_buffer == nullptr) return nullptr;
-
+void Recording::writeHeader() {
   // Mono 16-bit, which is what the PDM path delivers and what the vision's
   // request contract promises the backend.
   constexpr uint16_t kChannels = 1;
   constexpr uint16_t kBitsPerSample = 16;
   constexpr uint16_t kBlockAlign = kChannels * kBitsPerSample / 8;
 
-  const uint32_t dataBytes = static_cast<uint32_t>(recordedBytes());
+  // A length the header cannot know, in the form readers take as "until the
+  // end of the file" -- Python's wave reads every sample behind it, and refuses
+  // a zero outright (the vision's request contract). The backend rewrites both
+  // once the stream is in.
+  constexpr uint32_t kUnknownLength = 0xFFFFFFFF;
 
   HeaderWriter w{_buffer};
   w.tag("RIFF");
-  w.u32(36 + dataBytes);  // everything in the file after this field
+  w.u32(kUnknownLength);  // everything in the file after this field
   w.tag("WAVE");
   w.tag("fmt ");
   w.u32(16);              // fmt chunk body length: 16 for plain PCM
@@ -121,7 +124,5 @@ const uint8_t* Recording::wav() {
   w.u16(kBlockAlign);
   w.u16(kBitsPerSample);
   w.tag("data");
-  w.u32(dataBytes);
-
-  return _buffer;
+  w.u32(kUnknownLength);
 }

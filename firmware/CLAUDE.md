@@ -23,7 +23,7 @@ the hardware traps.
 | `src/capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
 | `src/display.h/.cpp` | The display task: owns the screen, draws what the orchestrator posts, off its thread |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
-| `src/backend.h/.cpp` | The round trip: the recording up as a POST, the answer back as JSON |
+| `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
 | `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
@@ -88,6 +88,15 @@ their process.
   running. `WifiLink::linkMs()` and `onlineMs()` are timestamps from the WiFi
   task for that reason; `elapsedMs()` is deliberately the polling thread's own
   view. Time anything else that happens off this thread the same way.
+  `Backend::firstByteUs()` is the same trap from the other side: it is read
+  after the taken chirp, so a backend quicker than 60 ms reads as the chirp.
+- **The request opens on `Capture::pastMinimumHold()`, not on the clock.** A
+  release is confirmed a debounce window after it happens, so the clock says
+  "past the minimum hold" about taps that are already over, and a tap must
+  reach nothing.
+- **Only the capture task commits to `Recording`.** The upload reads the buffer
+  while it grows; the published count is the one thing the two share, and it is
+  what makes that safe without a lock.
 - **`WiFi.persistent(false)` goes before `WiFi.mode()`.** Arduino's default
   storage is FLASH, so a mode set before that call goes through NVS and costs
   1.6 s on every wake -- measured in [E6](docs/experiments.md). `WifiLink`

@@ -61,6 +61,14 @@ class StickyButton {
   // enough yet.
   bool isTap() const;
 
+  // True once poll() has seen the line down at config::kButtonMinHoldMs or
+  // later, which is the moment a press stops being able to turn out to be a
+  // tap: whenever the release comes, it comes after that. Before the release is
+  // known this is the only safe answer, and the clock is not one -- the line
+  // may have gone high a debounce window ago without poll() having said so yet.
+  // Latches, like the release.
+  bool pastMinimumHold() const { return _pastMinimumHold; }
+
   // The raw level, with no debouncing -- true while the contact is closed.
   bool isDown() const;
 
@@ -69,4 +77,5 @@ class StickyButton {
   int64_t _highSinceUs = 0;  // when the line first went high, 0 while it is low
   int64_t _heldUs = 0;
   bool _released = false;
+  bool _pastMinimumHold = false;
 };

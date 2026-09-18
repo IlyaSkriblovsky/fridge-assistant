@@ -3,29 +3,49 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The question, as one HTTP round trip: the recording goes up, the answer comes
-// back.
+// esp_http_client.h stays in the .cpp; this is its handle type.
+struct esp_http_client;
+
+// The question, as one HTTP request that opens while the button is still held:
+// the recording goes up as it is made, the answer comes back.
 //
 // The contract is the vision's and it is deliberately small --
 //
 //     POST {config::kBackendBaseUrl}{config::kAudioPath}
 //     Content-Type: audio/wav
+//     Transfer-Encoding: chunked
 //     <WAV: PCM, 16 kHz, mono, signed 16-bit little-endian>
 //
 //     200 OK
 //     {"response": "..."}
 //
 // -- so the body is a file the backend can save and play back, with the sample
-// rate and the format in the WAV header rather than in headers of our own. It
-// carries no credentials (D8) and goes over plain HTTP (D5).
+// rate and the format in the WAV header rather than in headers of our own. The
+// header's two length fields say 0xFFFFFFFF, because it goes up before the
+// recording has a length; the terminating chunk is where the body ends, and the
+// backend takes the length from there. It carries no credentials (D8) and goes
+// over plain HTTP (D5).
 //
-// **The body is sent from PSRAM by pointer and length.** Recording reserved
-// the 44 header bytes at the front of its allocation, so what goes on the wire
-// is that allocation itself and nothing copies a megabyte. It is also why
-// Arduino's own HTTPClient is enough here: it can send a body only when the
-// length is known in advance, which is exactly the body this step has. D4 --
-// the streaming upload that opens the request on the press -- is the day that
-// stops being true and esp_http_client takes over.
+// **The request is four calls, because since S11 the body is a stream:**
+// open() while the button is held, write() as the capture task commits, end()
+// once it has stopped, receive() for the answer. The orchestrator's thread makes
+// all four, and every one of them blocks it -- which is allowed here because
+// nothing else on that thread has a deadline: the release is timed by the
+// capture task, and the buffer is linear, so a write that sits through one of
+// E7's stalls has nothing to overrun.
+//
+// **esp_http_client, not Arduino's HTTPClient**, which sends only bodies whose
+// length it knows. esp_http_client_open() with a negative length announces a
+// chunked body and then leaves the chunks to the caller: esp_http_client_write()
+// puts bytes on the socket exactly as given, framing included, so the framing
+// is written here.
+//
+// **Each chunk leaves as one write**, framed in a small buffer: the size line,
+// up to kFrameBytes of samples, the CRLF. Three writes would do the same job
+// with the samples straight from PSRAM, but the socket has Nagle's algorithm
+// switched off -- the terminating chunk must not wait for the backend to get
+// round to acknowledging the chunk before it -- and with nothing coalescing
+// them each of the three would be a packet of its own.
 //
 // **Everything that can go wrong is four screens**, which is the upload half of
 // the vision's error table. The distinctions are the ones the user can act on:
@@ -34,17 +54,12 @@
 // RESPONSE), and something that took the question and never came back (TIMED
 // OUT). Anything finer belongs in the log, which is what lastError() is for --
 // the same division WifiLink draws between NO WIFI and its own strings.
-//
-// **ask() blocks for the whole round trip**, up to config::kResponseTimeoutMs,
-// and that is allowed here and nowhere else in the firmware: by the time it is
-// called the button is up, the recording is over and the capture task has been
-// joined, so there is nothing left for this thread to be late for.
 class Backend {
  public:
-  // How the round trip ended. The orchestrator turns these into the vision's
-  // screens; nothing here knows what they are called.
+  // How a call ended. The orchestrator turns these into the vision's screens;
+  // nothing here knows what they are called.
   enum class Result : uint8_t {
-    Ok,           // answer() holds the text
+    Ok,           // so far, or answer() holds the text
     NoServer,     // nothing accepted a connection, or one died mid-request
     ServerError,  // answered, but not with 200 -- status() has the code
     BadResponse,  // 200, and a body that is not {"response": "..."}
@@ -63,45 +78,112 @@ class Backend {
   static constexpr size_t kMaxUrlChars = 96;
 
   // A reply longer than this is not an answer. Without a ceiling a backend that
-  // went wrong could have the device read and parse a megabyte on the heap, for
-  // a string the panel cuts at 128 characters.
-  static constexpr size_t kMaxBodyBytes = 4096;
+  // went wrong could have the device read and parse a megabyte, for a string
+  // the panel cuts at 128 characters. The reply is read into a buffer of this
+  // size that lives in the object, so there is no allocation to fail.
+  static constexpr size_t kMaxReplyBytes = 4096;
 
-  // The question. Returns how it ended; everything below narrows that down.
-  Result ask(const uint8_t* wav, size_t bytes);
+  // The most samples one chunk carries. Under the hold a chunk is whatever the
+  // capture task committed since the last poll, 512 bytes most of the time, so
+  // this only bounds the backlog -- the audio recorded before the request
+  // opened, or during a stall -- and the buffer it is framed in.
+  static constexpr size_t kFrameBytes = 2048;
+
+  ~Backend();
+
+  // Connects and sends the request line and headers, within
+  // config::kBackendConnectTimeoutMs. True means the request is open and
+  // write() may follow. On false the connection is gone and result(),
+  // unreachable() and lastError() say how.
+  //
+  // Opening again drops whatever request was open and starts a new one from
+  // byte zero -- which is what a retry is, now that it can happen while the user
+  // is still talking.
+  bool open();
 
   // The same, somewhere else: the seam that provokes each row of the vision's
   // error table -- a closed port, an address nothing answers at, a backend that
-  // returns 500 -- without a rebuild between rows. Nothing in the firmware calls
-  // it. S7's driver did, and S11 needs it again: the four results get mapped
-  // onto esp_http_client there, and each row has to be walked once more.
-  Result ask(const char* url, const uint8_t* wav, size_t bytes);
+  // returns 500 -- without editing the endpoint. Nothing in the firmware calls
+  // it.
+  bool open(const char* url);
 
-  // Meaningful after Ok. Always a valid string: empty before the first ask().
+  // Sends `bytes` of the body as chunks, blocking until the socket has taken
+  // them. A connection that takes nothing for config::kBackendStallTimeoutMs has
+  // failed. On false the connection is gone and result() says how.
+  bool write(const uint8_t* data, size_t bytes);
+
+  // The terminating chunk: the body is over. From here the backend has
+  // config::kResponseTimeoutMs to answer.
+  bool end();
+
+  // Waits for the answer and reads it. Returns how the question ended; after
+  // Ok, answer() holds the text. The connection is closed either way.
+  Result receive();
+
+  // Drops the connection, whatever state it is in. Safe to call at any time,
+  // and the last thing that happens to a request that failed.
+  void close();
+
+  // A request is open and taking body bytes: open() has succeeded, and neither
+  // end() nor a failure has happened since.
+  bool streaming() const { return _client != nullptr && !_ended; }
+
+  // How the last call ended. Ok until something fails, and the answer's own
+  // result once receive() has run.
+  Result result() const { return _result; }
+
+  // Meaningful after Ok. Always a valid string: empty before the first answer.
   const char* answer() const { return _answer; }
 
   // The HTTP status, once there was one. Zero when the request never got that
   // far, which is every NoServer and every TimedOut.
   int status() const { return _status; }
 
-  // True when the round trip ended because nothing at all answered at the
-  // address -- a connect that ran out of its own budget rather than one that
-  // was refused. It is the one distinction inside NoServer that the device can
-  // act on, and S7b is what acts on it: a refusal proves something is at the
-  // address and therefore that the address works, while silence is also the
-  // shape of a cached DHCP lease that has outlived its network. HTTPClient
-  // reports both as "connection refused", so the clock is what separates them.
+  // True when open() failed because nothing at all answered at the address --
+  // a connect that ran out of its own budget rather than one that was refused.
+  // It is the one distinction inside NoServer that the device can act on, and
+  // S7b is what acts on it: a refusal proves something is at the address and
+  // therefore that the address works, while silence is also the shape of a
+  // cached DHCP lease that has outlived its network. esp-tls reports the two
+  // apart, which HTTPClient never did.
   bool unreachable() const { return _unreachable; }
 
-  // What the reply weighed, for the log.
-  size_t bodyBytes() const { return _bodyBytes; }
+  // What went up in this request, counted without the framing: the number the
+  // backend's own byte count should match. Zero again on every open(), which
+  // is what makes it the offset the next write() continues from.
+  size_t sentBytes() const { return _sentBytes; }
 
-  // ask() to the answer in hand, and ask() to the first byte of the response.
-  // The gap between them is the body, which for this contract is nothing; the
-  // second number is the upload plus whatever the backend spent thinking, and
-  // it is the one E2 compares between http:// and https://.
-  uint32_t elapsedMs() const { return _elapsedMs; }
-  uint32_t firstByteMs() const { return _firstByteMs; }
+  // The chunks that carried it, and the longest single write of one -- which is
+  // where one of E7's stalls shows, if the request had one -- with the moment
+  // that write started.
+  uint32_t frames() const { return _frames; }
+  uint32_t longestWriteUs() const { return _longestWriteUs; }
+  int64_t longestWriteAtUs() const { return _longestWriteAtUs; }
+
+  // What the reply weighed, for the log.
+  size_t replyBytes() const { return _replyBytes; }
+
+  // The request's own timeline, in esp_timer_get_time() microseconds, so it
+  // shares an axis with the hold and the panel. Zero until each happens. After a
+  // retry they are the retry's: the request that carried the question.
+  //
+  //   openUs       open() called
+  //   connectedUs  connected, the headers sent
+  //   endUs        the terminating chunk written -- the body is over
+  //   firstByteUs  the response's headers in
+  //   doneUs       the answer read, or the failure known
+  //
+  // firstByteUs is when this thread read the headers, and the orchestrator
+  // comes to receive() only after the taken chirp: an answer that arrives inside
+  // the chirp's 60 ms reads as the chirp, which is exactly what the prototype
+  // backend's does (S11). So firstByteUs - endUs is the backend's own time only
+  // once the backend is slower than a chirp -- as one with a model behind it
+  // will be, and as E2 will need.
+  int64_t openUs() const { return _openUs; }
+  int64_t connectedUs() const { return _connectedUs; }
+  int64_t endUs() const { return _endUs; }
+  int64_t firstByteUs() const { return _firstByteUs; }
+  int64_t doneUs() const { return _doneUs; }
 
   // Why it ended that way, for Serial1. The screen gets one of four titles
   // instead; this is the string that says which of the ways it was.
@@ -112,16 +194,38 @@ class Backend {
   // it.
   static void endpoint(char* out, size_t size);
 
-  // One exit, so no path can return without stopping the clock.
+  // One exit for every ending, the answer's and every failure's: stops the
+  // clock, records how, and closes the connection. So a request that failed is
+  // never left open, and receive() closes whichever way it went.
   Result finish(Result result, const char* format, ...);
 
-  int64_t _startUs = 0;
-  uint32_t _elapsedMs = 0;
-  uint32_t _firstByteMs = 0;
+  // Puts `bytes` on the socket, all of them or a failure. Times the write.
+  bool send(const uint8_t* data, size_t bytes);
+
+  esp_http_client* _client = nullptr;
+  bool _ended = false;
+  Result _result = Result::Ok;
+
+  int64_t _openUs = 0;
+  int64_t _connectedUs = 0;
+  int64_t _endUs = 0;
+  int64_t _firstByteUs = 0;
+  int64_t _doneUs = 0;
+
+  size_t _sentBytes = 0;
+  uint32_t _frames = 0;
+  uint32_t _longestWriteUs = 0;
+  int64_t _longestWriteAtUs = 0;
+
   int _status = 0;
-  size_t _bodyBytes = 0;
+  size_t _replyBytes = 0;
   bool _unreachable = false;
 
+  // The size line, the samples and the CRLF of one chunk.
+  uint8_t _frame[kFrameBytes + 16];
+  // The reply, and its terminator for the parser.
+  char _reply[kMaxReplyBytes + 1];
+
   char _answer[kMaxAnswerChars] = {0};
-  char _error[80] = {0};
+  char _error[96] = {0};
 };

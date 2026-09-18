@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <atomic>
+
 class Recording;
 class StickyButton;
 class StickyMic;
@@ -29,12 +31,16 @@ class StickyMic;
 // inside the 40 ms release debounce, so the release is seen 40-56 ms after the
 // line goes high and not later.
 //
-// Ownership is handed over rather than shared, so nothing here is locked. From
-// start() until the task reports finished(), the microphone, the buffer and the
-// button belong to the task and the orchestrator must not touch them; after
-// that they are the orchestrator's again. The two flags that cross the boundary
-// while the task runs are the abort request going in and the finish coming out,
-// and both go through primitives that carry the barriers with them.
+// **The microphone and the button are handed over; the buffer is shared.**
+// From start() until the task reports finished(), the microphone and the button
+// belong to the task and the orchestrator must not touch them; after that they
+// are the orchestrator's again. The buffer is written by the task and read by
+// the orchestrator at the same time, from S11 on, because the upload streams
+// the recording while it is still being made -- Recording's committed count is
+// what makes that safe without a lock, and recording.h has how. Three flags
+// cross the boundary while the task runs, and each goes through a primitive
+// that carries the barrier with it: the abort request going in, and the
+// minimum hold and the finish coming out.
 //
 // Nothing in the task prints. Serial1 is the orchestrator's, and a line of log
 // at 115200 is a millisecond that the reads do not have to spare.
@@ -61,7 +67,7 @@ class Capture {
     None,        // still running, or never started
     Released,    // the button came back up and stayed up
     Full,        // the 30 s cap
-    Aborted,     // the orchestrator called abort(): WiFi went away
+    Aborted,     // the orchestrator called abort(): WiFi or the backend went away
     ReadFailed,  // the microphone stopped delivering
   };
 
@@ -80,12 +86,18 @@ class Capture {
   // failure during recording aborts rather than letting the user finish talking
   // into a recording that has nowhere to go". The task notices between two
   // reads, so the recording ends within a chunk. Wait for finished() before
-  // touching the buffer.
+  // touching the microphone or the button.
   void abort();
 
   // Non-blocking: true once the task is over and everything it wrote is the
   // caller's to read. Latches, so it keeps returning true.
   bool finished();
+
+  // Non-blocking: true once the press can no longer turn out to be a tap --
+  // StickyButton::pastMinimumHold(), published by the task that owns the
+  // button. It is what the upload waits for before it opens a request, because
+  // a tap has to reach nothing. Latches.
+  bool pastMinimumHold() const { return _pastMinimumHold.load(std::memory_order_acquire); }
 
   // finished(), but blocking up to timeoutMs. Returns false on the timeout,
   // which means the task is still running.
@@ -133,6 +145,7 @@ class Capture {
   TaskHandle_t _task = nullptr;
   SemaphoreHandle_t _done = nullptr;
   volatile bool _abort = false;
+  std::atomic<bool> _pastMinimumHold{false};
   bool _joined = false;
 
   StopReason _stopReason = StopReason::None;

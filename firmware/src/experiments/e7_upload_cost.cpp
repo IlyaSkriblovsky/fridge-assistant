@@ -36,6 +36,9 @@
 //                  upload 4 goes through Backend, unchanged. It anchors the
 //                  rig's four clocks to the one number S7 reported, so the
 //                  finding transfers to the firmware rather than to the rig.
+//                  Backend has been a chunked esp_http_client request since
+//                  S11, where the result in docs/experiments.md went through
+//                  HTTPClient; the payload goes up as a body of one write.
 //
 // **The connects that never arrive are the other half of the question.** Four of
 // S7's questions could not open a connection to a backend that was running and
@@ -342,9 +345,12 @@ Row postViaFirmware(const uint8_t* body, size_t bytes) {
   row.rssi = static_cast<int8_t>(WiFi.RSSI());
   g_chunkCount = 0;
 
-  const Backend::Result result = backend.ask(body, bytes);
-  row.totalMs = static_cast<uint16_t>(backend.elapsedMs());
-  row.waitMs = static_cast<uint16_t>(backend.firstByteMs());
+  const bool sent = backend.open() && backend.write(body, bytes) && backend.end();
+  const Backend::Result result = sent ? backend.receive() : backend.result();
+  row.totalMs = static_cast<uint16_t>((backend.doneUs() - backend.openUs()) / 1000);
+  if (backend.firstByteUs() != 0) {
+    row.waitMs = static_cast<uint16_t>((backend.firstByteUs() - backend.openUs()) / 1000);
+  }
   row.status = static_cast<uint16_t>(backend.status());
 
   switch (result) {

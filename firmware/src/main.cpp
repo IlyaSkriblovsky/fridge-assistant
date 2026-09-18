@@ -1,7 +1,8 @@
-// S8 -- The flow, with S10's display task under it. The orchestrator: wake,
-// latch, microphone, capture task, ready chirp, WiFi and the Listening screen,
-// release, taken chirp, the working screen, upload, answer or error chirp,
-// draw, deep sleep.
+// S8 -- The flow, with S10's display task and S11's streaming upload under it.
+// The orchestrator: wake, latch, microphone, capture task, ready chirp, WiFi and
+// the Listening screen, the request opened and the recording streamed into it
+// while the button is held, release, the tail of the body, taken chirp, answer
+// or error chirp, draw, deep sleep.
 //
 // **The order at the front is load-bearing and measured.** Capture starts
 // before the chirp, because the chirp means "the microphone is live" and a
@@ -29,6 +30,15 @@
 //    the user reads while waiting, and a full refresh would put the answer
 //    2.4 s behind it on the panel's own queue.
 //
+// **The upload goes up under the hold** -- D4, taken at S11. The request opens
+// once the press can no longer turn out to be a tap and the network is up,
+// whichever is later, and every pass of the loop that watches the recording
+// sends what the capture task has committed since the last one. What is left
+// after the release is the last few chunks of audio, the terminating chunk and
+// the backend's answer. A request that fails while the user is still talking
+// ends the question there and then, for the reason the vision gives a WiFi
+// drop: a recording with nowhere to go is abandoned rather than finished.
+//
 // **Nothing prints between the release and the last chirp** unless the
 // question has already failed. Serial1 at 115200 is a millisecond for every
 // eleven characters and blocks once the UART's FIFO is full, and that wait is
@@ -39,10 +49,10 @@
 // discarded tap included, and there is exactly one of them: finish().
 //
 // Two things came across from the S7b driver rather than dying with it. The
-// stale-lease rule is askRenewingStaleLease() below -- ask again, then drop the
-// lease, take an address and ask once more -- and it lives here because it
-// spans Backend and WifiLink and neither half can see it alone. The pre-clear
-// branch on stickyPower::wokeFromDeepSleep() is the other.
+// stale-lease rule is openRenewingStaleLease() below -- connect again, then drop
+// the lease, take an address and connect once more -- and it lives here because
+// it spans Backend and WifiLink and neither half can see it alone. The
+// pre-clear branch on stickyPower::wokeFromDeepSleep() is the other.
 
 #include <Arduino.h>
 #include <esp_timer.h>
@@ -68,7 +78,9 @@ constexpr int kPinLogTx = 43;
 
 // How often the association and the capture task are looked at while the button
 // is held. Small, because it is also the resolution of WifiLink::elapsedMs() --
-// and, since S10, how late this thread can be to a release.
+// and, since S10, how late this thread can be to a release. Since S11 it is also
+// what a chunk of the body carries: whatever the capture task committed in one
+// pass, which is a 16 ms read or two.
 constexpr uint32_t kPollMs = 10;
 
 // A press held through the log would wake the board again the moment it goes to
@@ -131,10 +143,14 @@ int64_t g_beginUs = 0;
 int64_t g_lastChirpUs = 0;
 
 // What this thread spent after the release, in the order it spent it. Kept
-// apart so the log can say what the wait was made of.
+// apart so the log can say what the wait was made of. The tail is everything it
+// took to get the rest of the body up -- the last chunks and the terminating
+// one, or on a question whose request could not open before the release, the
+// connect and the whole body. The answer is the time spent inside receive().
+uint32_t g_tailMs = 0;
 uint32_t g_takenChirpMs = 0;
 uint32_t g_networkWaitMs = 0;
-uint32_t g_roundTripMs = 0;
+uint32_t g_answerWaitMs = 0;
 
 // Display::start(), which brings the panel up on this thread. S10 settled that
 // it stays here rather than on the task, and this is the number that says so.
@@ -224,8 +240,8 @@ void logScreen(const char* name, Display::Screen which) {
 // What the question cost the user, which is the release to the last chirp --
 // the refresh after it is time the panel is readable through, not time spent
 // waiting. Printed as its parts because each of them belongs to a different
-// decision: the confirmation to the debounce and the poll, the network to S7b,
-// the round trip to E7 and D4.
+// decision: the confirmation to the debounce and the poll, the tail to S11, the
+// network to S7b, the answer to the backend and E2.
 //
 // **The parts are the chain and not the calendar.** Everything here is time
 // this thread spent in one thing after the release, in the order it spent it,
@@ -244,16 +260,17 @@ void logTiming(Outcome outcome, bool panelIdle) {
   const bool answered = outcome == Outcome::Answered;
   const uint32_t toChirpMs = millisBetween(g_releaseUs, g_lastChirpUs);
   const uint32_t confirmMs = millisBetween(g_releaseUs, g_releaseSeenUs);
-  const uint32_t partsMs = confirmMs + g_takenChirpMs + g_networkWaitMs + g_roundTripMs;
+  const uint32_t partsMs =
+      confirmMs + g_tailMs + g_takenChirpMs + g_networkWaitMs + g_answerWaitMs;
 
   Serial1.printf("  release to the %s chirp: %lu ms -- %lu ms for the release to be confirmed,"
-                 " %lu ms taken chirp, %lu ms waiting for the network, %lu ms round trip, %lu ms"
-                 " else\n",
+                 " %lu ms of tail, %lu ms taken chirp, %lu ms waiting for the network, %lu ms"
+                 " waiting for the answer, %lu ms else\n",
                  answered ? "answer" : "error", static_cast<unsigned long>(toChirpMs),
-                 static_cast<unsigned long>(confirmMs),
+                 static_cast<unsigned long>(confirmMs), static_cast<unsigned long>(g_tailMs),
                  static_cast<unsigned long>(g_takenChirpMs),
                  static_cast<unsigned long>(g_networkWaitMs),
-                 static_cast<unsigned long>(g_roundTripMs),
+                 static_cast<unsigned long>(g_answerWaitMs),
                  static_cast<unsigned long>(toChirpMs > partsMs ? toChirpMs - partsMs : 0));
 
   const Display::Record& shown =
@@ -288,6 +305,7 @@ void waitForRelease() {
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
+  backend.close();
   wifi.end();
 
   logRecording();
@@ -356,7 +374,8 @@ bool startDisplay() {
   finish(outcome);
 }
 
-// The question, with S7b's stale-lease rule around it.
+// The request, opened with S7b's stale-lease rule around it. False means it
+// could not be, and backend.result() says how.
 //
 // **A connect that nothing answered is the only thing that can say a cached
 // lease has gone stale**, because a lease that has outlived its network installs
@@ -365,27 +384,32 @@ bool startDisplay() {
 // healthy network on this desk producing a connect that fails outright about
 // once in fifteen questions, and E7 went looking for the mechanism and could not
 // reproduce it; a lease dropped on one of those costs 3.2 s on a wake where
-// nothing was wrong. Asking twice costs one connect timeout on a wake that was
-// already going to be slow, which is the cheaper of the two mistakes.
+// nothing was wrong. Connecting twice costs one connect timeout on a wake that
+// was already going to be slow, which is the cheaper of the two mistakes.
 //
 // Everything else the backend can do -- refuse the connection, answer 500,
 // answer nothing, answer nonsense -- proves there is something at the address
-// and therefore that the address works, and leaves the lease alone.
-Backend::Result askRenewingStaleLease() {
-  Backend::Result result = backend.ask(audio.wav(), audio.wavBytes());
+// and therefore that the address works, and leaves the lease alone. Only the
+// connect can fail this way, so only the open is retried: a connection that
+// answered and then died is not the lease.
+//
+// Since S11 this usually runs while the button is held, and the recording goes
+// on underneath it: a retry costs the user nothing until the release, and every
+// retry is a new request that starts again from the header.
+bool openRenewingStaleLease() {
+  if (backend.open()) return true;
 
-  const bool couldBeStale =
-      result == Backend::Result::NoServer && backend.unreachable() && wifi.usedLease();
-  if (!couldBeStale) return result;
+  const bool couldBeStale = backend.unreachable() && wifi.usedLease();
+  if (!couldBeStale) return false;
 
   Serial1.printf("  nothing answered in %lu ms, and this question is on a reused address"
-                 " -- asking once more before believing it\n",
-                 static_cast<unsigned long>(backend.elapsedMs()));
+                 " -- connecting once more before believing it\n",
+                 static_cast<unsigned long>(millisBetween(backend.openUs(), backend.doneUs())));
 
-  result = backend.ask(audio.wav(), audio.wavBytes());
-  if (result != Backend::Result::NoServer || !backend.unreachable()) {
+  const bool opened = backend.open();
+  if (opened || !backend.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
-    return result;
+    return opened;
   }
 
   Serial1.println("  twice, so the address is the suspect -- dropping the lease and asking DHCP");
@@ -404,15 +428,166 @@ Backend::Result askRenewingStaleLease() {
   // for whatever reason it failed the first time, and the 3.2 s just spent was
   // the price of a false positive. Worth saying out loud, because it is the one
   // line in the log that tells the two apart.
-  char before[16];
-  ipText(before, sizeof(before), stale);
   Serial1.printf("  DHCP took %lu ms and handed back %s -- %s\n",
                  static_cast<unsigned long>(wifi.renewMs()), wifi.ip(),
                  static_cast<uint32_t>(wifi.ipv4()) == stale
                      ? "the same address, so the lease was not what was wrong"
                      : "a different address, so it was");
 
-  return backend.ask(audio.wav(), audio.wavBytes());
+  return backend.open();
+}
+
+// Sends whatever the capture task has committed that has not gone up yet. The
+// offset is the request's own byte count, so a request that was opened again
+// starts from the header; and the count is published by the task with the
+// ordering that makes everything below it safe to read (Recording).
+bool sendCommitted() {
+  const size_t ready = audio.wavBytes();
+  const size_t sent = backend.sentBytes();
+  return ready == sent || backend.write(audio.wav() + sent, ready - sent);
+}
+
+// The rest of the body and the terminating chunk, once the recording is over.
+bool endBody() { return sendCommitted() && backend.end(); }
+
+// The request's own story, for the log: when it opened against the hold, what
+// it carried, where its longest write was, and the two halves the round trip
+// splits into since S11 -- the tail after the release, which is what streaming
+// exists to shrink, and the answer after the terminating chunk. The second is
+// read after the taken chirp, so a backend quicker than the chirp reads as the
+// chirp: Backend::firstByteUs() has why.
+void logStream(Backend::Result result) {
+  if (backend.openUs() == 0) return;
+
+  Serial1.printf("  request: opened %lu ms into setup()",
+                 static_cast<unsigned long>(millisBetween(g_entryUs, backend.openUs())));
+  if (backend.connectedUs() == 0) {
+    Serial1.println(", and never connected");
+  } else {
+    const uint32_t connectMs = millisBetween(backend.openUs(), backend.connectedUs());
+    const uint32_t longestAtMs = millisBetween(g_entryUs, backend.longestWriteAtUs());
+    Serial1.printf(", connected in %lu ms; %lu bytes of the recording's %lu in %lu chunks, the"
+                   " longest write %lu ms at %lu ms into setup()\n",
+                   static_cast<unsigned long>(connectMs),
+                   static_cast<unsigned long>(backend.sentBytes()),
+                   static_cast<unsigned long>(audio.wavBytes()),
+                   static_cast<unsigned long>(backend.frames()),
+                   static_cast<unsigned long>(backend.longestWriteUs() / 1000),
+                   static_cast<unsigned long>(longestAtMs));
+  }
+
+  if (backend.endUs() != 0 && g_releaseUs != 0) {
+    Serial1.printf("  the terminating chunk %lu ms after the release",
+                   static_cast<unsigned long>(millisBetween(g_releaseUs, backend.endUs())));
+    if (backend.firstByteUs() != 0) {
+      const uint32_t firstByteMs = millisBetween(backend.endUs(), backend.firstByteUs());
+      const uint32_t doneMs = millisBetween(backend.endUs(), backend.doneUs());
+      Serial1.printf(", the answer's first byte read %lu ms after that, all of it %lu ms after"
+                     " that",
+                     static_cast<unsigned long>(firstByteMs), static_cast<unsigned long>(doneMs));
+    }
+    Serial1.println();
+  }
+
+  if (result == Backend::Result::Ok) {
+    Serial1.printf("  answer: \"%s\", %lu bytes of JSON\n", backend.answer(),
+                   static_cast<unsigned long>(backend.replyBytes()));
+  } else {
+    Serial1.printf("  failed: %s\n", backend.lastError());
+  }
+}
+
+// The end of every question that reached for the backend: the vision's error
+// table in the one place that owns it, then the screen, the chirp, the lines
+// the wait could not afford, and sleep. Every outcome chirps before its screen
+// appears, answers included -- S7's note has why.
+//
+// Also reached from under the hold, when the request fails while the user is
+// still talking -- which is why the recording is stopped first. It is a
+// no-op on one that has already stopped.
+[[noreturn]] void conclude(Backend::Result result) {
+  capture.abort();
+
+  Outcome outcome = Outcome::Broken;
+  char detail[16] = {0};
+  const char* title = nullptr;
+
+  switch (result) {
+    case Backend::Result::Ok:
+      outcome = Outcome::Answered;
+      break;
+    case Backend::Result::NoServer:
+      outcome = Outcome::NoServer;
+      title = "NO SERVER";
+      break;
+    case Backend::Result::ServerError:
+      outcome = Outcome::ServerError;
+      title = "SERVER ERROR";
+      snprintf(detail, sizeof(detail), "%d", backend.status());
+      break;
+    case Backend::Result::BadResponse:
+      outcome = Outcome::BadResponse;
+      title = "BAD RESPONSE";
+      break;
+    case Backend::Result::TimedOut:
+      outcome = Outcome::TimedOut;
+      title = "TIMED OUT";
+      break;
+  }
+
+  // Posted first and chirped second: the post costs nothing and the chirp is
+  // 230 ms of blocking, so the panel starts on the answer while it sounds -- and
+  // the answer still appears a second after the chirp, which is what S7 moved
+  // the chirp in front of the refresh for. The wait ends where the chirp starts.
+  g_lastChirpUs = esp_timer_get_time();
+  if (title == nullptr) {
+    display.answer(backend.answer());
+    stickyBuzzer::answer();
+  } else {
+    display.error(title, detail[0] != '\0' ? detail : nullptr);
+    stickyBuzzer::error();
+  }
+
+  // The lines the wait above could not afford.
+  capture.wait(kCaptureJoinMs);
+  logRecording();
+
+  // Timed by the WiFi task rather than by this one, because this one is only
+  // ever told afterwards -- see WifiLink::onlineMs(). It is the radio's answer
+  // to "when was there a network", and it is not the same question as the
+  // network wait: an address that lands during the recording costs the
+  // question nothing.
+  const int64_t onlineUs = g_beginUs + static_cast<int64_t>(wifi.onlineMs()) * 1000;
+  Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- %lu ms from the wake",
+                 static_cast<unsigned long>(wifi.onlineMs()),
+                 wifi.usedCachedAp() ? "cached" : "scanned",
+                 wifi.usedLease() ? "installed" : "leased", wifi.ip(),
+                 static_cast<unsigned long>(millisBetween(g_entryUs, onlineUs)));
+  if (g_releaseUs != 0) {
+    Serial1.printf(", the address landed %lu ms after the release",
+                   static_cast<unsigned long>(millisBetween(g_releaseUs, onlineUs)));
+  }
+  Serial1.println();
+
+  // The one way the cache can fail without anything looking wrong: DHCP ran,
+  // the address is fine, and the client never said how long it lives -- so
+  // there is nothing to age an entry against and none is written. It would show
+  // up only as every question paying for DHCP forever.
+  if (!wifi.usedLease() && wifi.leaseSeconds() == 0) {
+    Serial1.println("  the client did not say how long the lease lives -- nothing cached for the"
+                    " next question");
+  }
+
+  logStream(result);
+  finish(outcome);
+}
+
+// One pass of the upload under the hold: the request opened the first time
+// through, then whatever the capture task has committed since the last pass. A
+// failure here ends the question now, with the user still talking.
+void stream() {
+  if (!backend.streaming() && !openRenewingStaleLease()) conclude(backend.result());
+  if (!sendCommitted()) conclude(backend.result());
 }
 
 }  // namespace
@@ -483,10 +658,21 @@ void setup() {
   display.listening();
 
   // Everything from here until the release is the capture task's; this loop
-  // only watches. A drop is the vision's rule that a recording with nowhere to
-  // go is aborted rather than finished.
+  // watches it, and feeds the upload what it has committed. A drop is the
+  // vision's rule that a recording with nowhere to go is aborted rather than
+  // finished.
+  //
+  // **The request waits for the press to stop being a tap**, which the capture
+  // task says rather than the clock: a release in the last debounce window is
+  // not known yet, and a tap has to reach nothing. On a wake with a lease the
+  // network is up at about 300 ms (S7b), which is where the minimum hold ends
+  // anyway, so on most questions the two arrive together.
   while (!capture.finished()) {
-    if (wifi.poll() == WifiLink::State::Failed) capture.abort();
+    if (wifi.poll() == WifiLink::State::Failed) {
+      capture.abort();
+    } else if (wifi.online() && capture.pastMinimumHold()) {
+      stream();
+    }
     delay(kPollMs);
   }
   g_releaseSeenUs = esp_timer_get_time();
@@ -501,11 +687,21 @@ void setup() {
   }
 
   // Silent on purpose -- D7. The chirp below is the first sound a question
-  // makes after the ready chirp, and a tap must not make it.
+  // makes after the ready chirp, and a tap must not make it. Nothing was opened
+  // for it either: the loop above waited for the minimum hold.
   if (button.isTap()) {
     logRecording();
     Serial1.println("  too short to be a question -- nothing sent");
     finish(Outcome::Tap);
+  }
+
+  // The loop above aborts for one reason only: the association failed, before
+  // the address arrived or after.
+  if (capture.stopReason() == Capture::StopReason::Aborted) {
+    logRecording();
+    Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
+                   wifi.lastError());
+    fail(Outcome::NoWifi, "NO WIFI", nullptr);
   }
 
   // The vision's step 6, in two parts: the chirp says the question was taken,
@@ -513,6 +709,20 @@ void setup() {
   // word waits its turn on the panel -- behind the rest of LISTENING on a short
   // hold -- and is dropped unseen if the answer overtakes it there.
   display.working();
+
+  // The tail, on a question whose request opened under the hold: the chunks
+  // committed since the loop's last pass and the terminating chunk. It goes
+  // before the chirp rather than after it -- the chirp is 60 ms of blocking,
+  // and the backend can spend them thinking instead of waiting for the end of
+  // the body.
+  const bool streamed = backend.streaming();
+  if (streamed) {
+    const int64_t startUs = esp_timer_get_time();
+    const bool ended = endBody();
+    g_tailMs = millisBetween(startUs, esp_timer_get_time());
+    if (!ended) conclude(backend.result());
+  }
+
   {
     const int64_t startUs = esp_timer_get_time();
     stickyBuzzer::taken();
@@ -521,111 +731,38 @@ void setup() {
 
   // A release that arrives before the address does is not a failure: the
   // association has a budget of its own and NO WIFI is what happens when that
-  // runs out.
+  // runs out. The question is then the pre-S11 one -- the whole body after the
+  // release -- which is also why the chirp above did not wait for it.
   //
   // Timed from here rather than from the release on purpose: this is the poll
   // loop's own view and the question it answers is the poller's -- how much of
   // the wait was left when this thread got here. The radio's view of the same
-  // moment is wifi.onlineMs(), below.
-  {
+  // moment is wifi.onlineMs(), in the log.
+  if (!streamed) {
+    {
+      const int64_t startUs = esp_timer_get_time();
+      while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+      g_networkWaitMs = millisBetween(startUs, esp_timer_get_time());
+    }
+
+    if (!wifi.online()) {
+      logRecording();
+      Serial1.printf("  no network after %lu ms: %s\n",
+                     static_cast<unsigned long>(wifi.elapsedMs()), wifi.lastError());
+      fail(Outcome::NoWifi, "NO WIFI", nullptr);
+    }
+
     const int64_t startUs = esp_timer_get_time();
-    while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
-    g_networkWaitMs = millisBetween(startUs, esp_timer_get_time());
+    const bool ended = openRenewingStaleLease() && endBody();
+    g_tailMs = millisBetween(startUs, esp_timer_get_time());
+    if (!ended) conclude(backend.result());
   }
 
-  if (!wifi.online()) {
-    logRecording();
-    Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
-                   wifi.lastError());
-    fail(Outcome::NoWifi, "NO WIFI", nullptr);
-  }
+  const int64_t startUs = esp_timer_get_time();
+  const Backend::Result result = backend.receive();
+  g_answerWaitMs = millisBetween(startUs, esp_timer_get_time());
 
-  const Backend::Result result = askRenewingStaleLease();
-  g_roundTripMs = backend.elapsedMs();
-
-  // The vision's error table, in the one place that owns it. Every outcome
-  // chirps before its screen appears, answers included -- S7's note has why.
-  Outcome outcome = Outcome::Broken;
-  char detail[16] = {0};
-  const char* title = nullptr;
-
-  switch (result) {
-    case Backend::Result::Ok:
-      outcome = Outcome::Answered;
-      break;
-    case Backend::Result::NoServer:
-      outcome = Outcome::NoServer;
-      title = "NO SERVER";
-      break;
-    case Backend::Result::ServerError:
-      outcome = Outcome::ServerError;
-      title = "SERVER ERROR";
-      snprintf(detail, sizeof(detail), "%d", backend.status());
-      break;
-    case Backend::Result::BadResponse:
-      outcome = Outcome::BadResponse;
-      title = "BAD RESPONSE";
-      break;
-    case Backend::Result::TimedOut:
-      outcome = Outcome::TimedOut;
-      title = "TIMED OUT";
-      break;
-  }
-
-  // Posted first and chirped second: the post costs nothing and the chirp is
-  // 230 ms of blocking, so the panel starts on the answer while it sounds -- and
-  // the answer still appears a second after the chirp, which is what S7 moved
-  // the chirp in front of the refresh for. The wait ends where the chirp starts.
-  g_lastChirpUs = esp_timer_get_time();
-  if (title == nullptr) {
-    display.answer(backend.answer());
-    stickyBuzzer::answer();
-  } else {
-    display.error(title, detail[0] != '\0' ? detail : nullptr);
-    stickyBuzzer::error();
-  }
-
-  // The lines the wait above could not afford.
-  logRecording();
-
-  // Timed by the WiFi task rather than by this one, because this one is only
-  // ever told afterwards -- see WifiLink::onlineMs(). It is the radio's answer
-  // to "when was there a network", and it is not the same question as the
-  // network wait: an address that lands during the recording costs the
-  // question nothing.
-  const int64_t onlineUs = g_beginUs + static_cast<int64_t>(wifi.onlineMs()) * 1000;
-  Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- %lu ms from the wake, the"
-                 " address landed %lu ms after the release\n",
-                 static_cast<unsigned long>(wifi.onlineMs()),
-                 wifi.usedCachedAp() ? "cached" : "scanned",
-                 wifi.usedLease() ? "installed" : "leased", wifi.ip(),
-                 static_cast<unsigned long>(millisBetween(g_entryUs, onlineUs)),
-                 static_cast<unsigned long>(millisBetween(g_releaseUs, onlineUs)));
-
-  // The one way the cache can fail without anything looking wrong: DHCP ran,
-  // the address is fine, and the client never said how long it lives -- so
-  // there is nothing to age an entry against and none is written. It would show
-  // up only as every question paying for DHCP forever.
-  if (!wifi.usedLease() && wifi.leaseSeconds() == 0) {
-    Serial1.println("  the client did not say how long the lease lives -- nothing cached for the"
-                    " next question");
-  }
-
-  Serial1.printf("  round trip: %lu ms, first byte at %lu ms",
-                 static_cast<unsigned long>(g_roundTripMs),
-                 static_cast<unsigned long>(backend.firstByteMs()));
-  if (backend.status() != 0 && backend.firstByteMs() != 0) {
-    Serial1.printf(" (%lu KB/s up)",
-                   static_cast<unsigned long>(audio.wavBytes() / backend.firstByteMs()));
-  }
-  if (result == Backend::Result::Ok) {
-    Serial1.printf(", %lu bytes of JSON\n", static_cast<unsigned long>(backend.bodyBytes()));
-    Serial1.printf("  answer: \"%s\"\n", backend.answer());
-  } else {
-    Serial1.printf("\n  failed: %s\n", backend.lastError());
-  }
-
-  finish(outcome);
+  conclude(result);
 }
 
 void loop() {

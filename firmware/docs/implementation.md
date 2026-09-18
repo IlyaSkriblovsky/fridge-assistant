@@ -29,7 +29,7 @@ which means asking.
 | S8 | The flow | Wake, record, ask, show, sleep | Done |
 | S9 | Re-run E1 | Wake latency of the real firmware | Done |
 | S10 | Display task | The panel off the orchestrator's thread | Done |
-| S11 | Streaming upload | The body going up under the hold | Not started |
+| S11 | Streaming upload | The body going up under the hold | Done |
 
 ## Why this order
 
@@ -1556,6 +1556,232 @@ playing back as the question; a tap reaching nothing; and the stale-lease rule
 walked once more, since a retry now restarts a stream -- which needs a way to
 provoke it again, the seam S7b used having gone with its driver.
 
+### What it turned out to involve
+
+`src/backend.h/.cpp` is a new client on `esp_http_client`, and the request is
+four calls where it was one: `open()` while the button is held, `write()` as the
+capture task commits, `end()` for the terminating chunk, `receive()` for the
+answer. The orchestrator's half:
+
+```
+while (!capture.finished()) {                 // the hold
+  if (wifi.poll() == Failed) capture.abort();
+  else if (wifi.online() && capture.pastMinimumHold()) stream();  // open, then send what is new
+}
+display.working();
+const bool streamed = backend.streaming();
+if (streamed) endBody();                      // the tail and the terminating chunk
+stickyBuzzer::taken();
+if (!streamed) { /* network, open, the whole body */ }
+conclude(backend.receive());
+```
+
+**`esp_http_client_write()` does not frame chunks.** Settled from the IDF
+source the prebuilt libraries were built from -- `release/v5.5` at `87912cd291`,
+which is `v5.5.2` plus `esp_http_client_get_socket()`: `esp_http_client_open()`
+with a negative length writes `Transfer-Encoding: chunked` instead of a
+`Content-Length` and does nothing else, and `write()` is `esp_transport_write()`
+in a loop. So the size line, the CRLF and the terminating `0\r\n\r\n` are
+written here, and the device confirmed it: every answer's byte count matched
+the recording to the byte, which a body framed twice could not have done.
+
+**Each chunk is one write, with Nagle off.** A chunk framed as three writes would
+send the samples straight from PSRAM, but with Nagle's algorithm on, the
+terminating chunk -- five bytes -- waits for the backend to acknowledge whatever
+is in flight, and a backend that delays its ACKs puts that delay on the one
+write whose latency is the whole wait. With it off, three writes would be three
+packets. So each chunk is framed into a 2 KB buffer in the object and goes out
+whole, and `TCP_NODELAY` is set through `esp_http_client_get_socket()`. A chunk
+under the hold is what the capture task committed since the last pass of the
+loop, 512 bytes most of the time; the 2 KB only bounds the backlog.
+
+**The four results are mapped on esp-tls's own verdict, and the clock is
+gone.** HTTPClient called every failed connect "connection refused" and S7 had
+to read the elapsed time to tell a refusal from silence. esp-tls keeps the two
+apart: a connect that runs out of its budget is
+`ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT`, which is `unreachable()` and the shape
+of a stale lease, and a closed port is a failed connect with errno 104 behind
+it -- `ECONNRESET`, which is what lwIP makes of the RST. A write that fails, or
+that takes nothing for the stall budget below, is `NO SERVER`; headers that do
+not come within the response budget are `TIMED OUT`, and so is a reply that
+stops short; a reply over 4 KB is `BAD RESPONSE`.
+
+**There is a third timeout.** A write that sits through one of E7's stalls needs
+a budget of its own: longer than the connect's 5 s, because a connection that
+has answered is one that works, and the longest stall E7 measured on a working
+one was 4243 ms, with a second loss behind its slowest first retransmit coming
+to 7.6 s. `config::kBackendStallTimeoutMs` is 10 s. Under the hold a stall costs
+nothing, so the only price of a long budget is a dead backend noticed later.
+`config::kResponseTimeoutMs` now counts from the terminating chunk, as the step
+asked: `receive()` sets what is left of it, because the taken chirp stands
+between the two.
+
+**The request waits for `Capture::pastMinimumHold()`, not for the clock.** The
+first reading of "once the hold passes the minimum" was the clock, and it is
+wrong by a debounce window: a release 20 ms before the minimum is not confirmed
+until 20 ms after it, and a request opened in between is a tap reaching the
+backend. `StickyButton` now latches the moment `poll()` sees the line down at
+the minimum or later -- after which the press cannot turn out to be a tap -- and
+the capture task publishes it.
+
+**The buffer is shared through one count.** `Recording`'s sample count is an
+atomic that `commit()` stores with release ordering and every reader loads with
+acquire, so what the orchestrator reads below it has landed, and nothing above
+it is read. The header is written once, by `begin()`, with `0xFFFFFFFF` in both
+length fields, so the buffer is a complete WAV at every length and `wav()` is
+`const`. The ownership paragraphs in `capture.h` and `recording.h` say this
+now: the microphone and the button are handed over, the buffer is shared.
+
+**The taken chirp follows the terminating chunk**, as S10 left it wanting,
+when the request was open at the release -- the tail is two or three
+milliseconds, and the 60 ms of chirp is then the backend's to think in. When the
+release comes first, the chirp comes first: the question is then the pre-S11
+one -- wait for the network, open, send the whole body -- and a chirp that
+waited for all of that would say nothing about the button.
+
+**A failure under the hold ends the question there**, which is what the step
+left to settle, and the vision's WiFi argument decided it: the error screen and
+the chirp come while the button is still down, and `conclude()` stops the
+recording first. The vision's error section says so. The stale-lease rule
+retries only the open -- a connection that answered and then died is not the
+lease -- and every retry is a new request from the header, under the recording.
+
+**A request that opened after the release** is timed in the log as the tail,
+connect and body together, so the parts still add up to the wait.
+
+**Two readings in the log are the instrument's, not the backend's.** The
+answer's first byte is read after the taken chirp, so a backend that answers in
+less than 60 ms reads as 62 ms, which is every question below; E2 now says so.
+And the longest write is timed around `esp_http_client_write()`, which blocks
+until the socket has taken the bytes, not until they have arrived.
+
+**The prototype backend fills in the lengths.** `assistant-server` rewrites the
+two fields once the stream is in, only where they say `0xFFFFFFFF` and walking
+the chunks to find `data`; a stream that dies keeps what arrived, with its
+lengths filled in. It also logs that a body came chunked and how long it took to
+arrive. Checked against a second instance on the laptop with a chunked request
+and with one cut off halfway. The server on the desk was not restarted during
+the runs below, so their files kept `0xFFFFFFFF` -- which showed on the way that
+the old prototype took the chunked body without a change -- and copies of
+them were given their lengths by the same function. Restarted afterwards, it
+filled them in on a question from the device: 286252 bytes, 8.94 s, both fields
+right.
+
+**The E7 rig builds against the new `Backend`**, sending its payload as a body
+of one write. Its result in [experiments.md](experiments.md) went through
+HTTPClient, and the rig says so.
+
+**The error table was walked by a driver that was not committed**: a table of
+URLs through `Backend::open(url)`, one row per question, and S7b's
+`spoilLease()` restored from history for one row. `Backend::open(url)` stays as
+the seam, as `ask(url, ...)` did.
+
+[D4](deferred.md) is paid, and its line is out of the deferred list. What in it
+was a decision rather than a shortcut -- the body staying a WAV, and why
+`0xFFFFFFFF` -- has moved into the vision's request contract.
+
+### What it measured
+
+Ten questions and two taps, then the error table. The panel was checked by eye
+throughout, and every transition was what S10 draws.
+
+| Hold | Request opened | Longest write | Release to the answer chirp | `WORKING` | Release to the answer on the glass |
+| --- | --- | --- | --- | --- | --- |
+| 3927 ms, DHCP | 3447 ms | 13 ms | 117 ms | drawn | 2199 ms |
+| 3402 ms | 400 ms | 8 ms | 122 ms | drawn | 2201 ms |
+| 4722 ms | 397 ms | 306 ms | 122 ms | drawn | 2201 ms |
+| 10722 ms | 395 ms | 4 ms | 116 ms | drawn | 2198 ms |
+| 2187 ms | 397 ms | 309 ms | 117 ms | superseded | 1830 ms |
+| 2367 ms | 397 ms | 5 ms | 121 ms | superseded | 1684 ms |
+| 717 ms | 397 ms | 307 ms | 154 ms | superseded | 3281 ms |
+| 747 ms | 396 ms | 8 ms | 118 ms | superseded | 3279 ms |
+| 912 ms | 400 ms | 6 ms | 123 ms | superseded | 3135 ms |
+| 1497 ms | 397 ms | 309 ms | 121 ms | superseded | 2520 ms |
+
+- **The round trip is out of the wait.** Release to the answer chirp is 116 to
+  123 ms on nine questions of ten and 154 on the tenth, whatever the hold:
+  47-55 ms for the release to be confirmed, 2 ms of tail, 60 ms of taken chirp,
+  3-4 ms waiting for an answer that had arrived during the chirp, and 2-3 ms of
+  everything else. [S10](#s10----display-task) measured the same wait at 318 ms
+  to 1.4 s, the round trip plus 115; what is left is the debounce and the chirp.
+- **Even the DHCP wake streamed everything under the hold.** Its address came
+  at 3436 ms and the request opened 11 ms later; by the release at 3927 the
+  3.4 s of backlog had gone up, and the tail was 2 ms.
+- **The body went up whole every time.** The answer's byte count matched the
+  recording on every question, 23084 to 866348 bytes, and so did the size of
+  the file the backend saved. Neither tap reached the backend: no request was
+  opened for either.
+- **No stall reached a question.** 2.5 MB went up across this run and the one
+  below, and no write took longer than 316 ms -- where E7's rate would have put
+  about five stalls of a second or more into that much body. Written up under
+  [E7](experiments.md), with the likely reason and without the capture that
+  would prove it.
+- **The first write after the connect sometimes takes 300 ms**, 303 to 316 ms
+  in six of the fifteen requests that connected and 4 to 22 ms otherwise, always
+  the write that carries the backlog at about 450 to 550 ms into the wake. The
+  cause is not established. It sits under the hold and costs nothing, except when
+  the release lands inside it: the 717 ms hold did, so this thread heard of the
+  release 70 ms after it rather than 50, and had 17 ms of tail to send -- the
+  154 ms above.
+- **LISTENING is 50 to 105 ms longer while a stream runs under it**: 2359 to
+  2412 ms on every question whose request opened at 400 ms, against 2305 to
+  2312 on the taps, the DHCP wake and the walk's rows whose requests did not
+  connect until after it. The display task is on core 0 at priority 1, where
+  lwIP handles the stream's packets, which is the likely reason. What it costs is
+  the answer on the glass on a short hold, which waits for LISTENING: it ends at
+  2754 to 2807 ms into the wake now against 2700 at S10.
+- **`WORKING` is dropped on every hold that ends inside LISTENING**, which is
+  any shorter than about 2.6 s, not only the short ones: the answer arrives about
+  120 ms after the release, while LISTENING is still refreshing. S10 drew it late on the 2.3-2.5 s holds; here the answer went
+  straight on after LISTENING, 1684 and 1830 ms after the release against S10's
+  2361 and 2533.
+- **The recording did not notice the stream on its core**: slow reads one in
+  14.3 to 15.7 over every question of both runs (S10: 14.2 to 15.5), the
+  longest read 30.1 ms at chunk 6 every time, and the task's clock within 7 ms of
+  the audio it kept.
+- **The display task used 1.7 to 2.2 KB of stack**, and the error screen has now
+  been drawn through it.
+
+The error table, one row per question:
+
+| Row | Hold | Screen | When |
+| --- | --- | --- | --- |
+| a closed port | 3961 ms | `NO SERVER` | 63 ms after the open, at 3.5 s -- under the hold |
+| an address nothing answers at, on a lease | 3327 ms | `NO SERVER` | 18.7 s into the wake |
+| `/audio/fault/500` | 2982 ms | `SERVER ERROR 500` | 138 ms after the release |
+| `/audio/fault/empty` | 3207 ms | `BAD RESPONSE` | 119 ms after the release |
+| `/audio/fault/slow` | 10302 ms | `TIMED OUT` | 30002 ms after the terminating chunk |
+| a lease spoiled onto another subnet | 27072 ms | the answer | 122 ms after the release |
+| the endpoint | 3792 ms | the answer | 115 ms after the release |
+
+- **A refusal ends the question under the hold, and leaves the lease.** The
+  closed port refused in 63 ms on a DHCP wake whose request opened at 3447 ms;
+  the recording was aborted at 3.47 s of audio with the button still down, the
+  error came, and the device waited for the release before sleeping. The next
+  wake found the lease the DHCP had just granted.
+- **The stale-lease rule runs under the hold, and a retry restarts the
+  stream.** On the spoiled lease two connects answered nothing in 5007 ms each,
+  DHCP took 3211 ms and handed back the real address, and the request reopened
+  at 13.6 s into a 27 s hold and streamed from the header: 866348 bytes, the
+  whole recording, answered 122 ms after the release. S7b measured the same
+  failure at 13.2 s of wait after the release; here none of it was.
+- **The rule still costs a false positive what it did.** The address nothing
+  answers at, on a good lease, took 5007 + 5000 ms of connects, 3230 ms of DHCP
+  that handed back the same address, and one more 5000 ms connect -- the error
+  at 18.7 s, 15.3 s after the release.
+- **The response budget counts from the terminating chunk**: `TIMED OUT` came
+  30002 ms after it, on a 10.3 s hold. S7 measured 30.5 to 32.9 s from the start
+  of the POST, with the upload inside the budget.
+- The error screen is a 1317 to 1333 ms partial, against the answer's 1243.
+
+**What this leaves.** After the release the wait is the debounce, the taken
+chirp and the backend, and against a backend that answers a fixed phrase the
+backend is nothing -- 115 to 154 ms in all. The two small findings above, the
+300 ms first write and the longer LISTENING, are both under the hold on long
+questions and cost the short ones at most a few tens of milliseconds on the
+glass. The next number that matters is the backend's own, which needs a model
+behind it; [E2](experiments.md) now says what streaming moved out of its way.
+
 ---
 
 ## Settled while planning
@@ -1581,8 +1807,8 @@ by accident.
   for real now: the upload's stalls are spread through the body, which is the
   case where streaming moves them under the hold. D4 has the argument.
 - **The streaming body stays a WAV**, with `0xFFFFFFFF` in both length fields,
-  rather than becoming raw PCM with the format in request headers --
-  [D4](deferred.md) has why. (S11)
+  rather than becoming raw PCM with the format in request headers -- the
+  vision's request contract has why. (S11)
 - **A stream that dies leaves the prototype backend a truncated file**, and that
   is accepted: the real backend will forward recordings to an external API
   rather than keep them. (S11)

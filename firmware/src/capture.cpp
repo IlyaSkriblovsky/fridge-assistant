@@ -33,6 +33,7 @@ bool Capture::start(StickyMic& mic, Recording& audio, StickyButton& button) {
   _button = &button;
 
   _abort = false;
+  _pastMinimumHold.store(false, std::memory_order_relaxed);
   _joined = false;
   _stopReason = StopReason::None;
   _lastError = "";
@@ -135,6 +136,9 @@ void Capture::run() {
     if (_button->poll()) {
       _stopReason = StopReason::Released;
       break;
+    }
+    if (_button->pastMinimumHold() && !_pastMinimumHold.load(std::memory_order_relaxed)) {
+      _pastMinimumHold.store(true, std::memory_order_release);
     }
   }
 
