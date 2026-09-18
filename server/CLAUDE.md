@@ -20,7 +20,7 @@
 | `main.py` | Весь сервер: FastAPI, `POST /audio`, намеренные сбои |
 | `pyproject.toml`, `uv.lock` | Зависимости, ставятся через `uv` |
 | `recordings/` | Записи с прибора. В `.gitignore` |
-| `.env` | Секреты: `GEMINI_API_KEY`, `KEEP_EMAIL`, `KEEP_MASTER_TOKEN`. В `.gitignore` |
+| `.env` | Секреты и настройки: `GEMINI_API_KEY`, `KEEP_EMAIL`, `KEEP_MASTER_TOKEN`, `KEEP_NOTE_ID` (заметка со списком покупок). В `.gitignore` |
 | `experiments/` | Пробные скрипты, не часть сервера. Зависимости объявлены в самом скрипте (PEP 723), запуск: `uv run --env-file .env experiments/<script>.py` |
 | `docs/vision.md` | Замысел, прибор, принятые решения, список сценариев |
 | `docs/device-contract.md` | Контракт с прошивкой: запрос, потоковое тело, ответ, ошибки |

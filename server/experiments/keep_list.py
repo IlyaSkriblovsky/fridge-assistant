@@ -25,13 +25,14 @@ Getting a master token (once):
      paste the cookie when asked; the script prints a token starting with
      `aas_et/`.
 
-Then put KEEP_EMAIL and KEEP_MASTER_TOKEN into .env and:
-    uv run --env-file .env experiments/keep_list.py lists          # every list
-    uv run --env-file .env experiments/keep_list.py show Покупки   # its items
-    uv run --env-file .env experiments/keep_list.py add Покупки молоко "кошачий корм"
+Then put KEEP_EMAIL and KEEP_MASTER_TOKEN into .env, run `lists` and put the
+shopping list's id into .env as KEEP_NOTE_ID:
+    uv run --env-file .env experiments/keep_list.py lists   # every list, with ids
+    uv run --env-file .env experiments/keep_list.py show    # items of KEEP_NOTE_ID
+    uv run --env-file .env experiments/keep_list.py add молоко "кошачий корм"
 
-A list is named by its title or its id, which `lists` prints. Every command
-prints how long login and sync took.
+`show` and `add` take --list with a title or an id to use another list.
+Every command prints how long login and sync took.
 """
 
 from __future__ import annotations
@@ -139,23 +140,29 @@ def main() -> int:
     token.add_argument("email")
     commands.add_parser("lists", help="show every list note")
     show = commands.add_parser("show", help="show the items of one list")
-    show.add_argument("list", help="title or id")
     add = commands.add_parser("add", help="add items to a list")
-    add.add_argument("list", help="title or id")
     add.add_argument("items", nargs="+")
+    for command in (show, add):
+        command.add_argument("--list", help="title or id (default: KEEP_NOTE_ID)")
     args = parser.parse_args()
 
     if args.command == "token":
         return get_master_token(args.email)
+
+    list_name = ""
+    if args.command in ("show", "add"):
+        list_name = args.list or os.environ.get("KEEP_NOTE_ID", "")
+        if not list_name:
+            sys.exit("Set KEEP_NOTE_ID or pass --list")
 
     try:
         keep = login()
         if args.command == "lists":
             show_lists(keep)
         elif args.command == "show":
-            show_items(find_list(keep, args.list))
+            show_items(find_list(keep, list_name))
         elif args.command == "add":
-            add_items(keep, find_list(keep, args.list), args.items)
+            add_items(keep, find_list(keep, list_name), args.items)
     except exception.LoginException as exc:
         print(f"Login failed: {exc}", file=sys.stderr)
         return 1
