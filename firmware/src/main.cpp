@@ -398,6 +398,21 @@ void setup() {
                  capture.stopReasonName(), static_cast<unsigned long>(button.heldMs()),
                  static_cast<unsigned long>(audio.recordedMs()),
                  static_cast<unsigned long>(audio.wavBytes()));
+
+  // The drop detector, and the baseline S10 is checked against. The task's own
+  // clock beyond the audio it kept is audio the DMA threw away, and should be a
+  // chunk or two. Slow reads come one in fifteen from the DMA's own block size;
+  // more than that is something else competing for the core. Capture's
+  // accessors have the rest.
+  Serial1.printf("  capture task: %lu ms reading for %lu ms kept, %lu chunks, %lu slow, the"
+                 " longest %lu us at chunk %lu\n",
+                 static_cast<unsigned long>(capture.elapsedMs()),
+                 static_cast<unsigned long>(audio.recordedMs()),
+                 static_cast<unsigned long>(capture.chunks()),
+                 static_cast<unsigned long>(capture.slowChunks()),
+                 static_cast<unsigned long>(capture.longestChunkUs()),
+                 static_cast<unsigned long>(capture.longestAtChunk()));
+
   Serial1.printf("  Listening screen: %lu ms, and the release was %s it%s\n",
                  static_cast<unsigned long>(g_listeningMs),
                  g_listeningLeftMs != 0 ? "inside" : "after",
