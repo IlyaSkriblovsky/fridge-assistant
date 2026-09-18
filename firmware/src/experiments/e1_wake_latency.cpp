@@ -43,6 +43,7 @@
 #include <esp_private/esp_clk.h>
 #include <esp_sleep.h>
 #include <soc/rtc.h>
+#include <soc/rtc_cntl_reg.h>
 
 #include "sticky/mic.h"
 #include "sticky/power.h"
@@ -63,9 +64,8 @@ constexpr uint32_t kChirpMs = 60;
 // spread; a single sample is not a measurement.
 constexpr uint32_t kTimerCycles = 20;
 
-// Short on purpose. The boot number is a difference between two readings of the
-// RTC counter taken with calibration values from either side of the sleep, so
-// any drift between them scales with how long the sleep was.
+// Short on purpose. Whatever error the worked-out deadline -- the skew column --
+// carries from calibration scales with how long the sleep was.
 constexpr uint64_t kTimerSleepUs = 2000000;
 
 // Held at least this long, a button press means "print the whole log". Well
@@ -86,10 +86,11 @@ constexpr uint32_t kMagic = 0xE1C0FFEE;
 // Header and rows go through the same format string, so the columns line up.
 // Every field is a string: a stage that does not apply prints a dash.
 constexpr const char* kRowFormat =
-    "%3s  %-5s %-9s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n";
+    "%3s  %-5s %-9s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n";
 
 struct Cycle {
   uint32_t bootUs;
+  int32_t skewUs;  // the worked-out deadline against the programmed one
   uint32_t latchUs;
   uint32_t micUs;
   uint32_t blockUs;
@@ -162,35 +163,53 @@ void summarise(const char* label, const uint32_t* values, uint32_t count) {
                  static_cast<unsigned long>(count));
 }
 
-// The boot half of the measurement. esp_timer is useless for this: its base is
-// synced to the RTC counter at startup and that counter runs through deep
-// sleep, so esp_timer_get_time() at the top of setup() reports time since the
-// first power-on, sleep included, not the length of the boot.
+// The boot half of the measurement. esp_timer is useless for this: it restarts
+// on every wake and does not carry the sleep, so it reads the same small value
+// at the top of every setup() however long the board slept, and it cannot see a
+// boot that ran before it started. (This comment used to give the opposite
+// reason -- that esp_timer carries the sleep -- which S2 disproved; see E1 in
+// docs/experiments.md. The method was right either way.)
 //
-// The RTC counter works because the wake deadline is known in the same units:
-// esp_sleep_enable_timer_wakeup() programs it as the counter value at sleep
-// entry plus the requested duration in slow-clock ticks. Working in ticks and
-// converting only the short difference keeps the calibration error off the
-// absolute counter value, which is hours wide by then.
+// The RTC counter works because the alarm is in the same ticks. Working in ticks
+// and converting only the short difference keeps the calibration error off the
+// absolute counter, which is hours wide by then.
 //
-// Two systematic biases, both sub-millisecond and both making the number
-// slightly pessimistic: the gap between the reading taken below and the moment
-// the deadline is latched inside esp_deep_sleep_start(), and IDF's own deep
-// sleep overhead compensation, which shortens the programmed sleep by roughly
-// 750 us.
-bool bootTimeUs(uint64_t rtcAtEntry, uint32_t& out) {
+// **The alarm is read, not worked out.** esp_deep_sleep_start() writes it into
+// RTC_CNTL, which stays up through the sleep and is not reset by the wake, so
+// the register holds the exact tick the wake event happened at. Until S9 this
+// rig worked it out instead -- the counter just before esp_deep_sleep_start()
+// plus the duration, converted with the previous boot's calibration -- and that
+// misses what the sleep entry does before reading the counter itself, IDF's
+// overhead compensation, and any difference between the calibration it used and
+// the one IDF did. `skew` keeps the old number on every row, as the programmed
+// alarm less the worked-out one: the old boot is boot + skew.
+uint64_t programmedAlarm() {
+  return (static_cast<uint64_t>(REG_GET_FIELD(RTC_CNTL_SLP_TIMER1_REG, RTC_CNTL_SLP_VAL_HI))
+          << 32) |
+         REG_READ(RTC_CNTL_SLP_TIMER0_REG);
+}
+
+bool bootTimeUs(uint64_t rtcAtEntry, uint32_t& out, int32_t& skewUs) {
   if (!stickyPower::wokeFromDeepSleep() || g_magic != kMagic || g_sleepUs == 0) {
     return false;
   }
-  const uint64_t deadline = g_sleepTicks + rtc_time_us_to_slowclk(g_sleepUs, g_sleepCal);
-  if (rtcAtEntry <= deadline) return false;
-  out = static_cast<uint32_t>(
-      rtc_time_slowclk_to_us(rtcAtEntry - deadline, esp_clk_slowclk_cal_get()));
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) return false;
+
+  const uint64_t alarm = programmedAlarm();
+  if (rtcAtEntry <= alarm) return false;
+  const uint32_t cal = esp_clk_slowclk_cal_get();
+  out = static_cast<uint32_t>(rtc_time_slowclk_to_us(rtcAtEntry - alarm, cal));
+
+  const uint64_t workedOut = g_sleepTicks + rtc_time_us_to_slowclk(g_sleepUs, g_sleepCal);
+  const int64_t skewTicks = static_cast<int64_t>(alarm) - static_cast<int64_t>(workedOut);
+  const uint64_t skewAbs = rtc_time_slowclk_to_us(
+      static_cast<uint64_t>(skewTicks < 0 ? -skewTicks : skewTicks), cal);
+  skewUs = skewTicks < 0 ? -static_cast<int32_t>(skewAbs) : static_cast<int32_t>(skewAbs);
   return true;
 }
 
 void printHeader() {
-  Serial1.printf(kRowFormat, "#", "wake", "reset", "boot", "latch", "mic", "block",
+  Serial1.printf(kRowFormat, "#", "wake", "reset", "boot", "skew", "latch", "mic", "block",
                  "settle", "dead", "total", "first", "floor");
 }
 
@@ -223,7 +242,7 @@ const char* cell(char* buf, size_t size, float value, bool valid) {
 }
 
 void printCycle(uint32_t index, const Cycle& c) {
-  char cIndex[8], cBoot[10], cLatch[10], cMic[10], cBlock[10], cSettle[10];
+  char cIndex[8], cBoot[10], cSkew[10], cLatch[10], cMic[10], cBlock[10], cSettle[10];
   char cDead[10], cTotal[10], cFirst[10], cFloor[10];
 
   snprintf(cIndex, sizeof(cIndex), "%lu", static_cast<unsigned long>(index));
@@ -234,6 +253,7 @@ void printCycle(uint32_t index, const Cycle& c) {
       stickyPower::wakeupCauseName(static_cast<esp_sleep_wakeup_cause_t>(c.wakeCause)),
       stickyPower::resetReasonName(static_cast<esp_reset_reason_t>(c.resetReason)),
       cell(cBoot, sizeof(cBoot), c.bootUs / 1000.0f, c.bootValid),
+      cell(cSkew, sizeof(cSkew), c.skewUs / 1000.0f, c.bootValid),
       cell(cLatch, sizeof(cLatch), c.latchUs / 1000.0f, true),
       cell(cMic, sizeof(cMic), c.micUs / 1000.0f, true),
       cell(cBlock, sizeof(cBlock), c.blockUs / 1000.0f, c.micOk),
@@ -294,6 +314,24 @@ void printSummary() {
   }
   summarise("boot", scratch, count);
 
+  {
+    static float skews[kTimerCycles];
+    uint32_t n = 0;
+    float lo = 0.0f;
+    float hi = 0.0f;
+    for (uint32_t i = 0; i < cycles; ++i) {
+      if (!g_log[i].bootValid) continue;
+      const float ms = g_log[i].skewUs / 1000.0f;
+      if (n == 0 || ms < lo) lo = ms;
+      if (n == 0 || ms > hi) hi = ms;
+      skews[n++] = ms;
+    }
+    if (n > 0) {
+      Serial1.printf("  %-10s min %+7.1f  median %+7.1f  max %+7.1f  (n=%lu)\n", "skew", lo,
+                     median(skews, n), hi, static_cast<unsigned long>(n));
+    }
+  }
+
   count = 0;
   for (uint32_t i = 0; i < cycles; ++i) scratch[count++] = g_log[i].latchUs;
   summarise("latch", scratch, count);
@@ -331,6 +369,7 @@ void printSummary() {
   Serial1.println();
   Serial1.println("  latch is delay(100) on a cold start and nothing on a wake.");
   Serial1.println("  dead = boot+latch+mic+block; total adds the settle window.");
+  Serial1.println("  boot is from the alarm in RTC_CNTL; boot+skew is the old worked-out one.");
   Serial1.println();
   Serial1.println("Hold the AI button to wake. Boot is not measurable on that path,");
   Serial1.println("but the stages and the wake cause are -- and a long hold is E4.");
@@ -387,7 +426,7 @@ void setup() {
   Cycle cycle{};
   cycle.wakeCause = static_cast<uint8_t>(esp_sleep_get_wakeup_cause());
   cycle.resetReason = static_cast<uint8_t>(esp_reset_reason());
-  cycle.bootValid = bootTimeUs(rtcEntry, cycle.bootUs);
+  cycle.bootValid = bootTimeUs(rtcEntry, cycle.bootUs, cycle.skewUs);
 
   stickyPower::holdLatch();
   const int64_t tLatch = esp_timer_get_time();

@@ -29,8 +29,8 @@
 // no locking here.
 //
 // **Every hold reads short**, by the boot time plus however long the contact
-// takes to become a wake event: 57 ms and an unmeasured millisecond or so
-// (docs/experiments.md, E1). Nothing on this path can do better -- a button
+// takes to become a wake event: 61 ms and an unmeasured millisecond or so
+// (docs/experiments.md, E1, as re-run on the firmware at S9). Nothing on this path can do better -- a button
 // wake carries no deadline to measure the boot against -- so the 300 ms minimum
 // hold asks for roughly 360 ms of real press, and the first ~60 ms of every
 // press is spent booting rather than being timed.

@@ -27,7 +27,7 @@ which means asking.
 | S7 | Upload and answer | The backend round trip | Done |
 | S7b | Cached DHCP lease | Three seconds off every question | Done |
 | S8 | The flow | Wake, record, ask, show, sleep | Done |
-| S9 | Re-run E1 | Wake latency of the real firmware | Not started |
+| S9 | Re-run E1 | Wake latency of the real firmware | Done |
 
 ## Why this order
 
@@ -1166,12 +1166,101 @@ deterministic to the millisecond partially as well as fully, exactly as
   wrong end: it is measured from the top of `setup()` and E1 measures from the
   button.
 
+  *Corrected at [S9](#s9----re-run-e1).* Wrong at this end too. The log line was
+  timed after `stickyBuzzer::ready()` returned, and the chirp is 110 ms of
+  blocking, so 203 ms was the end of the chirp. The microphone was live and the
+  chirp starting at 93 ms into `setup()` -- 43 ms since S9 took a stray
+  `delay(50)` out -- and the line is now timed where the chirp starts.
+
 ## S9 -- Re-run E1
 
 [E1](experiments.md) asks for this explicitly: the boot stage scales with the
 image, the rig's image was smaller than the firmware's, and the numbers in
 experiments.md are from a rig. Re-run it on the finished firmware, record both
 image sizes, and update the result there rather than here.
+
+The result is there, in
+[E1's re-run](experiments.md#re-run-on-the-finished-firmware-2026-09-18). **The
+firmware chirps 104.3 ms after the wake event, every time to within 0.2 ms**:
+61.2 ms of boot, 41.3 ms of microphone and 1.7 ms of everything else. What
+follows is what the step involved on this side.
+
+### What it turned out to involve
+
+**The premise had dissolved before anything was flashed.** E1's rig compiles
+every module in `src/` but `main.cpp`, and those have grown into WiFi, HTTP and
+the panel since E1, so the rig now copies 79588 bytes of IRAM and 22812 of DRAM
+on a wake against the firmware's 79692 and 23116. What it still cannot have is
+`main.cpp`, whose globals are constructed inside the boot being measured.
+
+**So the rig for this step is the firmware.** `exp_e1_firmware` builds
+`main.cpp` as it is and wraps five of its calls at link time with `--wrap`:
+`setup()`, `holdLatch()`, `StickyMic::begin()`, `stickyBuzzer::ready()` and
+`stickyPower::deepSleep()`. The firmware is not edited for it, the image copies
+exactly the bytes the firmware does, and a timer wake is the firmware handling a
+tap -- which it already knows how to do -- so every row is a whole run from the
+wake to the sleep. It is the first rig that measures the firmware rather than
+the firmware's modules, and the shape is reusable: anything that can be timed at
+a call boundary in `main.cpp` can be timed without touching `main.cpp`.
+
+**The instrument had to be fixed before the numbers meant anything.** The first
+run worked the wake deadline out, as E1 always had, and reported the firmware
+booting 5 ms faster than E1's rig. The deadline is in a register, and read from
+there the boot is 61.2 ms on the firmware and 61.8 on the rig with no spread at
+all; the 5 ms, and every millisecond of E1's own spread, was a calibration
+difference in the working-out. [E1](experiments.md) has the correction, and the
+old rig reads the register now too.
+
+**Two changes to `main.cpp`, both on the wake path:**
+
+- **`delay(50)` after `Serial1.begin()` is gone.** It came with the first demo,
+  waited for nothing, and was a third of the wake-to-chirp time -- 51.5 ms of a
+  stage that is 1.3 ms without it. E1's rig never saw it because the rig starts
+  `Serial1` after its capture. It is exactly the kind of number E1 said to look
+  for: the wake path is delays this project chose, not silicon.
+- **The "microphone live" line is timed where the chirp starts.** It was timed
+  after the chirp returned, which is how [S8](#s8----the-flow) came to record
+  203 ms for a chirp that started at 93. S8 carries the correction.
+
+**A tap never polls the network**, which showed up as the first real question
+after the timer phase paying for a scan and DHCP. The orchestrator's poll loop
+runs only after the Listening refresh, and a tap has finished long before that,
+so twenty taps in a row never reached `Online` and never cached an access point
+or a lease. Harmless -- a tap has nothing to send -- and the cache from the last
+real question survives any number of them, since a tap neither writes nor clears
+it.
+
+**The panel is 100 ms lower on every screen than S8's table**: 2300 ms for the
+Listening refresh, 889 for the working screen and 1243 for the answer, against
+2398-2403, 990-991 and 1343-1346. That is [E8](experiments.md)'s `sleep()`
+override arriving in the firmware's own log, 100 ms a refresh as E8 measured it
+on its rig.
+
+### What it measured
+
+Three runs of the wrapped firmware -- one before the change, two after -- and two
+of E1's rig for control, all on one afternoon:
+
+| | Before | After |
+| --- | --- | --- |
+| the wake to `setup()` | 61.2 ms | 61.2 ms |
+| `setup()` to the ready chirp | 93.0 ms | 43.0 ms |
+| **the wake to the ready chirp** | **154 ms** | **104.3 ms** |
+
+- Forty timer wakes after the change, 104.2 to 104.4 ms from the wake event to
+  the chirp. Five real questions on the button, short and long, came out at
+  43.0 ms from `setup()` to the chirp on every one, and all five were answered
+  with the byte count matching.
+- The boot is the same on the firmware as on a rig, to 0.6 ms, and does not
+  vary from wake to wake at all. Nothing the firmware has grown into since E1
+  costs anything before `setup()`.
+- **What is left is two things**: 61 ms of boot, and 41 ms of microphone, of
+  which 30 ms is the 24 ms settle discard rounded up to the DMA's 15 ms blocks
+  and 10 ms is the rail's `delay(10)`. Both levers are written up in E1 and
+  neither is taken here -- the first changes what the chirp promises and the
+  second means taking E3 again.
+- **Deep sleep stays.** Light sleep would buy about a tenth of a second now,
+  which is less than before and still not worth idle current.
 
 ---
 

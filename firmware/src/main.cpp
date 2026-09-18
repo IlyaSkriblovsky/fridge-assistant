@@ -308,8 +308,10 @@ void setup() {
   stickyPower::holdLatch();
   button.begin(g_entryUs);  // takes GPIO4 back from the RTC pad and pulls it up
 
+  // No settling delay after it. The delay(50) that used to follow came with the
+  // first demo, waited for nothing, and was a third of the wake-to-chirp time
+  // -- S9 measured it on the firmware's own image.
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
-  delay(50);
 
   Serial1.println();
   Serial1.printf("question -- wake %s, reset %s\n", stickyPower::wakeupCauseName(),
@@ -336,9 +338,15 @@ void setup() {
   if (!capture.start(mic, audio, button)) {
     fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
   }
+  // Timed as the chirp starts, not as it returns: the chirp is 110 ms of
+  // blocking, and a timestamp taken after it reports the end of the chirp as the
+  // moment the microphone went live -- which is how S8 came to record 203 ms for
+  // a chirp that started at 93. Measured from the top of setup(), so the boot is
+  // not in it; S9 has the boot.
+  const int64_t chirpUs = esp_timer_get_time();
   stickyBuzzer::ready();
-  Serial1.printf("  microphone live %lu ms after the wake\n",
-                 static_cast<unsigned long>((esp_timer_get_time() - g_entryUs) / 1000));
+  Serial1.printf("  ready chirp %lu ms into setup(), with the recording already running\n",
+                 static_cast<unsigned long>((chirpUs - g_entryUs) / 1000));
 
   g_beginUs = esp_timer_get_time();
   if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {

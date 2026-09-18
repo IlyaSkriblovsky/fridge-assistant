@@ -135,9 +135,12 @@ BUZZER low for the duration.
 Waking is not instant -- image load from flash, latch, microphone rail, then the
 settle window the driver discards. The first fraction of a second of speech is
 lost, which is why the buzzer chirp comes first: it tells the user when to
-start. Measured at 169 ms from the wake event to the first captured sample, of
-which 57 ms was the boot itself and 101 ms a latch delay that has since been
-taken off the wake path -- [E1](experiments.md).
+start. On the finished firmware the chirp sounds 104 ms after the wake event,
+the same to a fifth of a millisecond every time: 61 ms of boot, 41 ms of
+microphone rail and settle discard, and under 2 ms of everything else --
+[E1](experiments.md), re-run at [S9](implementation.md#s9----re-run-e1). Two
+delays this project chose, 100 ms in the latch and 50 ms after the log port came
+up, were taken off the wake path on the way there.
 
 Caching the BSSID and channel in RTC memory across sleeps and passing them to
 `WiFi.begin(ssid, pass, channel, bssid)` removes the scan, and reconnect time is

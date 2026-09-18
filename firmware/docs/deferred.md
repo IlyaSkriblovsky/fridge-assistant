@@ -223,9 +223,9 @@ A press shorter than `config::kButtonMinHoldMs` is discarded silently: no
 screen, no sound, nothing sent.
 
 "No sound" cannot be quite true, because the ready chirp comes first by design.
-Capture starts roughly 70 ms after the wake -- [E1](experiments.md)'s 169 ms
-less the latch delay that has since come off the wake path -- and the chirp
-follows it immediately, while the minimum hold is 300 ms. So a tap between the
+The chirp sounds 104 ms after the wake, with capture already running --
+[E1](experiments.md), re-run on the firmware at
+[S9](implementation.md#s9----re-run-e1) -- while the minimum hold is 300 ms. So a tap between the
 two has already been answered with "the microphone is live", which was true when
 it sounded. Nothing further happens.
 
