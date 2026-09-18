@@ -14,9 +14,9 @@ in one place rather than archaeology through commit messages.
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
-| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes |
+| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes. Scheduled as [S11](implementation.md#s11----streaming-upload), after [S10](implementation.md#s10----display-task) |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
-| D6 | Everything partial but the Listening screen, which is full because nothing survives the sleep to be differential against | The same waveforms, with the refresh off the orchestrator's thread | Paid at [S8](implementation.md#s8----the-flow); the thread is [D4](deferred.md)'s display task |
+| D6 | Everything partial but the Listening screen, which is full because nothing survives the sleep to be differential against | The same waveforms, with the refresh off the orchestrator's thread | Paid at [S8](implementation.md#s8----the-flow); the thread is [S10](implementation.md#s10----display-task) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
@@ -96,15 +96,30 @@ it, in this step's favour:
   for once: a long question has more windows and therefore more chances to
   stall, and a long question is exactly the one with room to stream.
 
-Two things have to be settled when this changes:
+Two things had to be settled before this could change, and both now are:
 
-- A WAV header declares a length that is unknown when a chunked request opens.
-  Either the length fields get a placeholder the backend agrees to ignore, or the
-  body switches to raw PCM with the format moved into request headers.
-- Display gets its own task. With a single POST after release, rendering and
-  uploading never overlap; with a streaming upload, a one-to-two second panel
-  refresh would stall it -- and since S7b that refresh is the *only* thing
-  between the wake and a network that is ready to take bytes.
+- **The body stays a WAV, with `0xFFFFFFFF` in both length fields.** A WAV
+  header declares a length that is unknown when a chunked request opens, and the
+  transport carries it instead: the terminating chunk is where the body ends, so
+  the backend takes the length from there and rewrites or strips the header as
+  it needs. `0xFFFFFFFF` rather than zero because Python's `wave`, which the
+  prototype backend reads its uploads with, takes the first as a file of unknown
+  length and reads every sample in it, and refuses the second outright as `not a
+  WAVE file` -- checked with a one-second tone, both ways.
+
+  Raw PCM with the format in request headers was the other way, and it buys
+  nothing. The header would only move to the backend, which needs the format
+  either way -- to save a file that plays now, and to hand the audio on later --
+  and there is no standard type for little-endian PCM to carry it in:
+  `audio/L16` is big-endian by RFC 2586. So it would mean swapping a megabyte on
+  the device or headers of our own, and the second is the bespoke protocol the
+  vision's transport decision exists to avoid.
+- **Display gets its own task**, and it is
+  [S10](implementation.md#s10----display-task), ahead of this entry's own
+  [S11](implementation.md#s11----streaming-upload). With a single POST after
+  release, rendering and uploading never overlap; with a streaming upload, a
+  one-to-two second panel refresh would stall it -- and since S7b that refresh is
+  the *only* thing between the wake and a network that is ready to take bytes.
 
 **S8 has put a number on what the task is worth, and it is not the upload.**
 The working screen is 990 ms on this thread and the leftover Listening refresh
@@ -165,7 +180,8 @@ Keeping a 48000-byte frame in RTC memory is not an option either -- there are
 
 So the arrangement S8 arrived at is the end state for the waveforms: **one full
 refresh a wake, and it is `LISTENING`.** What is still owed is not a cheaper
-refresh but a thread to run it on.
+refresh but a thread to run it on, and that is
+[S10](implementation.md#s10----display-task).
 
 **The panel comes off the critical path through [D4](deferred.md)'s display
 task, not through a partial.** That is the correction this entry needed: the

@@ -28,6 +28,8 @@ which means asking.
 | S7b | Cached DHCP lease | Three seconds off every question | Done |
 | S8 | The flow | Wake, record, ask, show, sleep | Done |
 | S9 | Re-run E1 | Wake latency of the real firmware | Done |
+| S10 | Display task | The panel off the orchestrator's thread | Not started |
+| S11 | Streaming upload | The body going up under the hold | Not started |
 
 ## Why this order
 
@@ -1262,11 +1264,147 @@ of E1's rig for control, all on one afternoon:
 - **Deep sleep stays.** Light sleep would buy about a tenth of a second now,
   which is less than before and still not worth idle current.
 
+## S10 -- Display task
+
+The panel on a thread of its own, which is what [D6](deferred.md) still owes and
+what [D4](deferred.md) names as its precondition. It comes before the streaming
+upload rather than inside it, for two reasons that are both measured:
+
+- **It is worth more than the upload.** [S8](#s8----the-flow) put the
+  release-to-chirp wait at 2.0 to 5.6 s, and on every hold part of that is the
+  panel: the 889 ms working screen always, and on a hold shorter than the
+  Listening refresh whatever is left of that too -- 1.2 to 2.1 s, measured. None
+  of it needs this thread. That is about a second off a long question and two to
+  three off a short one, before a byte of the upload moves.
+- **The upload cannot stream without it.** On a cached wake the address arrives
+  while the Listening refresh has barely started, and the orchestrator then sits
+  inside that refresh for two more seconds, unable to write anything. S11 on a
+  single thread would send nothing until the refresh let go, which on a short
+  question is after the release -- the POST it was meant to replace.
+
+It can also be checked by itself, which is what the step order asks for: the
+upload stays a single POST after the release here, so the only thing that
+changes is who waits for the panel.
+
+What it delivers: one task that owns `StickyScreen`, and an orchestrator that
+posts screens instead of drawing them. The wait after the release keeps the
+chirp, the network and the round trip, and loses the panel.
+
+- **The task wraps `StickyScreen`; it does not replace it.** `screen.h` was kept
+  four calls wide for this day, and the four become messages. The task is logic
+  rather than board -- the rule that put `Capture` at the top of `src/` and
+  `StickyMic` in `sticky/` -- so it is a new module next to `Capture`, and after
+  it nothing but the task touches the panel.
+- **It wants no priority to speak of.** A refresh is mostly the library waiting
+  on BUSY in `vTaskDelay()` -- D4 has the arithmetic -- so the task is blocked
+  for nearly all of its life. What it does spend CPU on is the drawing before a
+  refresh, about 260 ms for a full screen, and the 222 ms plane push inside one
+  ([E8](experiments.md)). Well below capture; the core is chosen on the device,
+  against the capture task's slow-chunk count.
+- **A queue of one, with replacement** -- D6's rule. A screen posted while
+  another is still waiting replaces it; the refresh already on the panel is never
+  cut short. In practice only `WORKING` is ever superseded, and that is the
+  point: on a short hold with a quick backend the answer lands while the
+  Listening refresh is still running, and `WORKING` would cost 889 ms to show a
+  word that was stale before it appeared.
+- **Nothing sleeps with the panel mid-refresh.** `finish()` waits for the task
+  to go idle before `deepSleep()`, bounded like the capture join and for the same
+  reason. That wait is past the answer chirp, so it is awake time rather than
+  wait, and the log keeps the two apart.
+- **The panel's numbers come from the task's clock.** After this step
+  `screen.listening()` and the rest return at once, and timing them here would
+  time a queue post -- a number about the poster rather than the panel, which is
+  the trap S7b and S8 each fell into once. The log also wants two moments where
+  it has one now: the release to the answer chirp, which this step shortens, and
+  the release to the answer on the glass, which it shortens less, because the
+  screens of one question still queue on one controller ([E8](experiments.md)).
+- **A panel that will not start still has to reach the orchestrator.** It is the
+  one failure with nothing to draw on, and the vision's answer -- chirp, log,
+  sleep -- is the orchestrator's to give. Whether `begin()` stays here, ahead of
+  the task, or the task reports it back is for the step to settle.
+
+Once it has run, [D6](deferred.md) is paid and its line comes out of the
+deferred list. [E8](experiments.md)'s second lever -- the power-down between two
+refreshes of one question -- is worth another look then, since the panel's own
+timeline is all that will be left of the panel in a question. It is not part of
+this step.
+
+**Verified by** S8's log over the same holds, short and long, with no panel left
+in the release-to-chirp wait; a short hold, which is the superseded-`WORKING`
+case by itself; the capture task's slow-chunk count unchanged with the display
+task running; and the panel checked by eye through a run of consecutive
+questions, which means asking.
+
+## S11 -- Streaming upload
+
+[D4](deferred.md) itself: the request opens while the button is still held and
+the body goes up as it is captured, so what is left after the release is the
+last few chunks of audio and the round trip. D4 has the argument, and
+[E7](experiments.md) the reason it is worth more than the bytes -- the stalls
+that cost one upload in four a whole retransmission timeout are spread through
+the body, and they move under the hold with it.
+
+- **`esp_http_client` replaces `HTTPClient`**, as the vision's transport section
+  has said all along: Arduino's client sends only bodies of known length.
+  `esp_http_client_open()` with a negative length announces a chunked body;
+  whether `esp_http_client_write()` then frames the chunks, or leaves the
+  `<size>\r\n...\r\n` framing and the terminating `0\r\n\r\n` to the caller, is
+  the first thing to establish, against the backend, before anything is built on
+  it. `Backend`'s four results and `unreachable()` get mapped again with it:
+  today they lean on `HTTPClient`'s error codes, and on its habit of calling
+  every failed connect "connection refused".
+- **The body stays a WAV, with `0xFFFFFFFF` in both length fields.** Settled
+  before the step; D4 has why. The vision's request contract says so when this
+  lands.
+- **The backend's half is its own.** The prototype in `assistant-server`
+  rewrites the two fields once the terminating chunk is in, so the file it saves
+  has a true length; the real backend will forward the stream to an external API
+  and take the length from the transport. A stream that dies mid-question leaves
+  the prototype a truncated file, and that is accepted -- the real backend will
+  not keep recordings.
+- **The buffer is shared for the first time.** Until now `Recording` changes
+  hands on the release and nothing is locked. From this step the orchestrator
+  reads samples the capture task is still writing past, so the committed count
+  has to be published with the ordering that makes everything below it safe to
+  read. The samples behind the count never move, which is what keeps it a
+  counter rather than a lock -- and the paragraphs on ownership in `capture.h`
+  and `recording.h` get rewritten rather than left describing a handover that no
+  longer happens.
+- **The request opens once the hold passes `config::kButtonMinHoldMs`**, or once
+  the network is up if that is later. A tap has to reach nothing -- that is what
+  the minimum hold is for -- and on a cached wake the network is usable about
+  300 ms after the wake ([S7b](#s7b----cached-dhcp-lease)), which is where the
+  minimum hold ends anyway.
+- **The upload runs on the orchestrator.** After S10 it has nothing else to do
+  but poll, and it already owns WiFi, the error table and `askAbout()`. A write
+  that blocks through one of E7's stalls blocks only this thread: the release is
+  timestamped by the capture task, and the buffer is linear, so there is nothing
+  to overrun.
+- **A retry starts again from byte zero.** The buffer holds the whole recording,
+  so `askAbout()`'s stale-lease rule keeps its shape; what changes is that a
+  retry can now happen while the user is still talking, and is a stream in its
+  own right. What a server that fails outright during the hold does to the
+  recording -- the vision aborts on a WiFi failure, and the same argument
+  applies -- is for the step to settle.
+- **`config::kResponseTimeoutMs` counts from the terminating chunk.** It is the
+  backend's thinking time, and a 30 s hold must not spend it.
+- **The round trip in the log splits in two**: the tail after the release, which
+  is what streaming exists to shrink, and the answer after the terminating chunk,
+  which is the number [E2](experiments.md) will want.
+
+**Verified by** the release-to-chirp wait against S10's over the same holds --
+the tail after the release should be the last chunks of audio plus the round
+trip, with E7's stalls landing under the hold on long questions and out of the
+wait; the byte count in the answer matching the recording; the saved file
+playing back as the question; a tap reaching nothing; and the stale-lease rule
+walked once more, since a retry now restarts a stream -- which needs a way to
+provoke it again, the seam S7b used having gone with its driver.
+
 ---
 
 ## Settled while planning
 
-Four questions came out of writing this down. All four are answered; the
+Six questions came out of writing this down. All six are answered; the
 reasoning lives where it belongs and is summarised here so nobody reopens them
 by accident.
 
@@ -1286,3 +1424,9 @@ by accident.
   *Reopened and closed by [E7](experiments.md), 2026-09-17.* It is being weighed
   for real now: the upload's stalls are spread through the body, which is the
   case where streaming moves them under the hold. D4 has the argument.
+- **The streaming body stays a WAV**, with `0xFFFFFFFF` in both length fields,
+  rather than becoming raw PCM with the format in request headers --
+  [D4](deferred.md) has why. (S11)
+- **A stream that dies leaves the prototype backend a truncated file**, and that
+  is accepted: the real backend will forward recordings to an external API
+  rather than keep them. (S11)
