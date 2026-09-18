@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import os
 import socket
+import time
 import urllib.request
 import wave
 from collections.abc import AsyncIterator
@@ -18,6 +19,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.requests import ClientDisconnect
 # The form parser yields starlette's UploadFile; fastapi's is a subclass of it,
 # so an isinstance check against the fastapi one would miss every upload.
 from starlette.datastructures import UploadFile
@@ -28,6 +30,11 @@ RECORDINGS_DIR = Path(os.environ.get("RECORDINGS_DIR", "recordings"))
 
 # The device may stream a long recording; never buffer it whole in memory.
 CHUNK_SIZE = 64 * 1024
+
+# What the device's WAV header says in both length fields. It streams the
+# recording while the button is still held, so the header goes up before the
+# recording has a length; the end of the chunked body is where it ends.
+UNKNOWN_LENGTH = 0xFFFFFFFF
 
 # How long /audio/fault/slow holds a question before answering. Longer than the
 # device's config::kResponseTimeoutMs, which is 30 s, so the firmware gives up
@@ -71,6 +78,43 @@ def describe_wav(path: Path) -> str:
         return f"not a readable WAV ({exc})"
 
 
+def settle_wav_lengths(path: Path) -> bool:
+    """Write the true lengths into a WAV header that could not know them.
+
+    Only fields that say UNKNOWN_LENGTH are touched, so a file that arrived with
+    real lengths is left as it came. Python's wave reads such a file anyway, as
+    one of unknown length, but players and the log's duration do not. Returns
+    True if anything was rewritten.
+    """
+    size = path.stat().st_size
+    changed = False
+    with path.open("r+b") as f:
+        head = f.read(12)
+        if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            return False
+        if int.from_bytes(head[4:8], "little") == UNKNOWN_LENGTH:
+            f.seek(4)
+            f.write((size - 8).to_bytes(4, "little"))
+            changed = True
+
+        # The data chunk is found by walking the chunks rather than assumed at
+        # offset 36, which is where the device puts it but not where every WAV
+        # does.
+        offset = 12
+        while offset + 8 <= size:
+            f.seek(offset)
+            chunk = f.read(8)
+            length = int.from_bytes(chunk[4:8], "little")
+            if chunk[:4] == b"data":
+                if length == UNKNOWN_LENGTH:
+                    f.seek(offset + 4)
+                    f.write((size - offset - 8).to_bytes(4, "little"))
+                    changed = True
+                break
+            offset += 8 + length + (length & 1)
+    return changed
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,13 +142,19 @@ async def upload_audio(request: Request) -> dict[str, object]:
     """Accept a WAV recording and store it under a timestamped name.
 
     Takes the audio either as the raw request body (any content type) or as a
-    multipart form field — the device firmware may end up doing either.
+    multipart form field — the device firmware may end up doing either. The
+    firmware streams it chunked while the button is held, so the body arrives
+    over as long as the question took to ask, and the header's lengths are
+    filled in here once it has all arrived.
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
     path = RECORDINGS_DIR / f"{stamp}.wav"
 
     content_type = request.headers.get("content-type", "")
+    chunked = "chunked" in request.headers.get("transfer-encoding", "").lower()
+    started = time.monotonic()
     size = 0
+    disconnected = False
     with path.open("wb") as out:
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
@@ -115,13 +165,24 @@ async def upload_audio(request: Request) -> dict[str, object]:
                     out.write(chunk)
                     size += len(chunk)
         else:
-            async for chunk in request.stream():
-                out.write(chunk)
-                size += len(chunk)
+            # A stream that dies mid-question leaves a truncated file, and that
+            # is accepted: it is what arrived, and its header is settled below
+            # like any other.
+            try:
+                async for chunk in request.stream():
+                    out.write(chunk)
+                    size += len(chunk)
+            except ClientDisconnect:
+                disconnected = True
+    took = time.monotonic() - started
 
+    settled = settle_wav_lengths(path)
     print(
-        f"[{stamp}] {path.name}  {size} bytes  "
+        f"[{stamp}] {path.name}  {size} bytes"
+        f"{' chunked' if chunked else ''} over {took:.2f} s  "
         f"content-type={content_type or '-'}  {describe_wav(path)}"
+        f"{'  (lengths filled in)' if settled else ''}"
+        f"{'  -- the device went away before the end' if disconnected else ''}"
     )
     return {
         "status": "ok",
