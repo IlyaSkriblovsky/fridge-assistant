@@ -1024,11 +1024,11 @@ sleep.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
 - **Two things came across from [S7b](#s7b----cached-dhcp-lease)'s driver rather
-  than dying with it.** The stale-lease rule is `askAbout()` -- ask again, then
-  drop the lease, take an address and ask once more -- and it belongs in the
-  orchestrator because it spans `Backend` and `WifiLink` and neither half can
-  see it alone. The pre-clear branch on `stickyPower::wokeFromDeepSleep()` is the
-  other.
+  than dying with it.** The stale-lease rule is `askRenewingStaleLease()` -- ask
+  again, then drop the lease, take an address and ask once more -- and it
+  belongs in the orchestrator because it spans `Backend` and `WifiLink` and
+  neither half can see it alone. The pre-clear branch on
+  `stickyPower::wokeFromDeepSleep()` is the other.
 - **`WifiLink::spoilLease()` went with the driver**, as it was meant to. It was
   the one seam in a permanent module that the firmware never called, kept
   through S7b because the rule it tested was moving into new code and wanted
@@ -1376,16 +1376,16 @@ the body, and they move under the hold with it.
   300 ms after the wake ([S7b](#s7b----cached-dhcp-lease)), which is where the
   minimum hold ends anyway.
 - **The upload runs on the orchestrator.** After S10 it has nothing else to do
-  but poll, and it already owns WiFi, the error table and `askAbout()`. A write
-  that blocks through one of E7's stalls blocks only this thread: the release is
-  timestamped by the capture task, and the buffer is linear, so there is nothing
-  to overrun.
+  but poll, and it already owns WiFi, the error table and
+  `askRenewingStaleLease()`. A write that blocks through one of E7's stalls
+  blocks only this thread: the release is timestamped by the capture task, and
+  the buffer is linear, so there is nothing to overrun.
 - **A retry starts again from byte zero.** The buffer holds the whole recording,
-  so `askAbout()`'s stale-lease rule keeps its shape; what changes is that a
-  retry can now happen while the user is still talking, and is a stream in its
-  own right. What a server that fails outright during the hold does to the
-  recording -- the vision aborts on a WiFi failure, and the same argument
-  applies -- is for the step to settle.
+  so the stale-lease rule in `askRenewingStaleLease()` keeps its shape; what
+  changes is that a retry can now happen while the user is still talking, and is
+  a stream in its own right. What a server that fails outright during the hold
+  does to the recording -- the vision aborts on a WiFi failure, and the same
+  argument applies -- is for the step to settle.
 - **`config::kResponseTimeoutMs` counts from the terminating chunk.** It is the
   backend's thinking time, and a 30 s hold must not spend it.
 - **The round trip in the log splits in two**: the tail after the release, which

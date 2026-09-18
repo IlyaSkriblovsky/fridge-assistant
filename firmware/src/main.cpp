@@ -27,10 +27,10 @@
 // discarded tap included, and there is exactly one of them: finish().
 //
 // Two things came across from the S7b driver rather than dying with it. The
-// stale-lease rule is askAbout() below -- ask again, then drop the lease, take
-// an address and ask once more -- and it lives here because it spans Backend
-// and WifiLink and neither half can see it alone. The pre-clear branch on
-// stickyPower::wokeFromDeepSleep() is the other.
+// stale-lease rule is askRenewingStaleLease() below -- ask again, then drop the
+// lease, take an address and ask once more -- and it lives here because it
+// spans Backend and WifiLink and neither half can see it alone. The pre-clear
+// branch on stickyPower::wokeFromDeepSleep() is the other.
 
 #include <Arduino.h>
 #include <esp_timer.h>
@@ -255,7 +255,7 @@ void waitForRelease() {
 // Everything else the backend can do -- refuse the connection, answer 500,
 // answer nothing, answer nonsense -- proves there is something at the address
 // and therefore that the address works, and leaves the lease alone.
-Backend::Result askAbout() {
+Backend::Result askRenewingStaleLease() {
   Backend::Result result = backend.ask(audio.wav(), audio.wavBytes());
 
   const bool couldBeStale =
@@ -481,7 +481,7 @@ void setup() {
                     " next question");
   }
 
-  const Backend::Result result = askAbout();
+  const Backend::Result result = askRenewingStaleLease();
   const uint32_t roundTripMs = backend.elapsedMs();
 
   Serial1.printf("  round trip: %lu ms, first byte at %lu ms", static_cast<unsigned long>(roundTripMs),
