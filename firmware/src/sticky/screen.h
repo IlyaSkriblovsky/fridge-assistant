@@ -7,10 +7,12 @@
 
 // The four screens the device draws, and the only place the panel is touched.
 //
-// The interface is deliberately four calls wide. D4 moves the display into a
-// task of its own once the upload streams, and that split is cheap exactly as
-// long as nothing outside this class calls the panel: the day it happens, these
-// four become messages on a queue and everything else stays as it is.
+// The interface is deliberately four calls wide, and since S10 it has one
+// caller: Display, in src/display.h, owns the only instance and draws it on a
+// task of its own. That split was cheap exactly because nothing outside this
+// class had ever called the panel -- the four became messages in a slot and
+// nothing here changed. Everything below runs on that task and blocks it for
+// the length of a refresh, which is what the task is for.
 //
 // The panel is a 3.97" 800x480 monochrome e-paper on an SSD1677 controller,
 // through the two corrections in src/sticky/epaper.h -- which is included by
@@ -23,18 +25,19 @@
 //    the panel the way the vision's screen section settles on -- buttons along
 //    the bottom edge, on the right, under the right thumb. A rotation appearing
 //    here later is a regression, not a fix.
-//  * **One full refresh per question, and it is the first one** -- D6.
-//    listening() is full and everything after it is partial, which is not a
-//    preference but the only arrangement that works. A partial update is
-//    differential: the controller picks each pixel's waveform from the pair
-//    (what is on the glass, what should be), and "what is on the glass" is the
-//    shadow in src/sticky/epaper.h -- allocated fresh on every boot and seeded
-//    white. After a deep sleep the glass still holds the last answer and the
-//    firmware has been told nothing about it, so a partial listening() would
-//    leave that answer's black pixels exactly where they are and draw the word
-//    on top. Only a full refresh drives every pixel whatever it was, which is
-//    what reconciles the glass with the buffer once per wake -- and it also
-//    clears accumulated ghosting, which is the other thing D6 is about.
+//  * **One full refresh per question, and it is the first one** -- the
+//    vision's screen section. listening() is full and everything after it is
+//    partial, which is not a preference but the only arrangement that works. A
+//    partial update is differential: the controller picks each pixel's
+//    waveform from the pair (what is on the glass, what should be), and "what
+//    is on the glass" is the shadow in src/sticky/epaper.h -- allocated fresh
+//    on every boot and seeded white. After a deep sleep the glass still holds
+//    the last answer and the firmware has been told nothing about it, so a
+//    partial listening() would leave that answer's black pixels exactly where
+//    they are and draw the word on top. Only a full refresh drives every pixel
+//    whatever it was, which is what reconciles the glass with the buffer once
+//    per wake -- and it also clears accumulated ghosting, which is the other
+//    thing full refreshes are for.
 //
 //    So the cost is paid where it is not felt. The Listening refresh runs under
 //    the recording; the three that follow it are partial and each is a little
@@ -87,10 +90,9 @@ class StickyScreen {
 
   // Listening -> working. The vision's step 6: the button is up, the question
   // is on its way, and the panel would otherwise still read LISTENING until the
-  // answer lands. The word alone is repainted, through a partial refresh --
-  // this is the one transition the user waits through, so a full refresh here
-  // would put its two and a half seconds in front of a round trip that is
-  // usually half a second (E7).
+  // answer lands. The word alone is repainted, through a partial refresh: the
+  // answer queues behind it on the one controller, so a full refresh here
+  // would put its two and a half seconds in front of the answer's own.
   //
   // **It has to follow a full refresh in the same boot**, which listening()
   // always is: a partial update is differential against what the controller was

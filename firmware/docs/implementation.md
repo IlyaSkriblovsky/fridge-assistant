@@ -28,7 +28,7 @@ which means asking.
 | S7b | Cached DHCP lease | Three seconds off every question | Done |
 | S8 | The flow | Wake, record, ask, show, sleep | Done |
 | S9 | Re-run E1 | Wake latency of the real firmware | Done |
-| S10 | Display task | The panel off the orchestrator's thread | Not started |
+| S10 | Display task | The panel off the orchestrator's thread | Done |
 | S11 | Streaming upload | The body going up under the hold | Not started |
 
 ## Why this order
@@ -1334,6 +1334,162 @@ in the release-to-chirp wait; a short hold, which is the superseded-`WORKING`
 case by itself; the capture task's slow-chunk count unchanged with the display
 task running; and the panel checked by eye through a run of consecutive
 questions, which means asking.
+
+### What it turned out to involve
+
+`src/display.h/.cpp`. `Display` is `start()`, the five posts -- `clear()`,
+`listening()`, `working()`, `answer()`, `error()` -- and `waitIdle()`, and it
+owns the only `StickyScreen` there is, so nothing outside it can reach the panel
+at all. The orchestrator's half of it is the calls it already made, minus the
+waiting:
+
+```
+if (!display.start()) ...                 // the panel up, then the task
+if (!stickyPower::wokeFromDeepSleep()) display.clear();
+display.listening();
+...                                       // the release, seen when it happens
+display.working();
+stickyBuzzer::taken();
+...                                       // the round trip
+display.answer(backend.answer());
+stickyBuzzer::answer();
+```
+
+**The slot is one screen with replacement, and the pre-clear is not a screen.**
+A post while another screen is still waiting replaces it and marks it
+superseded; the task takes whatever is in the slot when the panel comes free.
+The first sketch put `clear()` in the same slot, and on a cold start the
+`listening()` posted straight after it would have replaced it before the task
+had looked -- the one post that must never be dropped, dropped by the rule
+written for the others. So the pre-clear is a flag the task honours ahead of
+the slot. What can then be superseded is `WORKING` on any short hold, and
+`LISTENING` on a cold start whose release comes before the pre-clear has
+finished; both are right, because `StickyScreen::working()` repaints the band
+over a frame buffer that is either `LISTENING` or white, and either is what the
+glass holds.
+
+**`begin()` stayed on the orchestrator's thread**, inside `Display::start()`,
+before the task exists. The panel that will not start is then a return value
+and the vision's chirp, log and sleep stay exactly where they were. It turned
+out to be 201 ms rather than the milliseconds it looked like on paper -- E8 timed
+the controller's re-initialisation inside a refresh at 24 ms, and the rest has
+not been taken apart -- but it costs nothing the user waits for: `LISTENING`
+cannot start before it on any thread, and until the release this thread has
+nothing to do but watch.
+
+**Core 0, at priority 1.** The step left the core to the device, against the
+capture task's slow-chunk count, and the count did not move -- so the choice
+rests on the argument, and core 1 was not tried. Core 1 is capture's and the
+orchestrator's, and after [S11](#s11----streaming-upload) the orchestrator
+streams the upload while the button is held; at priority 1 on that core the
+panel would time-slice with it against half a second of drawing and plane push
+at the very start of the stream. On core 0 everything else outranks it and
+sleeps most of the time. The one thing it can hold up there is the idle task the
+watchdog watches, and its longest run without blocking is about half a second
+against a 5 s timeout.
+
+**Every chirp now follows its post.** A post costs nothing and the chirps are
+60, 230 and 450 ms of blocking, so the panel starts on the screen while the
+chirp sounds instead of after it. The answer still appears a second after its
+chirp, which is the order [S7](#s7----upload-and-answer) put the chirp in front
+of the refresh for.
+
+**Nothing prints between the release and the last chirp.** With the panel gone,
+Serial1 was the next thing in the wait: 115200 baud is a millisecond every
+eleven characters, arduino-esp32 gives `Serial1` no transmit buffer beyond the
+UART's 128-byte FIFO, and the five lines that used to go out between the
+release and the upload come to about 30 ms at that rate. They are written after
+the last chirp now, in the order things happened, and the failure paths still
+print as they go.
+
+**The exit waits for the panel, and says for how long.** `finish()` shuts the
+microphone and the radio down, then waits for the task to go idle, bounded at
+`kDisplayDrainMs` for the capture join's reason -- the library waits up to 30 s
+on a BUSY pin that never drops. That wait is past the last chirp and is printed
+apart from the wait before it.
+
+**The panel's numbers are the task's.** Each screen gets a record -- posted,
+taken, finished, partial, superseded -- stamped on the task with
+`esp_timer_get_time()`, so they share an axis with everything the orchestrator
+measures, and they are read back once the task is idle. The log prints them as
+a timeline from the top of `setup()`, which is also the axis the hold is on.
+
+**[D6](deferred.md) is paid, and its line is out of the deferred list.** What
+in it was a decision rather than a shortcut -- why `LISTENING` stays full, the
+ghosting depth fixed at two, what an idle screen would cost -- has moved into
+the vision's screen section, which is where the reasons for the panel's shape
+now live.
+
+### What it measured
+
+Twelve wakes: a cold start that the flash turned into a tap, then eleven real
+questions, the first of them paying for DHCP because the flash cleared RTC
+memory. The panel was checked by eye throughout: `LISTENING`, `WORKING`, the
+answer on every long and medium hold, `WORKING` never appearing on a short one,
+and every transition clean.
+
+| Hold | Round trip | Release to the answer chirp | `WORKING` | Answer queued | Release to the answer on the glass |
+| --- | --- | --- | --- | --- | --- |
+| 4722 ms, DHCP | 391 ms | 509 ms | drawn | 447 ms | 2200 ms |
+| 5352 ms | 658 ms | 777 ms | drawn | 173 ms | 2203 ms |
+| 5007 ms | 644 ms | 758 ms | drawn | 191 ms | 2202 ms |
+| 5292 ms | 792 ms | 910 ms | drawn | 37 ms | 2204 ms |
+| 11922 ms | 1277 ms | 1394 ms | drawn | 0 ms | 2649 ms |
+| 2322 ms | 504 ms | 621 ms | drawn, 323 ms late | 668 ms | 2533 ms |
+| 2472 ms | 699 ms | 816 ms | drawn, 173 ms late | 302 ms | 2361 ms |
+| 957 ms | 484 ms | 598 ms | superseded | 1144 ms | 2986 ms |
+| 1137 ms | 205 ms | 318 ms | superseded | 1246 ms | 2808 ms |
+| 1137 ms | 221 ms | 335 ms | superseded | 1228 ms | 2807 ms |
+| 897 ms | 295 ms | 408 ms | superseded | 1395 ms | 3047 ms |
+
+- **There is no panel left in the wait.** Release to the answer chirp is the
+  round trip plus 113 to 119 ms on every question, whatever the hold: 49-55 ms
+  for the capture task to confirm the release (the 40 ms debounce, the chunk it
+  lands in and this thread's 10 ms poll), 60 ms of taken chirp, 0 ms waiting for
+  the network and 4 ms of everything else. [S8](#s8----the-flow) measured the
+  same wait at 2.0 to 5.6 s with up to 2.1 s of leftover `LISTENING` and 990 ms
+  of `WORKING` inside it; this run is 318 ms to 1.4 s, and the 1.4 s is a
+  1277 ms round trip. It was audible at the desk before it was read off the log:
+  the answer's pair now follows the taken note by about the round trip.
+- **The short hold is the superseded-`WORKING` case, every time.** All four
+  holds under 1.2 s had their answer in hand while `LISTENING` still had 1.1 to
+  1.4 s to run, and `WORKING` was dropped unseen in all four. The answer went on
+  the glass the moment `LISTENING` let go, at 2700 ms into `setup()` whatever
+  the hold -- which makes those four questions 3997 ms awake to the millisecond.
+- **The answer on the glass is shortened less, and the table says exactly
+  why.** Four long holds came out at 2200 to 2204 ms from release to glass with
+  round trips from 391 to 792 ms: the answer queued behind `WORKING`, which
+  starts about 50 ms after the release and takes 895, so the glass is `WORKING`
+  plus the answer's own 1250 whenever the round trip is shorter than `WORKING`.
+  The one round trip longer than that, 1277 ms, queued for nothing and landed at
+  2649. On a short hold it is `LISTENING` the answer waits for instead. That is
+  [E8](experiments.md)'s point arriving in the firmware's log: the screens of
+  one question queue on one controller, and the 338 ms each refresh spends after
+  its image is drawn is now the panel's own business and nobody else's.
+- **The recording did not notice.** Slow reads one in 14.2 to 15.5 across all
+  eleven -- 20 of 295, 22 of 335, 50 of 745, 4 of 56 -- which is the DMA's
+  240-frame blocks under 256-sample reads, exactly as [S4](#s4----capture-task)
+  found; the longest read 30.1 ms, at the same chunk every time; and the task's
+  clock within -6 to +4 ms of the audio it kept, which is less than a chunk.
+- **The panel is as deterministic as ever**: `LISTENING` 2303-2307 ms full,
+  starting 393-395 ms into `setup()` behind the 201 ms `begin()`; `WORKING`
+  891-912 ms partial; the answer 1242-1256 ms partial. The answer's spread is
+  one thing: 1242-1243 when it started behind `LISTENING`, 1252-1256 when it
+  started straight behind `WORKING`, and the second is also when `finish()` was
+  shutting the radio down on the same core, partway into the answer's plane
+  push. Ten milliseconds of awake time, and the cost of core 0 if it is one.
+- **The display task used 1.8 to 2.0 KB of stack.** It keeps the 8 KB it had
+  as loopTask: the error screen and the library's fallback paths have not run
+  on it yet, and the log keeps reporting the number.
+- **The exit waits 1.0 to 2.4 s for the panel**, all of it past the last chirp.
+  A long hold is awake for its hold plus about 2.25 s and a short one for about
+  4 s from the wake.
+
+**What this leaves for [S11](#s11----streaming-upload).** The wait after the
+release is now the round trip and 115 ms that is not network. Of that, the
+60 ms taken chirp blocks this thread, which is where the streamed tail will be
+written from, so it wants to follow the terminating chunk rather than precede
+it; the 50 ms of release confirmation is the debounce and stays.
 
 ## S11 -- Streaming upload
 

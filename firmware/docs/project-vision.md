@@ -31,11 +31,13 @@ It is a personal device, built for one user, powered by battery.
    and a language model, which is seconds -- `kResponseTimeoutMs` allows thirty
    of them -- and the panel would otherwise still read "Listening", which stops
    being true the moment the button comes up. The word is a partial refresh, not
-   a screen of its own: this is the one transition the user waits through, and a
-   full refresh would put two and a half seconds in front of a wait that is
-   usually half a second. The answer chirp then marks the end of the wait rather
-   than covering it: it sounds when the refresh starts, so it says the answer has
-   arrived and not that it is finished being drawn.
+   a screen of its own: the answer queues behind it on the one controller, and a
+   full refresh would put two and a half seconds in front of the answer's own.
+   It is drawn on the panel's own task, so the upload never waits for it, and it
+   is skipped when the answer arrives before the panel is free to draw it. The
+   answer chirp then marks the end of the wait rather than covering it: it
+   sounds when the refresh starts, so it says the answer has arrived and not that
+   it is finished being drawn.
 7. **Upload.** POST the recording to the backend as a WAV.
 8. **Answer.** The backend replies with text. Render it on the e-paper.
 9. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
@@ -183,29 +185,41 @@ directly -- `esp_http_client` for chunked uploads, `esp_sleep` for deep sleep,
 FreeRTOS for tasks. PlatformIO also accepts `framework = arduino, espidf` if
 menuconfig-level tuning is ever needed.
 
-### Concurrency: two tasks
+### Concurrency: three tasks
 
 Capture and networking cannot share a thread. The I2S DMA holds 6 x 240 frames,
 which is 90 ms at 16 kHz, while a blocking WiFi connect takes seconds. Audio
 would be dropped in chunks.
 
-- **Capture task**, pinned to core 1, reads I2S into the buffer and polls the
-  button between reads. A `gpio_get_level()` costs nothing and never blocks, and
-  it buys a tight stop: the other task's loop refreshes the panel, so a release
-  arriving during a refresh would otherwise add a second or two of room noise to
-  the end of every recording.
-- **Network/UI task** does WiFi, HTTP and the e-paper. The WiFi and lwIP tasks
-  sit on core 0, so the recording and the network never share a core either.
+- **Capture task**, pinned to core 1 above everything else there, reads I2S
+  into the buffer and polls the button between reads. A `gpio_get_level()`
+  costs nothing and never blocks, and it buys a stop that does not depend on
+  what the other tasks are inside: a release arriving during a refresh or a
+  stalled upload would otherwise add a second or two of room noise to the end
+  of every recording.
+- **The orchestrator**, Arduino's own loop task on core 1, does WiFi and HTTP
+  and decides what happens next. The WiFi and lwIP tasks sit on core 0, so the
+  recording and the network never share a core either.
+- **Display task**, core 0 below everything but the idle task, owns the e-paper
+  and draws whatever the orchestrator posts: at most one screen waiting, and a
+  newer post replacing one the panel has not reached yet.
 
-E-paper refresh belongs in the second task: it is a long blocking SPI transfer
-followed by a BUSY wait, and it must not sit between two I2S reads.
+E-paper refresh is a long blocking SPI transfer followed by a BUSY wait, 0.8 to
+2.3 s a screen. It must not sit between two I2S reads, and it does not sit in
+front of the upload either: the orchestrator posts a screen and carries on, and
+the one place it waits for the panel is before deep sleep, which would otherwise
+cut a refresh in half. Almost all of a refresh is the library polling BUSY with
+`vTaskDelay()`, so the task is blocked for nearly its whole life and wants no
+priority to speak of.
 
-Two tasks are enough while the upload happens after the button is released,
-because rendering and uploading never overlap: the "Listening" refresh runs while
-WiFi is still associating, and WiFi makes progress in its own IDF tasks
-regardless. The chunked variant breaks that and needs a third task
-([D4](deferred.md)), so keeping display calls behind a small interface now makes
-that split cheap later.
+The third task came before the streaming upload rather than with it.
+[S8](implementation.md#s8----the-flow) measured the panel as most of what the
+user waited through after the release -- the rest of the Listening refresh on a
+short question, the working screen on every one -- and none of it needed the
+orchestrator's thread; [S10](implementation.md#s10----display-task) took it
+off, and the wait became the round trip. [D4](deferred.md)'s streaming upload
+runs on the orchestrator, which now has nothing else to do while the button is
+held.
 
 ### Buttons
 
@@ -235,11 +249,14 @@ nothing about what is on the glass: the previous-image plane is rebuilt from
 zero on every boot while the panel still holds the last answer. Only a full
 refresh drives every pixel whatever it was, so exactly one is needed per wake to
 reconcile the two, and it is `Listening`. It also clears accumulated ghosting,
-which is the other thing full refreshes are for -- [D6](deferred.md).
+which is the other thing full refreshes are for, and it fixes the ghosting depth
+at two by construction: full, partial, partial, sleep, whatever the sequence of
+questions, so nothing accumulates across a run.
 
 That is the cheap place to spend it. The Listening refresh runs under the
 recording, where the user is still talking; everything after it is on the far
-side of the button coming up, where a second is a second the user waits.
+side of the button coming up, where a second is a second before the answer is on
+the glass.
 
 **So working, answer and error are partial**, and on this panel that is 1344 ms
 against 2400 ms for the same area full -- measured at
@@ -249,16 +266,20 @@ out clean: no smear, no residue, checked by eye over a run of consecutive
 questions. That run was the first time the partial-refresh correction in
 `src/sticky/epaper.h` had ever executed.
 
-**The working transition is the only one that costs the user anything**, and it
-is what settled the shape of all of this. Every other transition happens while
-the user is waiting for nothing. This one sits on the critical path -- released,
-draw, upload, wait, draw again -- so whatever it costs is added to the wait for
-every answer, to show a screen that a fast backend may not leave up long enough
-to read. It repaints the word and nothing else: `LISTENING` and `WORKING` are
+**The working transition is what settled the shape of all of this.** Every
+other transition happens while the user is waiting for nothing; this one is
+between the button and the answer. Until [S10](implementation.md#s10----display-task)
+it sat on the critical path -- released, draw, upload, wait, draw again -- and
+whatever it cost was added to the wait for every answer. With the panel on a
+task of its own it no longer delays the answer's chirp, but it still delays the
+answer's appearance, because the screens of one question queue on one
+controller. It repaints the word and nothing else: `LISTENING` and `WORKING` are
 one screen with two words in it, drawn in the same face at the same size and
 centred, so the strip of panel the word occupies belongs to the face rather than
 to the word, and a partial refresh of that strip -- 990 ms -- is the whole
-transition.
+transition. When the answer arrives before the panel is free to draw the word,
+the word is dropped: on a short question it is still under the Listening refresh
+when the answer lands, every time.
 
 The two shapes it was chosen over were a screen of its own at the full 2.4 s,
 which would have been slower than the wait it announced three times in four, and
@@ -287,12 +308,21 @@ last answer. It belongs to the UI/UX pass and is not decided here. Two things
 about the panel already hang on it, which is why it is written down:
 
 - Its content is not expected to be reconstructible after a wake, which is what
-  keeps the Listening screen a full refresh -- [D6](deferred.md) has the
-  reasoning, and it is the reason that refresh needs a thread rather than a
-  cheaper waveform.
+  keeps the Listening screen a full refresh. The only way round would be to
+  rebuild what is on the glass and seed the shadow in `src/sticky/epaper.h` from
+  it without touching the panel, and whatever the idle screen shows will have
+  been built from things the device had while it was awake; nor does a
+  48000-byte frame fit in the 8192 bytes of RTC memory the WiFi lease already
+  lives in. It is the reason that refresh got a thread rather than a cheaper
+  waveform.
 - Drawn by a full refresh, it settles what the panel holds overnight: the image
   that has to survive without power is then always one a full waveform drove,
   and how well a partial one keeps stops being worth measuring.
+- It costs awake time: a second full refresh a question and the seconds before
+  it, on a device awake four to ten seconds a question. Whether that is
+  affordable is [E5](experiments.md)'s question. The mechanics are already
+  there -- the display task takes the post, and the exit already waits for the
+  panel to finish.
 
 Battery level belongs on the **answer and error screens**, not on the Listening
 screen -- read from the BQ27220 fuel gauge on the sensor I2C bus (address
@@ -354,6 +384,11 @@ readable well before it ends -- the text appears inverted partway through -- so
 by the time the user has looked up, the answer is already on the glass. Judged
 at the panel during [S7](implementation.md#s7----upload-and-answer), where the
 first real wait existed to sit through.
+
+Since the panel has a task of its own the screen is posted a moment before the
+chirp rather than drawn after it, so the panel starts on the image while the
+chirp sounds; the image still arrives a second behind the sound, which is the
+order that matters.
 
 A press too short to count makes no sound at all -- [D7](deferred.md).
 

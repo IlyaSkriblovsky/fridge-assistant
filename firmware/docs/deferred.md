@@ -14,9 +14,8 @@ in one place rather than archaeology through commit messages.
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
-| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes. Scheduled as [S11](implementation.md#s11----streaming-upload), after [S10](implementation.md#s10----display-task) |
+| D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes. Scheduled as [S11](implementation.md#s11----streaming-upload); its precondition, [S10](implementation.md#s10----display-task)'s display task, has run |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
-| D6 | Everything partial but the Listening screen, which is full because nothing survives the sleep to be differential against | The same waveforms, with the refresh off the orchestrator's thread | Paid at [S8](implementation.md#s8----the-flow); the thread is [S10](implementation.md#s10----display-task) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
@@ -80,10 +79,11 @@ it, in this step's favour:
   [S7b](implementation.md#s7b----cached-dhcp-lease) has removed the premise: a
   cached lease puts the device on a usable network 300 ms after the wake, so
   every question has a window now and the saving no longer scales only with
-  length. What is in the way instead is the second point below -- the panel
-  refresh holds the orchestrator's thread for 2.4 s of that window -- which
-  makes the display task a precondition for this step rather than a tidying-up
-  afterwards.
+  length. What was in the way instead is the second point below -- the panel
+  refresh held the orchestrator's thread for 2.4 s of that window -- which made
+  the display task a precondition for this step rather than a tidying-up
+  afterwards. [S10](implementation.md#s10----display-task) has taken it out of
+  the way.
 - **Part of the upload is not upload, and it is spread through the body.** The
   same run showed 112684 bytes taking 6848 ms while three times that went in
   half the time, and [E7](experiments.md) found what those seconds are: the
@@ -114,22 +114,21 @@ Two things had to be settled before this could change, and both now are:
   `audio/L16` is big-endian by RFC 2586. So it would mean swapping a megabyte on
   the device or headers of our own, and the second is the bespoke protocol the
   vision's transport decision exists to avoid.
-- **Display gets its own task**, and it is
+- **Display has its own task**, since
   [S10](implementation.md#s10----display-task), ahead of this entry's own
   [S11](implementation.md#s11----streaming-upload). With a single POST after
-  release, rendering and uploading never overlap; with a streaming upload, a
-  one-to-two second panel refresh would stall it -- and since S7b that refresh is
-  the *only* thing between the wake and a network that is ready to take bytes.
+  release, rendering and uploading never overlapped; with a streaming upload, a
+  one-to-two second panel refresh would have stalled it -- and since S7b that
+  refresh was the *only* thing between the wake and a network that is ready to
+  take bytes.
 
-**S8 has put a number on what the task is worth, and it is not the upload.**
-The working screen is 990 ms on this thread and the leftover Listening refresh
-is up to 2 s more -- so on a cached wake with a quick backend the panel is the
-majority of what the user waits through, and every millisecond of it is a
-millisecond a display task removes. That is about a second a question on a long
-hold and closer to two and a half on a short one, before the streaming upload
-this entry is nominally about saves anything at all. It is also the precondition
-for the last part of [D6](deferred.md), whose full refresh has to run after the
-answer while the orchestrator is going to sleep.
+**The task was worth more than the upload, and it has been taken first.**
+[S8](implementation.md#s8----the-flow) measured the release-to-chirp wait at 2.0
+to 5.6 s with up to 2.1 s of leftover Listening refresh and 990 ms of working
+screen inside it. After S10 it is the round trip plus 113 to 119 ms on every
+hold -- the release being confirmed, the taken chirp, and nothing of the panel.
+What is left for this entry is exactly the part it was always about: the round
+trip, and the stalls inside it.
 
 **That task is close to free, which was not obvious.** A full refresh takes
 2.4 s on this panel ([S5](implementation.md#s5----screens)), but almost none of
@@ -138,100 +137,14 @@ it is CPU: the library waits for the controller on the BUSY pin in a
 arduino-esp32 is `vTaskDelay()` against a 1000 Hz tick. So a refresh is about
 2200 yields, and a task doing nothing but drawing is blocked for essentially all
 of its life -- it can share a core with anything and wants no priority to speak
-of.
+of. S10 put it on core 0 at priority 1 and the capture task's slow reads did not
+move.
 
 The same fact explains a result S5 and [S4](implementation.md#s4----capture-task)
-both measured: the panel costs the capture task nothing. While the orchestrator
-is inside a refresh it is parked in `vTaskDelay`, so the capture task at
-priority 10 preempts it freely rather than queueing behind it.
-
-## D6 -- Partial refresh
-
-**Most of this is paid.** [S8](implementation.md#s8----the-flow) made the
-working screen, the answer and the errors partial, and the two things this entry
-said were owed first are now known: a partial takes **1344 ms over the whole
-panel** and 990 ms over the word's 136 rows, against 2400 ms for a full refresh
-either way, deterministic to the millisecond over fourteen of them -- and the
-panel comes out clean over a run of consecutive questions, checked by eye. The
-partial-refresh correction in `src/sticky/epaper.h`, written at S5 and never
-exercised, has run.
-
-The saving is 1056 ms a transition and it does not shrink with area: two window
-sizes were enough to separate the fixed cost from the per-row one and show that
-the whole difference is waveform, not transfer. The numbers are in S8.
-
-**What is left is one transition, the Listening screen, and it stays full.** It
-has to be: a partial update is differential against what the controller has been
-told is on the glass, and after a deep sleep the firmware has been told nothing
-while the panel still holds whatever the last wake left. Draw `LISTENING`
-partially in that state and the old image's black pixels stay exactly where they
-are with the word on top. Every other transition is safe precisely because this
-one ran first.
-
-**And it cannot be argued out of.** The way round would be for the wake to
-reconstruct what is on the glass and seed the shadow in `epaper.h` from it
-without touching the panel -- which needs the previous image to be something the
-firmware can rebuild from what survives the sleep. It is not. The screen left on
-the glass between questions is meant to be an idle screen of the wider UI's own,
-and its content is not expected to be reconstructible after a wake: whatever it
-shows, it will have been built from things the device had while it was awake.
-Keeping a 48000-byte frame in RTC memory is not an option either -- there are
-8192 bytes of it, and the WiFi lease is already in them.
-
-So the arrangement S8 arrived at is the end state for the waveforms: **one full
-refresh a wake, and it is `LISTENING`.** What is still owed is not a cheaper
-refresh but a thread to run it on, and that is
-[S10](implementation.md#s10----display-task).
-
-**The panel comes off the critical path through [D4](deferred.md)'s display
-task, not through a partial.** That is the correction this entry needed: the
-2.4 s of `LISTENING` is only in the way because the orchestrator sits inside it
-and therefore cannot notice the button coming up -- 1239 to 1809 ms of it left
-over on a short question, measured in S8. Behind a queue it stops being in the
-way at all. The orchestrator posts the screen, keeps polling capture, sees the
-release when it happens, chirps, and starts the upload while the panel is still
-catching up. The wait stops containing any panel at all and becomes the round
-trip, which on a cached wake with a quick backend is 282 ms against the 3166 ms
-S8 measured on the same question.
-
-Two things that arrangement wants, neither of them hard and both worth writing
-down before someone builds it:
-
-- **Nothing may sleep with the queue unfinished.** Deep sleep would cut a
-  refresh in half, so the exit waits for the display task to drain. That is
-  awake time rather than wait -- it is all past the answer chirp -- but it is
-  the reason the two are worth keeping apart in the log.
-- **A superseded screen should be dropped rather than drawn.** If the answer
-  lands before `WORKING` has started, drawing `WORKING` costs a second and shows
-  the user a word that was already stale when it appeared. A queue of one with
-  replacement is probably the whole of it.
-
-**The ghosting depth stays fixed at two either way**, which is worth stating
-because an earlier draft of this entry had it as an open question. Full,
-partial, partial -- and, once there is an idle screen, a second full refresh
-before sleep -- so between any two full refreshes there are never more than two
-partials, however many questions are asked. Nothing accumulates across a run.
-"How many partials does this panel take" would only have become a question if
-the full refresh had moved off the wake, and it is not moving.
-
-**The one thing an idle screen does settle** is how well a partial image keeps.
-The answer screen is drawn partially and a partial waveform drives pixels less
-hard, so if the answer were the image that lived on the glass between questions
--- possibly for days -- how well it holds would be worth measuring. With an idle
-screen replacing it after some seconds, and that idle screen drawn by a full
-refresh, the image that has to survive the night is always fully driven and
-there is nothing to measure. That is a reason to want the idle screen that has
-nothing to do with the UI.
-
-What it costs is awake time, and more of it than it first looks: two full
-refreshes a cycle rather than one, plus the five or ten seconds of waiting in
-between, on a device currently awake six to twelve seconds a question. Whether
-that is affordable waits for [E5](experiments.md), which is what would say what
-a second awake is worth against a night asleep.
-
-The rest waits for the UI/UX pass, with the other display work -- and for
-[D4](deferred.md)'s display task, since a refresh that happens after the answer
-has to happen while the orchestrator is on its way to sleep.
+both measured: the panel cost the capture task nothing even on the same core.
+While the orchestrator was inside a refresh it was parked in `vTaskDelay`, so
+the capture task at priority 10 preempted it freely rather than queueing behind
+it.
 
 ## D7 -- Nothing for a press too short
 

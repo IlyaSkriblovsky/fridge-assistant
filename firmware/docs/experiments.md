@@ -1087,6 +1087,14 @@ at all, and never separated from the panel until now.
      What that costs is [E5](#e5----deep-sleep-idle-current)'s question and E5 is
      not taken. Worth revisiting once [D4](deferred.md)'s display task lands and
      the panel's own timeline is all that is left.
+
+     *It has landed, at [S10](implementation.md#s10----display-task), and the
+     log now shows where this lever would pay.* On a long hold with a quick
+     backend the answer queues behind `WORKING` for 37 to 447 ms and reaches
+     the glass 2.2 s after the release whatever the round trip was -- the
+     screens of one question queued on one controller, exactly as this
+     experiment said they would be. Two power-downs and wake-ups between them
+     are part of that queue.
   3. `Panel_EPaper::ePaperSleep()`'s own `delay(100)`, 100 ms a refresh. Out of
      reach: it is private and non-virtual, and everything `refreshFull()` touches
      is private too, so there is no subclass that reaches it -- only an upstream

@@ -21,8 +21,9 @@ class StickyMic;
 // vision's concurrency decision in one sentence.
 //
 // **The button poll lives here too**, between reads. A gpio_get_level() costs
-// nothing and never blocks, and it buys a tight stop: the orchestrator polls in
-// a loop that also refreshes the panel, so a release arriving during a refresh
+// nothing and never blocks, and it buys a stop that does not depend on what the
+// orchestrator is inside: until S10 that was a panel refresh, from S11 it is an
+// upload write that can block through a retransmission timeout, and either
 // would otherwise add a second or two of room noise to the end of every
 // recording. Polled every chunk -- 256 samples, 16 ms -- which is comfortably
 // inside the 40 ms release debounce, so the release is seen 40-56 ms after the
