@@ -16,7 +16,7 @@ in one place rather than archaeology through commit messages.
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
 | D4 | Whole recording POSTed after release | Chunked streaming upload | Latency proving to matter -- [S7](implementation.md#s7----upload-and-answer) says it has for long questions, and [E7](experiments.md) says the stalls move under the hold with the bytes |
 | D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
-| D6 | Full refresh on every transition | Partial refresh where it pays | The working screen at S8, or the UI/UX pass |
+| D6 | Everything partial but the Listening screen, which is full because nothing survives the sleep to be differential against | The same waveforms, with the refresh off the orchestrator's thread | Paid at [S8](implementation.md#s8----the-flow); the thread is [D4](deferred.md)'s display task |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
@@ -106,6 +106,16 @@ Two things have to be settled when this changes:
   refresh would stall it -- and since S7b that refresh is the *only* thing
   between the wake and a network that is ready to take bytes.
 
+**S8 has put a number on what the task is worth, and it is not the upload.**
+The working screen is 990 ms on this thread and the leftover Listening refresh
+is up to 2 s more -- so on a cached wake with a quick backend the panel is the
+majority of what the user waits through, and every millisecond of it is a
+millisecond a display task removes. That is about a second a question on a long
+hold and closer to two and a half on a short one, before the streaming upload
+this entry is nominally about saves anything at all. It is also the precondition
+for the last part of [D6](deferred.md), whose full refresh has to run after the
+answer while the orchestrator is going to sleep.
+
 **That task is close to free, which was not obvious.** A full refresh takes
 2.4 s on this panel ([S5](implementation.md#s5----screens)), but almost none of
 it is CPU: the library waits for the controller on the BUSY pin in a
@@ -122,22 +132,90 @@ priority 10 preempts it freely rather than queueing behind it.
 
 ## D6 -- Partial refresh
 
-All three transitions -- asleep to Listening, Listening to answer, Listening to
-error -- use a full refresh. Each changes most of the screen, and a full refresh
-clears accumulated ghosting as a side effect.
+**Most of this is paid.** [S8](implementation.md#s8----the-flow) made the
+working screen, the answer and the errors partial, and the two things this entry
+said were owed first are now known: a partial takes **1344 ms over the whole
+panel** and 990 ms over the word's 136 rows, against 2400 ms for a full refresh
+either way, deterministic to the millisecond over fourteen of them -- and the
+panel comes out clean over a run of consecutive questions, checked by eye. The
+partial-refresh correction in `src/sticky/epaper.h`, written at S5 and never
+exercised, has run.
 
-This means the partial-refresh correction in `src/sticky/epaper.h` is currently
-unused -- it has never run on the device at all. It stays: the library bug it
-works around returns the moment anything draws a partial update, and a correct
-driver is worth more than a smaller one.
+The saving is 1056 ms a transition and it does not shrink with area: two window
+sizes were enough to separate the fixed cost from the per-row one and show that
+the whole difference is waveform, not transfer. The numbers are in S8.
 
-**The working screen may pull this forward.** The vision's step 6 is the one
-transition on the critical path of a question, so it is the first place where
-2.4 s is spent out of the user's time rather than under a recording -- see
-[S8](implementation.md#s8----the-flow). If that is what a partial refresh is
-for, two things are owed first: how long one takes on this panel, which nobody
-has measured, and what the accumulated ghosting looks like over a real sequence
-of transitions, which only a human at the panel can say.
+**What is left is one transition, the Listening screen, and it stays full.** It
+has to be: a partial update is differential against what the controller has been
+told is on the glass, and after a deep sleep the firmware has been told nothing
+while the panel still holds whatever the last wake left. Draw `LISTENING`
+partially in that state and the old image's black pixels stay exactly where they
+are with the word on top. Every other transition is safe precisely because this
+one ran first.
+
+**And it cannot be argued out of.** The way round would be for the wake to
+reconstruct what is on the glass and seed the shadow in `epaper.h` from it
+without touching the panel -- which needs the previous image to be something the
+firmware can rebuild from what survives the sleep. It is not. The screen left on
+the glass between questions is meant to be an idle screen of the wider UI's own,
+and its content is not expected to be reconstructible after a wake: whatever it
+shows, it will have been built from things the device had while it was awake.
+Keeping a 48000-byte frame in RTC memory is not an option either -- there are
+8192 bytes of it, and the WiFi lease is already in them.
+
+So the arrangement S8 arrived at is the end state for the waveforms: **one full
+refresh a wake, and it is `LISTENING`.** What is still owed is not a cheaper
+refresh but a thread to run it on.
+
+**The panel comes off the critical path through [D4](deferred.md)'s display
+task, not through a partial.** That is the correction this entry needed: the
+2.4 s of `LISTENING` is only in the way because the orchestrator sits inside it
+and therefore cannot notice the button coming up -- 1239 to 1809 ms of it left
+over on a short question, measured in S8. Behind a queue it stops being in the
+way at all. The orchestrator posts the screen, keeps polling capture, sees the
+release when it happens, chirps, and starts the upload while the panel is still
+catching up. The wait stops containing any panel at all and becomes the round
+trip, which on a cached wake with a quick backend is 282 ms against the 3166 ms
+S8 measured on the same question.
+
+Two things that arrangement wants, neither of them hard and both worth writing
+down before someone builds it:
+
+- **Nothing may sleep with the queue unfinished.** Deep sleep would cut a
+  refresh in half, so the exit waits for the display task to drain. That is
+  awake time rather than wait -- it is all past the answer chirp -- but it is
+  the reason the two are worth keeping apart in the log.
+- **A superseded screen should be dropped rather than drawn.** If the answer
+  lands before `WORKING` has started, drawing `WORKING` costs a second and shows
+  the user a word that was already stale when it appeared. A queue of one with
+  replacement is probably the whole of it.
+
+**The ghosting depth stays fixed at two either way**, which is worth stating
+because an earlier draft of this entry had it as an open question. Full,
+partial, partial -- and, once there is an idle screen, a second full refresh
+before sleep -- so between any two full refreshes there are never more than two
+partials, however many questions are asked. Nothing accumulates across a run.
+"How many partials does this panel take" would only have become a question if
+the full refresh had moved off the wake, and it is not moving.
+
+**The one thing an idle screen does settle** is how well a partial image keeps.
+The answer screen is drawn partially and a partial waveform drives pixels less
+hard, so if the answer were the image that lived on the glass between questions
+-- possibly for days -- how well it holds would be worth measuring. With an idle
+screen replacing it after some seconds, and that idle screen drawn by a full
+refresh, the image that has to survive the night is always fully driven and
+there is nothing to measure. That is a reason to want the idle screen that has
+nothing to do with the UI.
+
+What it costs is awake time, and more of it than it first looks: two full
+refreshes a cycle rather than one, plus the five or ten seconds of waiting in
+between, on a device currently awake six to twelve seconds a question. Whether
+that is affordable waits for [E5](experiments.md), which is what would say what
+a second awake is worth against a night asleep.
+
+The rest waits for the UI/UX pass, with the other display work -- and for
+[D4](deferred.md)'s display task, since a refresh that happens after the answer
+has to happen while the orchestrator is on its way to sleep.
 
 ## D7 -- Nothing for a press too short
 

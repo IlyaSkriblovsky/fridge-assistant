@@ -107,14 +107,6 @@ class WifiLink {
   // it; the orchestrator does not have to.
   static void forgetLease();
 
-  // Moves the cached lease onto a subnet the device is not on, which is what a
-  // lease that has outlived its network looks like from here: it installs
-  // perfectly and reaches nothing. **Nothing in the firmware calls this.** It
-  // exists because the stale-lease path is the one thing in this class that
-  // cannot be reached by waiting, and the S7b driver has to be able to walk it
-  // on demand. False when there was no lease to spoil.
-  static bool spoilLease();
-
   // Starts the association and returns immediately. False means nothing was
   // started: no credentials, which is a build-time mistake rather than a
   // network failure, and lastError() says so.

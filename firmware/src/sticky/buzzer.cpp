@@ -9,19 +9,27 @@ namespace {
 constexpr uint8_t kResolutionBits = 10;
 
 // Frequencies and durations are a choice, not a measurement -- the only
-// requirement is that the three are distinguishable without looking. The two
+// requirement is that the four are distinguishable without looking. The two
 // pairs share their notes and differ in direction: the rising pair opens a
 // question, the falling pair closes it. The error note is neither, and is lower
 // and longer than anything in the pairs so it cannot be mistaken for one that
 // was cut short.
 //
+// The taken note has to survive being heard half a second before the answer's
+// pair, which is what E7 says the usual round trip is, so it is placed where
+// neither pair can absorb it: one note rather than two, between the pair's two
+// pitches so it is neither of them, and short enough that it cannot be taken
+// for the error's sustained note.
+//
 // Kept near 2-3 kHz because that is where a small piezo is loudest; the E1 rig
 // measured nothing about this, it just used 3 kHz and was audible across a
 // room.
 constexpr uint16_t kLowHz = 2000;
+constexpr uint16_t kMidHz = 2500;
 constexpr uint16_t kHighHz = 3000;
 
 constexpr stickyBuzzer::Note kReady[] = {{kLowHz, 40}, {0, 30}, {kHighHz, 40}};
+constexpr stickyBuzzer::Note kTaken[] = {{kMidHz, 60}};
 constexpr stickyBuzzer::Note kAnswer[] = {{kHighHz, 90}, {0, 50}, {kLowHz, 90}};
 constexpr stickyBuzzer::Note kError[] = {{1500, 450}};
 
@@ -53,6 +61,8 @@ void stickyBuzzer::play(const Note* notes, size_t count) {
 }
 
 void stickyBuzzer::ready() { play(kReady); }
+
+void stickyBuzzer::taken() { play(kTaken); }
 
 void stickyBuzzer::answer() { play(kAnswer); }
 

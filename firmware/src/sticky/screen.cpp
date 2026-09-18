@@ -16,9 +16,10 @@ namespace {
 // at about 4.5 mm -- the first is a headline at arm's length, the second is
 // subordinate to it without being small.
 //
-//  * kTitleFont, doubled, is the Listening screen: 516 px of "LISTENING" on an
-//    800 px panel, which is the largest of the three by a long way because it
-//    is the one screen read from across a room.
+//  * kTitleFont, doubled, is the one word of listening() and working(): 516 px
+//    of "LISTENING" on an 800 px panel, which is the largest of the three by a
+//    long way because it is the screen read from across a room. "WORKING" is
+//    narrower and sits in the same band, which is the point of the band.
 //  * kTitleFont at size 1 is an error title, white inside the bar. The widest
 //    in the vision's table is NO MICROPHONE at 416 px, so every title clears
 //    the bar's edges with room to spare.
@@ -29,6 +30,12 @@ const GFXfont* const kDetailFont = &FreeSans18pt7b;
 
 // The answer starts here and runs off the right edge if it has to -- D2.
 constexpr int32_t kAnswerMarginX = 40;
+
+// Added above and below the face's own line height to make the band working()
+// refreshes. It buys back the rounding in the datum arithmetic and a few pixels
+// of slack, and every pixel of it is rows the controller has to be sent, so it
+// is small on purpose.
+constexpr int32_t kWordBandMargin = 12;
 
 // The error bar: full width, centred vertically, with the detail under it. A
 // band of black is what tells an error from an answer at a glance, before
@@ -82,17 +89,70 @@ void StickyScreen::clear() {
 
   _display.fillScreen(TFT_WHITE);
   _display.refresh();
+  _drewFullFrame = true;
+  _lastWasPartial = false;
+}
+
+void StickyScreen::refreshWhole() {
+  // A full refresh has to have run this boot, or the shadow the partial is
+  // differential against is the all-white one a fresh allocation starts as
+  // while the glass still holds the last question's answer.
+  if (_drewFullFrame && _display.refreshPartial(0, 0, _display.width(), _display.height()).ok()) {
+    _lastWasPartial = true;
+    return;
+  }
+
+  if (_drewFullFrame) _lastError = _display.lastResult().message;
+  _display.refresh();
+  _drewFullFrame = true;
+  _lastWasPartial = false;
+}
+
+void StickyScreen::startWord() {
+  _display.setTextColor(TFT_BLACK);
+  _display.setFreeFont(kTitleFont);
+  _display.setTextSize(2);
+  _display.setTextDatum(MC_DATUM);
+}
+
+void StickyScreen::wordBand(int32_t& y, int32_t& height) {
+  height = _display.fontHeight() + 2 * kWordBandMargin;
+  y = (_display.height() - height) / 2;
 }
 
 void StickyScreen::listening() {
   if (!_ready) return;
 
   startFrame();
-  _display.setFreeFont(kTitleFont);
-  _display.setTextSize(2);
-  _display.setTextDatum(MC_DATUM);
+  startWord();
   _display.drawString("LISTENING", _display.width() / 2, _display.height() / 2);
   _display.refresh();
+  _drewFullFrame = true;
+  _lastWasPartial = false;
+}
+
+bool StickyScreen::working() {
+  if (!_ready) return false;
+
+  startWord();
+
+  int32_t y = 0;
+  int32_t height = 0;
+  wordBand(y, height);
+
+  // The frame buffer outside the band is left exactly as listening() drew it,
+  // because it is exactly what is on the glass and the partial refresh will not
+  // send it. Only the band is repainted, and only the band is pushed.
+  _display.fillRect(0, y, _display.width(), height, TFT_WHITE);
+  _display.drawString("WORKING", _display.width() / 2, _display.height() / 2);
+
+  const GfxResult result = _display.refreshPartial(0, y, _display.width(), height);
+  _lastWasPartial = result.ok();
+  if (!result.ok()) {
+    _lastError = result.message;
+    return false;
+  }
+  return true;
 }
 
 void StickyScreen::answer(const char* text) {
@@ -105,7 +165,7 @@ void StickyScreen::answer(const char* text) {
   _display.setFreeFont(kAnswerFont);
   _display.setTextDatum(ML_DATUM);
   _display.drawString(drawable, kAnswerMarginX, _display.height() / 2);
-  _display.refresh();
+  refreshWhole();
 }
 
 void StickyScreen::error(const char* title, const char* detail) {
@@ -134,5 +194,5 @@ void StickyScreen::error(const char* title, const char* detail) {
                         barY + kErrorBarHeight + kErrorDetailGap);
   }
 
-  _display.refresh();
+  refreshWhole();
 }

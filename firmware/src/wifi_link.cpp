@@ -107,13 +107,6 @@ constexpr uint32_t kScanAttemptMs = 6000;
 // is the likeliest reason it refused.
 constexpr uint32_t kRetryDelayMs = 300;
 
-// Where spoilLease() moves an address to, in IPAddress's byte order: the same
-// host on 10.42.0.0/24, which is the subnet E6's rig used for the same job and
-// is not the one this device is on.
-constexpr uint32_t kWrongSubnet = 0x00002A0Au;   // 10.42.0.x
-constexpr uint32_t kWrongMask = 0x00FFFFFFu;     // 255.255.255.0
-constexpr uint32_t kWrongHostByte = 0xFE000000u; // ....254, for the gateway
-
 // The lwIP client behind esp_netif. Null until the station has a netif, which
 // is any time before WiFi.mode(WIFI_STA); the offered lease time and the BOUND
 // state are the two things read through it, and neither has an accessor in
@@ -179,20 +172,6 @@ bool WifiLink::cachedLease(Lease& lease) {
 }
 
 void WifiLink::forgetLease() { g_lease.magic = 0; }
-
-bool WifiLink::spoilLease() {
-  if (g_lease.magic != kCacheMagic || g_lease.ip == 0) return false;
-
-  // The host part is kept and everything in front of it replaced, so what comes
-  // out is an address that is perfectly valid somewhere else -- which is the
-  // failure being imitated. The age and the offered life are left alone: the
-  // entry has to look fresh, or begin() would refuse it for the wrong reason.
-  g_lease.ip = kWrongSubnet | (g_lease.ip & 0xFF000000u);
-  g_lease.gateway = kWrongSubnet | kWrongHostByte;
-  g_lease.dns = g_lease.gateway;
-  g_lease.mask = kWrongMask;
-  return true;
-}
 
 bool WifiLink::begin(const char* ssid, const char* password) {
   if (ssid == nullptr || ssid[0] == '\0') {

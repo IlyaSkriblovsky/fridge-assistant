@@ -7,8 +7,9 @@
 //
 // The only feedback fast enough to be useful: the e-paper is one to two seconds
 // behind everything, so the buzzer is what tells the user when the microphone
-// went live and how the question ended. Three patterns, meant to be told apart
-// without looking -- see the sound table in docs/project-vision.md.
+// went live, that the question was taken, and how it ended. Four patterns,
+// meant to be told apart without looking -- see the sound table in
+// docs/project-vision.md.
 //
 // Two properties the callers depend on:
 //
@@ -40,8 +41,9 @@ inline void play(const Note (&notes)[N]) {
   play(notes, N);
 }
 
-// The three patterns from the vision's table. Durations below.
+// The four patterns from the vision's table. Durations below.
 void ready();   // microphone is live: two very short notes, low then high
+void taken();   // the question is on its way: one short note, between the two
 void answer();  // the answer is on screen: two short notes, high then low
 void error();   // one longer note, lower than either of the pairs
 

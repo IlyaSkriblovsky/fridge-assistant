@@ -12,12 +12,12 @@ the hardware traps.
 
 | Path | What |
 | --- | --- |
-| `src/main.cpp` | Boot sequence, plus the temporary driver for the step being built; S8 makes it the orchestrator |
+| `src/main.cpp` | The orchestrator: wake, record, ask, show, sleep |
 | `src/sticky/power.h/.cpp` | Power latch, deep sleep entry, wake reporting |
-| `src/sticky/buzzer.h/.cpp` | Buzzer on LEDC: the ready, answer and error patterns |
+| `src/sticky/buzzer.h/.cpp` | Buzzer on LEDC: the ready, taken, answer and error patterns |
 | `src/sticky/button.h/.cpp` | AI button: the press that woke the board, timed and debounced |
 | `src/sticky/mic.h/.cpp` | PDM microphone: power, I2S PDM-RX, level measurement |
-| `src/sticky/screen.h/.cpp` | The three screens, and the only place the panel is touched |
+| `src/sticky/screen.h/.cpp` | The four screens, and the only place the panel is touched |
 | `src/sticky/epaper.h` | `Driver_SSD1677_Sticky` -- two corrections to Seeed_GFX2's SSD1677 path |
 | `src/recording.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |

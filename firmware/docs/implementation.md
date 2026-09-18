@@ -26,7 +26,7 @@ which means asking.
 | S6 | WiFi | Association without blocking, BSSID cached | Done |
 | S7 | Upload and answer | The backend round trip | Done |
 | S7b | Cached DHCP lease | Three seconds off every question | Done |
-| S8 | The flow | Wake, record, ask, show, sleep | Not started |
+| S8 | The flow | Wake, record, ask, show, sleep | Done |
 | S9 | Re-run E1 | Wake latency of the real firmware | Not started |
 
 ## Why this order
@@ -972,78 +972,199 @@ the second.
 
 ## S8 -- The flow
 
-`main.cpp` becomes the orchestrator and the demo code goes: wake, latch, button,
+`main.cpp` is the orchestrator and the demo code is gone: wake, latch, button,
 microphone, capture task, ready chirp, WiFi and the Listening screen, release,
-stop, upload, answer or error chirp, draw, deep sleep.
+taken chirp, the working screen, upload, answer or error chirp, draw, deep
+sleep.
 
 - The order at the front is load-bearing and measured: capture starts *before*
   the chirp, because the chirp means "the microphone is live"
   ([E1](experiments.md), [E3](experiments.md)).
-- **The pre-clear should not happen on every wake.** `setupDisplay()` currently
-  does a `fillScreen(TFT_WHITE)` and a full refresh at boot, which is one to two
-  seconds spent flushing a panel the Listening screen is about to overwrite
-  anyway. It is needed on a cold start, where the controller's previous-image
-  RAM is unknown; `stickyPower::wokeFromDeepSleep()` already tells the two
-  apart. S5 measured the cost at 2373 ms and the driver already branches on it.
-- **Decide what the device does between the release and the answer.** The
-  vision's step 6, and the one question it leaves open. Until the answer is
-  drawn the panel still reads `LISTENING`, which stops being true the moment the
-  button comes up, and the answer chirp only marks the end of the gap rather
-  than filling it -- [S7](#s7----upload-and-answer) moved it in front of the
-  refresh, which buys back 2.4 s of the wait but none of the rest. This is the step where it can finally be judged, because it
-  is the first time a real wait exists to sit through.
+- **The pre-clear does not happen on every wake.** A `fillScreen(TFT_WHITE)` and
+  a full refresh at boot is one to two seconds spent flushing a panel the
+  Listening screen is about to overwrite anyway. It is needed on a cold start,
+  where the controller's previous-image RAM is unknown;
+  `stickyPower::wokeFromDeepSleep()` tells the two apart.
+- **What the device does between the release and the answer is settled**, and it
+  is the vision's step 6 closed. The gap is covered twice over: a fourth buzzer
+  pattern the moment the button comes up, and a partial refresh of the word
+  alone -- `LISTENING` becomes `WORKING` -- which is [D6](deferred.md) arriving
+  a step early and for a reason.
 
-  It is the only transition that costs the user anything: released, draw,
-  upload, wait, draw again, so a full refresh puts its 2.4 s in front of every
-  answer -- to show a screen a fast backend may not leave up long enough to
-  read. Three shapes, in rising order of work:
+  The three shapes were a screen of its own at the full 2.4 s, a chirp and no
+  screen at all, and the partial. [E7](experiments.md) ruled out the first: the
+  round trip is about 0.5 s three times out of four and 1.5 to 5.5 s the fourth
+  time, so a full refresh would put 2.4 s in front of a wait that is usually
+  shorter than itself, to show a screen a fast backend would not leave up long
+  enough to read. What was owed before the third could be picked was its cost on
+  this panel, which nobody had measured and which is now 990 ms -- **and the
+  reason it could be picked without an experiment first is that this step has to
+  run on the device anyway**, so the measurement is a line in the log rather
+  than a rig.
+- **One full refresh per question, and it is the first one.** Having measured
+  the partial the step went back and made the answer and the errors partial too,
+  which is the arrangement the panel ends up with: `listening()` full,
+  everything after it differential. It is not a preference. A partial update is
+  differential against what the controller has been told is on the glass -- the
+  shadow in `src/sticky/epaper.h`, allocated fresh on every boot and seeded
+  white -- and after a deep sleep the glass still holds the last answer while
+  the firmware has been told nothing about it. Only a full refresh drives every
+  pixel whatever it was, so exactly one is needed to reconcile the two, and it
+  may as well be the one that runs under the recording where it costs nothing.
+  `clear()` is the cold-start form of the same reconciliation.
 
-  - a screen of its own, `StickyScreen::working()`, at the full 2.4 s;
-  - a fourth buzzer pattern on release and no screen at all, which costs
-    milliseconds but leaves the panel lying until the answer lands;
-  - a partial refresh of the word alone -- [D6](deferred.md), which would also
-    be the first time the partial-refresh correction in `src/sticky/epaper.h`
-    has ever run on the device, and whose cost on this panel is unmeasured.
-
-  **[E7](experiments.md) has now produced the number, and it is two numbers.**
-  The round trip is about 0.5 s three times out of four and 1.5 to 5.5 s the
-  fourth time, because one upload in four stops for a retransmission timeout
-  that has nothing to do with its size. So the wait this screen covers is
-  usually shorter than the refresh that would announce it and occasionally four
-  times longer -- which argues against the first shape and for one of the two
-  cheap ones, and says the choice cannot be made on an average. What it does not
-  cover is a model: the backend still answers a fixed phrase, so the thinking
-  time that will dominate this wait in the end is still unmeasured.
-
-  **[S7b](#s7b----cached-dhcp-lease) has moved the other end of the gap**, and
-  it is now the panel's. The network used to be what a question waited for and
-  is not any more: with the address installed it is usable 300 ms into the wake
-  and the release-to-network wait is zero. What is left in front of the upload is
-  the LISTENING refresh, which this thread sits inside for 2641-2644 ms while
-  the recording goes on without it -- measured to the millisecond on four
-  consecutive wakes. A hold longer than that pays nothing, and every question
-  shorter than about 2.6 s now waits for the panel instead of the radio. So the
-  screen this step has to choose is in front of a wait it is itself creating,
-  which is an argument the cheap shapes did not have before.
-- **The LISTENING refresh is now the largest single number between the wake and
-  the upload**, at 2.4 s against 300 ms of network and 500 ms of round trip. It
-  is the same 2.4 s as the pre-clear above and the same as the answer's own
-  refresh; [D6](deferred.md)'s partial refresh is the only thing that touches
-  any of them, and this is the first step where all three are visible at once.
+  **It also fixes the ghosting depth at two, by construction.** Full, partial,
+  partial, sleep -- there are never more than two partial refreshes between two
+  full ones, whatever the sequence of questions, so nothing accumulates across a
+  run and neither this arrangement nor the one [D6](deferred.md) leaves it with
+  asks how many partials the panel will take. The full refresh is not moving off
+  the wake, which is the only thing that would have let partials chain.
 - Every exit is deep sleep with the latch held, including the error paths and
   the discarded tap.
-- **Two things come across from [S7b](#s7b----cached-dhcp-lease)'s driver rather
-  than dying with it.** The stale-lease rule lives in `askAbout()` in the file
-  S8 rewrites -- ask again, then drop the lease, take an address and ask once
-  more -- and it belongs in the orchestrator because it spans `Backend` and
-  `WifiLink` and neither half can see it alone. The pre-clear branch on
-  `stickyPower::wokeFromDeepSleep()` is the other.
-- **`WifiLink::spoilLease()` goes when the driver does**, and not before. It
-  is the one seam in a permanent module that the firmware never calls, kept
-  through this step because the rule it tests is moving into new code and wants
-  walking once in its new home. Delete it with the driver, once it has.
+- **Two things came across from [S7b](#s7b----cached-dhcp-lease)'s driver rather
+  than dying with it.** The stale-lease rule is `askAbout()` -- ask again, then
+  drop the lease, take an address and ask once more -- and it belongs in the
+  orchestrator because it spans `Backend` and `WifiLink` and neither half can
+  see it alone. The pre-clear branch on `stickyPower::wokeFromDeepSleep()` is the
+  other.
+- **`WifiLink::spoilLease()` went with the driver**, as it was meant to. It was
+  the one seam in a permanent module that the firmware never called, kept
+  through S7b because the rule it tested was moving into new code and wanted
+  walking once in its new home. It has walked.
 
-**Verified by** the whole interaction, on battery, with the cable out.
+**Verified by** the whole interaction on the device: nineteen questions of
+varying length, the panel checked by eye through a run of consecutive questions
+with one full refresh apiece -- every transition clean, no smear, no residue --
+and the numbers below off Serial1.
+
+### What it turned out to involve
+
+**The working screen is two words in one screen, not two screens.**
+`listening()` and `working()` draw a single word in the same face at the same
+size, centred, so the strip of panel the word occupies is a property of the face
+and not of the word -- `StickyScreen::wordBand()` is that strip, and `working()`
+repaints it and refreshes it alone. Nothing outside the band differs between the
+two screens and nothing outside it is sent to the controller a second time. The
+band is `fontHeight()` plus a small margin, which is 136 rows of 480: the line
+advance is larger than the ascent-plus-descent that `drawString` centres glyphs
+within, so a band of that height clears the word top and bottom without
+measuring a single glyph.
+
+**The partial-refresh correction in `src/sticky/epaper.h` has now run.** Written
+at S5 and never exercised until this step -- [D6](deferred.md) said as much --
+it supplies the previous-image plane that `Panel_EPaper::updatePartial()` never
+pushes. It works: the old word goes and the new one arrives, with no smear and
+no residue of `LISTENING` inside the band. Checked at the panel over a run of
+questions, which is the only way that question can be answered.
+
+**Two log lines were wrong on the first run, and both were the same mistake.**
+A wait broken into parts is only a breakdown if the parts do not overlap:
+
+- *Was the release inside the Listening refresh?* was answered by comparing how
+  long ago the release was against how long the refresh took, which is not that
+  question and got it backwards on every hold. The refresh's own end timestamp
+  is what answers it.
+- *How much of the wait was the network?* was the address's arrival measured
+  from the release -- and on a wake with a lease the address arrives while this
+  thread is still inside the Listening refresh, so those milliseconds were being
+  counted twice. One question reported 2051 ms of leftover refresh and 2625 ms
+  of network inside a total of 3382 ms. What the question actually waited for is
+  the poll loop's own duration *after* the panel let go, which is zero on every
+  cached wake; the radio's view stays on the line above it, where it answers a
+  different question and is right about it. It is
+  [S7b](#s7b----cached-dhcp-lease)'s rule read from the other end -- a number
+  read off a poll is a number about the poller, and sometimes the poller is what
+  you meant to measure.
+
+**The answer chirp was inside the panel's number.** Every chirp sounds before
+its screen, deliberately, so the 230 ms of the answer pattern sits between the
+release and the refresh -- and timing the two together reported every full
+refresh in this firmware as 2619-2620 ms against the 2375-2377 ms
+[S5](#s5----screens) measured the same screen at. The gap was the buzzer and not
+the panel: S5's number stands, and so does the 2398-2403 ms in the table, which
+is a full refresh of the same firmware timed with the chirp outside it. The
+firmware now ends the wait where the chirp starts and times the refresh from
+where it begins.
+
+**`finish()` is the only exit and it joins the capture task on a bounded wait.**
+The task owns the microphone until it is joined, so the abort has to come before
+`mic.end()`; the bound is there for one case, a `start()` that created its
+semaphore and then failed to create the task, which would otherwise leave a
+question hanging with the rail latched.
+
+### What it measured
+
+Nineteen questions on the device, holds from 0.2 to 5.0 s. The panel is
+deterministic to the millisecond partially as well as fully, exactly as
+[S5](#s5----screens) found:
+
+| Transition | Window | Refresh |
+| --- | --- | --- |
+| `clear()`, cold start only, full | 480 rows | 2386-2389 ms |
+| Listening, full | 480 rows | 2398-2403 ms |
+| working, **partial** | 136 rows | **990-991 ms** |
+| answer, **partial** | 480 rows | **1343-1346 ms** |
+
+- **A partial refresh does not vary at all.** Fourteen of them: 990 or 991 ms
+  over the word's 136 rows, 1343 to 1346 ms over all 480. The panel is as
+  deterministic partially as it is fully.
+- **The saving does not collapse as the window grows**, which is the thing worth
+  knowing and was not obvious from the band alone. A partial of the whole panel
+  is 1344 ms against 2400 ms full -- 56% of the price for 100% of the area. Two
+  points is enough to take the number apart, and the arithmetic is on measured
+  values rather than on a model: (1344-990)/(480-136) is **1.03 ms a row**, so
+  the fixed part of a partial is 990 - 136x1.03 = **850 ms** and the fixed part
+  of a full refresh, at the same per-row cost, is 2400 - 494 = **1906 ms**. The
+  1056 ms between them is waveform and nothing else; both push two planes of the
+  same size, so the transfer cancels. The per-row millisecond is not SPI either
+  -- it is the byte-at-a-time bit reversal in `Panel_EPaper::pushNewColorsFlip`
+  and in `pushInvertedRows`, which is CPU.
+- **`listening()` is the one transition that cannot have any of this**, and it
+  is also the one still costing a short question the most: the leftover refresh
+  was 1809 ms on a 1.0 s hold and 1239 ms on a 1.6 s one. It stays full for the
+  reason in the note above, and that reason does not go away -- the screen left
+  on the glass between questions is meant to be an idle screen of the wider UI's
+  own, whose content a wake has no way to rebuild, so there is never anything to
+  seed the shadow from. What takes those milliseconds off the critical path is
+  not a cheaper waveform but [D4](deferred.md)'s display task: behind a queue the
+  orchestrator stops sitting inside the refresh, sees the release when it
+  happens and starts the upload while the panel catches up. D6 has the argument
+  now that this step has the numbers for it.
+- **The largest thing a short question waits for is the Listening refresh it is
+  still inside.** 1680 ms of it on a 1.2 s hold, 2051 ms on a 0.8 s one. The
+  working screen and the round trip together are about 1.5 s, so the leftover
+  refresh is larger than both for anything held under about two seconds. A hold
+  longer than the refresh pays nothing: 0 ms on every hold past 3.5 s.
+- **The network has left the wait entirely.** Zero milliseconds on every wake
+  with a lease, because the address lands 78-91 ms into the wake and this thread
+  does not reach the poll loop for another three seconds. S7b's 3.24 s is intact
+  and the panel has inherited the whole of what used to be the radio's.
+- **The round trip behaved the way [E7](experiments.md) said it would, and the
+  larger uploads made the point twice over.** Nine uploads of 24 to 128 KB came
+  back in 251, 404, 408, 464, 515, 612, 955 and 1008 ms with one of 3044 ms --
+  one stall in nine. Five later ones of 31 to 157 KB came back in 282, 1777,
+  1914, 2867 and 4454 ms: four stalls in five. E7 puts an upload at about
+  twenty-two windows with one in four stopping for a retransmission timeout, so
+  a 157 KB upload has more windows and more chances, and that is what the second
+  set shows. The 31 KB one in the middle of it went in 282 ms.
+- **The release-to-chirp wait is 2.0 to 5.6 s**, and the shape of it is the
+  whole argument for [D4](deferred.md)'s display task. On a long hold it is the
+  working screen plus the round trip -- 990 ms of panel in front of anything
+  from 282 ms to 4.5 s of network. On a short one the leftover Listening refresh
+  is in front of both. **Every millisecond of the panel in that number is a
+  millisecond a display task would remove**, because nothing about the upload
+  needs this thread; that is about a second a question on a long hold and closer
+  to two and a half on a short one, which is more than the streaming upload D4
+  is nominally about.
+- **The answer's own refresh is not in that number and is worth having anyway.**
+  It comes after the chirp, so making it partial does not shorten a wait -- what
+  it shortens is the time to a fully drawn panel and the time to sleep, by
+  1056 ms a question. That is battery rather than latency, which is a different
+  argument for the same change.
+- **The microphone is live 203-204 ms after a wake** and 303 ms after a
+  power-on, which is [S9](#s9----re-run-e1)'s number arriving early and from the
+  wrong end: it is measured from the top of `setup()` and E1 measures from the
+  button.
 
 ## S9 -- Re-run E1
 

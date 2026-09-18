@@ -1,37 +1,40 @@
-// S7b -- Cached DHCP lease. A temporary driver, the way S1's to S7's were:
-// docs/implementation.md asks for E6's numbers coming back from the firmware
-// rather than from a rig, and for a question that starts with a stale lease
-// still getting its answer. S8 replaces all of this with the orchestrator.
+// S8 -- The flow. The orchestrator, and the end of the temporary drivers that
+// S1 to S7b were: wake, latch, microphone, capture task, ready chirp, WiFi and
+// the Listening screen, release, taken chirp, the working screen, upload,
+// answer or error chirp, draw, deep sleep.
 //
-// It is S7's driver with the error table taken out -- that walk is done and
-// recorded -- and the address put in its place. Each press walks one row and
-// the next press walks the next:
+// **The order at the front is load-bearing and measured.** Capture starts
+// before the chirp, because the chirp means "the microphone is live" and a
+// chirp that came first would put its own duration into the dead time at the
+// front of every question -- E1 and E3, and the vision's step 3. Nothing may be
+// inserted between mic.begin() and stickyBuzzer::ready() that can block.
 //
-//   1  nothing cached yet             DHCP, ~3.3 s from the top of setup()
-//   2  the last question's lease      installed, ~200 ms and no client at all
-//   3  a closed port                  NO SERVER at once, and the lease kept
-//   4  the lease, still there         ~200 ms again -- the refusal changed nothing
-//   5  a lease from another network   two dead connects, DHCP, then the answer
+// **The panel is the largest number between the wake and the upload**, at 2.4 s
+// against 300 ms of network and 500 ms of round trip (S5, S7b, E7). Two things
+// here follow from that and from nothing else:
 //
-// **After the last row every press behaves like row 2**, which is what the
-// device does from then on. The counter lives in RTC memory, which the reset
-// that flashing or opening the monitor causes clears -- so a session always
-// starts at row 1 and a walk of the table is five presses from a fresh flash.
+//  * The pre-clear is a cold-start thing. A full white frame before the first
+//    real screen is what a controller whose previous-image RAM has nothing to
+//    do with the glass needs; on a wake it is 2373 ms spent flushing a panel
+//    the Listening screen overwrites anyway.
+//  * The working screen is a partial refresh -- S8 settled the vision's step 6
+//    that way, because it is the one transition the user waits through and a
+//    full refresh would put 2.4 s in front of a round trip that is usually half
+//    a second. The chirp goes in front of it for the same reason every other
+//    chirp does: the buzzer exists because the panel is late.
 //
-// Row 3 is the row that says the detector is a detector rather than "any
-// NO SERVER": a refusal proves something is at the address, so the address is
-// fine and the lease must survive it. Row 5 is the one failure in this step
-// that cannot be reached by waiting -- a lease only goes stale when the network
-// changes underneath it -- so the driver makes one, through
-// WifiLink::spoilLease(), on the wake before.
+// **Every exit is deep sleep with the latch held**, the error paths and the
+// discarded tap included, and there is exactly one of them: finish().
 //
-// A press too short to be a question is discarded without consuming a row, and
-// so is a question that never reached the POST.
+// Two things came across from the S7b driver rather than dying with it. The
+// stale-lease rule is askAbout() below -- ask again, then drop the lease, take
+// an address and ask once more -- and it lives here because it spans Backend
+// and WifiLink and neither half can see it alone. The pre-clear branch on
+// stickyPower::wokeFromDeepSleep() is the other.
 
 #include <Arduino.h>
 #include <esp_timer.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "config.h"
 #include "secrets.h"
@@ -53,16 +56,23 @@ constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
 // How often the association and the capture task are looked at while the button
-// is held. Small, because it is also the resolution of WifiLink::linkMs().
+// is held. Small, because it is also the resolution of WifiLink::elapsedMs().
 constexpr uint32_t kPollMs = 10;
 
-// A press held through the report would wake the board again the moment it goes
-// to sleep, since ext1 wakes on the level rather than on an edge.
+// A press held through the log would wake the board again the moment it goes to
+// sleep, since ext1 wakes on the level rather than on an edge. Only the 30 s
+// recording cap can reach the exit with the button still down.
 constexpr uint32_t kReleaseWaitMs = 30000;
 
-// What a question came to, which is the last column of the table below. The
-// first five are Backend's results; the rest are the ways a question ends
-// before there is anything to send.
+// How long finish() gives the capture task to notice an abort before it stops
+// waiting. Bounded rather than indefinite for one case: a start() that created
+// the semaphore and then failed to create the task leaves nothing to give it,
+// and a question must not end by hanging with the rail latched. A chunk is
+// 16 ms, so an abort that is going to land has landed long before this.
+constexpr uint32_t kCaptureJoinMs = 500;
+
+// What the question came to. The first five are Backend's results, the rest are
+// the ways one ends before there is anything to send.
 enum class Outcome : uint8_t {
   Answered,
   NoServer,
@@ -74,66 +84,6 @@ enum class Outcome : uint8_t {
   Tap,     // too short to be a question
 };
 
-// Where the address this question ran on came from.
-enum class Mode : uint8_t {
-  Dhcp,   // asked for and waited on, which is what every question cost before
-  Lease,  // the last question's, installed in 40 ms
-  Stale,  // ... the same, after the driver moved it onto another network
-};
-
-struct Plan {
-  const char* what;      // what this press is testing
-  const char* expected;  // what E6 says should come of it
-  bool closedPort;       // ask a port nothing is listening on instead
-  bool spoilAfter;       // leave the next wake a lease from the wrong network
-};
-
-constexpr Plan kPlans[] = {
-    {"the first question of a session", "DHCP -- about 3.3 s to a usable network", false, false},
-    {"a question carrying the last one's lease", "the lease installed -- about 200 ms, no client",
-     false, false},
-    {"a refusal, which is not a stale lease", "NO SERVER at once, and the lease kept", true,
-     false},
-    {"the lease, still there after the refusal", "about 200 ms again -- nothing was dropped",
-     false, true},
-    {"a lease from a network the device is not on",
-     "two connects that answer nothing, then DHCP, then the answer", false, false},
-};
-constexpr uint32_t kPlanCount = sizeof(kPlans) / sizeof(kPlans[0]);
-
-// Which row a press that is past the table walks: the one that is the device's
-// ordinary behaviour from then on.
-constexpr uint32_t kSteadyPlan = 1;
-
-// The log lives in RTC memory, which survives deep sleep but not a power cycle
-// or a reset -- so a session is exactly what this table holds.
-constexpr uint32_t kLogRows = 16;
-constexpr uint32_t kMagic = 0x57B0FFEE;
-
-struct Row {
-  uint8_t plan;
-  uint8_t mode;
-  uint8_t outcome;
-  uint16_t heldMs;
-  uint16_t linkMs;      // begin() to the link, before the address
-  uint16_t connectMs;   // begin() to a usable network
-  uint16_t bootMs;      // the top of setup() to the same moment -- E6's column
-  uint16_t waitedMs;    // release to it, 0 when it was already up
-  uint16_t toPostMs;    // release to the upload starting, which is not the same
-  uint16_t roundTripMs; // the ask that produced the outcome
-  uint16_t lostMs;      // the connects that answered nothing, before the drop
-  uint16_t renewMs;     // DHCP after the lease was dropped, 0 when none was
-  uint16_t answeredMs;  // release to the answer being on the glass
-  uint32_t sentBytes;
-  int16_t status;
-};
-
-RTC_DATA_ATTR uint32_t g_magic;
-RTC_DATA_ATTR uint32_t g_walked;     // rows of the table walked so far
-RTC_DATA_ATTR uint32_t g_questions;  // rows written, which may exceed kLogRows
-RTC_DATA_ATTR bool g_spoiled;        // the lease this wake found was made stale
-RTC_DATA_ATTR Row g_log[kLogRows];
-
 StickyButton button;
 StickyMic mic;
 Recording audio;
@@ -142,36 +92,47 @@ WifiLink wifi;
 StickyScreen screen;
 Backend backend;
 
-// Everything a question produced, filled in as it goes and written to the table
-// whichever way it ends.
-Row g_row;
-
-// The three moments the question is measured against, and not one of them is
-// the moment this thread reaches them. The panel refresh is why: it takes two
-// and a half seconds during which nothing here polls anything, and every number
-// that was read off a poll came back with the refresh inside it.
+// The moments the question is measured against, and two of them are not the
+// moment this thread reaches them. The panel refresh is why: it takes two and a
+// half seconds during which nothing here polls anything, so a number read off a
+// poll would have the refresh inside it.
 //
-//  * The release is tEntry plus the hold, because the orchestrator can be
-//    inside that refresh when the button comes up -- the capture task sees it,
-//    this thread does not.
-//  * Online is begin() plus WifiLink::onlineMs(), which is the WiFi task's
-//    own timestamp of the address arriving. The first run of this driver used
-//    the first poll that reported it and measured the panel instead: four wakes
-//    reported an installed lease as 2642, 2643, 2642, 2643 ms.
-//  * begin() is taken here rather than asked for, because everything above is
-//    relative to it.
+//  * The release is the top of setup() plus the hold, because this thread can
+//    be inside the Listening refresh when the button comes up -- the capture
+//    task sees it, this thread does not.
+//  * Online is wifi.begin() plus WifiLink::onlineMs(), which is the WiFi task's
+//    own timestamp of the address arriving.
 //
-// All three are zero until they happen.
+// All of them are zero until they happen.
+int64_t g_entryUs = 0;
 int64_t g_releaseUs = 0;
 int64_t g_beginUs = 0;
-int64_t g_onlineUs = 0;
+int64_t g_listeningEndUs = 0;
 
-// The row this question walks: the next one while the table is unfinished, and
-// the steady one once it has been walked through.
-uint32_t planIndex() { return g_walked < kPlanCount ? g_walked : kSteadyPlan; }
+// What the panel cost this question, which is the one thing S8 set out to
+// measure. Kept apart from the rest because it is the reason the working screen
+// has the shape it has, and because D4's display task is weighed against it.
+uint32_t g_listeningMs = 0;
+uint32_t g_workingMs = 0;
+uint32_t g_answerMs = 0;
 
-const char* outcomeName(uint8_t outcome) {
-  switch (static_cast<Outcome>(outcome)) {
+// The release to the moment the last chirp starts, which is the whole of what
+// the user waits through: the refresh behind it is readable long before it ends
+// and the chirp is what says to look up. Measured rather than derived, because
+// the chirp itself is 230 ms and putting it on the panel's side of the line
+// would report every full refresh in this firmware as 245 ms slower than
+// S5 measured the same screen at.
+uint32_t g_toChirpMs = 0;
+
+// **The part of the Listening refresh that the question waited for**, which is
+// how much of it was still running when the button came up. It is zero for a
+// hold longer than the refresh and the largest term in the wait for anything
+// shorter -- 1660 ms of a 1.3 s question, measured -- so it belongs in the
+// breakdown beside the network and the round trip rather than in the remainder.
+uint32_t g_listeningLeftMs = 0;
+
+const char* outcomeName(Outcome outcome) {
+  switch (outcome) {
     case Outcome::Answered: return "answered";
     case Outcome::NoServer: return "NO SERVER";
     case Outcome::ServerError: return "SERVER ERROR";
@@ -180,21 +141,12 @@ const char* outcomeName(uint8_t outcome) {
     case Outcome::NoWifi: return "NO WIFI";
     case Outcome::Broken: return "broken";
     case Outcome::Tap: return "tap, discarded";
-    default: return "?";
   }
+  return "?";
 }
 
-const char* modeName(uint8_t mode) {
-  switch (static_cast<Mode>(mode)) {
-    case Mode::Dhcp: return "dhcp";
-    case Mode::Lease: return "lease";
-    case Mode::Stale: return "stale";
-    default: return "?";
-  }
-}
-
-// WifiLink hands addresses back in IPAddress's byte order -- first octet in
-// the low byte -- so that its header does not have to include WiFi.h.
+// WifiLink hands addresses back in IPAddress's byte order -- first octet in the
+// low byte -- so that its header does not have to include WiFi.h.
 void ipText(char* out, size_t size, uint32_t address) {
   snprintf(out, size, "%u.%u.%u.%u", static_cast<unsigned>(address & 0xFF),
            static_cast<unsigned>((address >> 8) & 0xFF),
@@ -202,76 +154,43 @@ void ipText(char* out, size_t size, uint32_t address) {
            static_cast<unsigned>((address >> 24) & 0xFF));
 }
 
-// The configured base URL with its port replaced. kBackendBaseUrl is
-// "scheme://host[:port]", so the colon to cut at is the last one after the "//"
-// -- the only other colon in the string belongs to the scheme.
-void urlWithPort(char* out, size_t size, uint16_t port, const char* path) {
-  const char* base = config::kBackendBaseUrl;
-  const char* authority = strstr(base, "//");
-  const char* colon = authority != nullptr ? strrchr(authority, ':') : nullptr;
-  const size_t keep = colon != nullptr ? static_cast<size_t>(colon - base) : strlen(base);
-  snprintf(out, size, "%.*s:%u%s", static_cast<int>(keep), base, static_cast<unsigned>(port),
-           path);
+uint32_t sinceReleaseMs() {
+  if (g_releaseUs == 0) return 0;
+  return static_cast<uint32_t>((esp_timer_get_time() - g_releaseUs) / 1000);
 }
 
-void planUrl(char* out, size_t size, const Plan& plan) {
-  if (plan.closedPort) {
-    urlWithPort(out, size, 1, config::kAudioPath);
-  } else {
-    snprintf(out, size, "%s%s", config::kBackendBaseUrl, config::kAudioPath);
-  }
+// What the question cost the user, which is the release to the answer chirp --
+// the refresh after it is time the panel is readable through, not time spent
+// waiting. Printed as its parts because each of them belongs to a different
+// decision: the panel to this step and D6, the network to S7b, the round trip
+// to E7 and D4.
+//
+// **The parts are the chain and not the calendar.** Everything here is time
+// this thread spent in one thing after the release, in the order it spent it,
+// so the four add up to the total bar the chirp and the logging. The address
+// arriving is deliberately not one of them: it happens in the WiFi task and
+// usually lands underneath the Listening refresh, so counting it from the
+// release would count the same milliseconds twice. What is counted is the wait
+// that was left once the panel let go of this thread, which is nothing at all
+// on a wake with a lease -- the "online in" line above has the radio's own view.
+void logTiming(Outcome outcome, uint32_t networkWaitMs, uint32_t roundTripMs) {
+  if (g_releaseUs == 0) return;
+
+  Serial1.printf("  release to the %s: %lu ms -- %lu ms left of the Listening refresh,"
+                 " %lu ms working screen, %lu ms waiting for the network, %lu ms round"
+                 " trip; %lu ms of %s refresh after it\n",
+                 outcome == Outcome::Answered ? "answer chirp" : "error chirp",
+                 static_cast<unsigned long>(g_toChirpMs),
+                 static_cast<unsigned long>(g_listeningLeftMs),
+                 static_cast<unsigned long>(g_workingMs),
+                 static_cast<unsigned long>(networkWaitMs),
+                 static_cast<unsigned long>(roundTripMs),
+                 static_cast<unsigned long>(g_answerMs),
+                 screen.lastWasPartial() ? "partial" : "full");
 }
 
-void printTable() {
-  static constexpr const char* kFormat =
-      "%3s  %-6s %7s %9s %8s %7s %8s %10s %9s %8s %8s  %s\n";
-
-  Serial1.println();
-  Serial1.printf(kFormat, "#", "mode", "link", "connect", "boot", "wait", "to POST", "wav",
-                 "round trip", "lost", "dhcp", "outcome");
-
-  const uint32_t rows = g_questions < kLogRows ? g_questions : kLogRows;
-  for (uint32_t i = 0; i < rows; ++i) {
-    const Row& row = g_log[i];
-
-    char index[8];
-    char link[12] = "--";
-    char connect[12] = "--";
-    char boot[12] = "--";
-    char wait[12] = "--";
-    char toPost[12] = "--";
-    char sent[12] = "--";
-    char roundTrip[12] = "--";
-    char lost[12] = "--";
-    char renew[12] = "--";
-    char outcome[32];
-
-    snprintf(index, sizeof(index), "%lu", static_cast<unsigned long>(i + 1));
-    if (row.linkMs != 0) snprintf(link, sizeof(link), "%u ms", row.linkMs);
-    if (row.connectMs != 0) snprintf(connect, sizeof(connect), "%u ms", row.connectMs);
-    if (row.bootMs != 0) snprintf(boot, sizeof(boot), "%u ms", row.bootMs);
-    if (row.heldMs != 0) snprintf(wait, sizeof(wait), "%u ms", row.waitedMs);
-    if (row.toPostMs != 0) snprintf(toPost, sizeof(toPost), "%u ms", row.toPostMs);
-    if (row.sentBytes != 0) snprintf(sent, sizeof(sent), "%lu B",
-                                     static_cast<unsigned long>(row.sentBytes));
-    if (row.roundTripMs != 0) snprintf(roundTrip, sizeof(roundTrip), "%u ms", row.roundTripMs);
-    if (row.lostMs != 0) snprintf(lost, sizeof(lost), "%u ms", row.lostMs);
-    if (row.renewMs != 0) snprintf(renew, sizeof(renew), "%u ms", row.renewMs);
-
-    if (static_cast<Outcome>(row.outcome) == Outcome::ServerError) {
-      snprintf(outcome, sizeof(outcome), "SERVER ERROR %d", static_cast<int>(row.status));
-    } else {
-      snprintf(outcome, sizeof(outcome), "%s", outcomeName(row.outcome));
-    }
-
-    Serial1.printf(kFormat, index, modeName(row.mode), link, connect, boot, wait, toPost, sent,
-                   roundTrip, lost, renew, outcome);
-  }
-  Serial1.println();
-}
-
-// A press held through the report is still down when the sleep is armed, and
-// ext1 wakes on the level. Only the 30 s cap can get here with the button down.
+// A press held through the log is still down when the sleep is armed, and ext1
+// wakes on the level.
 void waitForRelease() {
   if (!button.isDown()) return;
 
@@ -280,56 +199,48 @@ void waitForRelease() {
   while (button.isDown() && esp_timer_get_time() < deadlineUs) delay(5);
 }
 
-// The one exit. `consumed` says whether the row this question was walking has
-// been walked -- a tap or a failure before the POST leaves it for the next
-// press, because the row it was testing never ran.
-[[noreturn]] void finish(Outcome outcome, bool consumed) {
-  g_row.outcome = static_cast<uint8_t>(outcome);
-
-  // Called straight after whichever screen was drawn, so this is the whole gap
-  // the user sits through: the network, the round trip and the refresh.
-  if (g_releaseUs != 0) {
-    g_row.answeredMs = static_cast<uint16_t>((esp_timer_get_time() - g_releaseUs) / 1000);
-  }
-
-  if (g_magic != kMagic) {
-    g_magic = kMagic;
-    g_questions = 0;
-  }
-  if (g_questions < kLogRows) g_log[g_questions] = g_row;
-  ++g_questions;
-
-  if (consumed) {
-    // The row is only spoiled once the question that was testing it is over,
-    // and only when it actually ran: a tap leaves the table where it was, and
-    // spoiling on the way past would put the next wake on a row it was not
-    // walking.
-    if (kPlans[g_row.plan].spoilAfter) g_spoiled = WifiLink::spoilLease();
-    ++g_walked;
-  }
-
-  printTable();
-
+// The one exit. Called straight after whichever screen was drawn, so everything
+// above it has already happened.
+[[noreturn]] void finish(Outcome outcome) {
+  // The capture task owns the microphone until it is joined, so the abort comes
+  // before mic.end() and not after it. Both are no-ops when the task never
+  // started or has already reported.
+  capture.abort();
+  capture.wait(kCaptureJoinMs);
   mic.end();
   wifi.end();
-  waitForRelease();
 
-  Serial1.printf("  press the AI button for \"%s\"\n", kPlans[planIndex()].what);
+  Serial1.printf("  %s, %lu ms awake\n", outcomeName(outcome),
+                 static_cast<unsigned long>((esp_timer_get_time() - g_entryUs) / 1000));
+
+  waitForRelease();
   Serial1.flush();
 
   stickyPower::deepSleep();
 }
 
-// A failure with nothing sent: log it, show it, chirp, sleep. The row stays
-// where it is.
+// A failure: log it, chirp, show it, sleep. The chirp comes before the screen
+// for the reason every chirp does -- the panel is one to two seconds behind and
+// holding the sound back spends that advantage.
 [[noreturn]] void fail(Outcome outcome, const char* title, const char* detail) {
   Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
+
+  g_toChirpMs = sinceReleaseMs();
   stickyBuzzer::error();
-  if (screen.begin()) screen.error(title, detail);
-  finish(outcome, false);
+
+  const int64_t refreshStartUs = esp_timer_get_time();
+  const bool drawn = screen.begin();
+  if (drawn) screen.error(title, detail);
+  g_answerMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
+  if (drawn) {
+    Serial1.printf("  error screen: %lu ms %s\n", static_cast<unsigned long>(g_answerMs),
+                   screen.lastWasPartial() ? "partial" : "full");
+  }
+
+  finish(outcome);
 }
 
-// The question, with S7b's rule around it.
+// The question, with S7b's stale-lease rule around it.
 //
 // **A connect that nothing answered is the only thing that can say a cached
 // lease has gone stale**, because a lease that has outlived its network installs
@@ -344,9 +255,8 @@ void waitForRelease() {
 // Everything else the backend can do -- refuse the connection, answer 500,
 // answer nothing, answer nonsense -- proves there is something at the address
 // and therefore that the address works, and leaves the lease alone.
-Backend::Result askAbout(const char* url) {
-  Backend::Result result = backend.ask(url, audio.wav(), audio.wavBytes());
-  g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
+Backend::Result askAbout() {
+  Backend::Result result = backend.ask(audio.wav(), audio.wavBytes());
 
   const bool couldBeStale =
       result == Backend::Result::NoServer && backend.unreachable() && wifi.usedLease();
@@ -355,11 +265,8 @@ Backend::Result askAbout(const char* url) {
   Serial1.printf("  nothing answered in %lu ms, and this question is on a reused address"
                  " -- asking once more before believing it\n",
                  static_cast<unsigned long>(backend.elapsedMs()));
-  g_row.lostMs = static_cast<uint16_t>(backend.elapsedMs());
 
-  result = backend.ask(url, audio.wav(), audio.wavBytes());
-  g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
-  g_row.lostMs = static_cast<uint16_t>(g_row.lostMs + backend.elapsedMs());
+  result = backend.ask(audio.wav(), audio.wavBytes());
   if (result != Backend::Result::NoServer || !backend.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
     return result;
@@ -369,7 +276,6 @@ Backend::Result askAbout(const char* url) {
   const uint32_t stale = wifi.ipv4();
   wifi.renewAddress();
   while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
-  g_row.renewMs = static_cast<uint16_t>(wifi.renewMs());
 
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.renewMs()),
@@ -390,48 +296,24 @@ Backend::Result askAbout(const char* url) {
                      ? "the same address, so the lease was not what was wrong"
                      : "a different address, so it was");
 
-  result = backend.ask(url, audio.wav(), audio.wavBytes());
-  g_row.roundTripMs = static_cast<uint16_t>(backend.elapsedMs());
-  return result;
+  return backend.ask(audio.wav(), audio.wavBytes());
 }
 
 }  // namespace
 
 void setup() {
-  const int64_t tEntry = esp_timer_get_time();
+  g_entryUs = esp_timer_get_time();
 
   // First thing on boot -- everything below depends on the board staying alive.
   stickyPower::holdLatch();
-  button.begin(tEntry);  // takes GPIO4 back from the RTC pad and pulls it up
+  button.begin(g_entryUs);  // takes GPIO4 back from the RTC pad and pulls it up
 
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   delay(50);
 
-  if (g_magic != kMagic) {
-    g_magic = kMagic;
-    g_questions = 0;
-    g_walked = 0;
-    g_spoiled = false;
-  }
-
-  const uint32_t index = planIndex();
-  const Plan& plan = kPlans[index];
-  const bool spoiled = g_spoiled;
-  g_spoiled = false;
-
-  g_row = Row{};
-  g_row.plan = static_cast<uint8_t>(index);
-
-  char url[Backend::kMaxUrlChars];
-  planUrl(url, sizeof(url), plan);
-
   Serial1.println();
-  Serial1.printf("S7b lease driver -- question %lu, wake %s, reset %s\n",
-                 static_cast<unsigned long>(g_questions + 1), stickyPower::wakeupCauseName(),
+  Serial1.printf("question -- wake %s, reset %s\n", stickyPower::wakeupCauseName(),
                  stickyPower::resetReasonName());
-  Serial1.printf("  row %lu/%lu: %s -- %s\n", static_cast<unsigned long>(index + 1),
-                 static_cast<unsigned long>(kPlanCount), plan.what, url);
-  Serial1.printf("  expecting %s\n", plan.expected);
 
   WifiLink::Lease lease;
   if (WifiLink::cachedLease(lease)) {
@@ -439,10 +321,9 @@ void setup() {
     char gateway[16];
     ipText(ip, sizeof(ip), lease.ip);
     ipText(gateway, sizeof(gateway), lease.gateway);
-    Serial1.printf("  lease in RTC memory: %s via %s, %lu s old of %lu%s\n", ip, gateway,
+    Serial1.printf("  lease in RTC memory: %s via %s, %lu s old of %lu\n", ip, gateway,
                    static_cast<unsigned long>(lease.ageS),
-                   static_cast<unsigned long>(lease.seconds),
-                   spoiled ? " -- moved onto another network on purpose" : "");
+                   static_cast<unsigned long>(lease.seconds));
   } else {
     Serial1.println("  no lease in RTC memory -- this question pays for DHCP");
   }
@@ -456,34 +337,36 @@ void setup() {
     fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
   }
   stickyBuzzer::ready();
+  Serial1.printf("  microphone live %lu ms after the wake\n",
+                 static_cast<unsigned long>((esp_timer_get_time() - g_entryUs) / 1000));
 
   g_beginUs = esp_timer_get_time();
   if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
-    capture.abort();
-    capture.wait();
     fail(Outcome::NoWifi, "NO WIFI", wifi.lastError());
-  }
-  g_row.mode = static_cast<uint8_t>(wifi.usedLease() ? (spoiled ? Mode::Stale : Mode::Lease)
-                                                     : Mode::Dhcp);
-  if (wifi.hadLease() && !wifi.usedLease()) {
-    Serial1.println("  the lease was not installed -- past half the life the server gave it,"
-                    " or WiFi.config() refused it");
   }
 
   // The one failure with nothing to draw a message on: chirp, log and sleep.
   if (!screen.begin()) {
     Serial1.printf("  the panel would not start: %s\n", screen.lastError());
     stickyBuzzer::error();
-    capture.abort();
-    capture.wait();
-    finish(Outcome::Broken, false);
+    finish(Outcome::Broken);
   }
 
   // A cold start is the only time the controller's previous-image RAM has
-  // nothing to do with what is on the glass. On a wake it is one to two seconds
-  // spent flushing a panel the next screen overwrites anyway -- see S8.
-  if (!stickyPower::wokeFromDeepSleep()) screen.clear();
-  screen.listening();
+  // nothing to do with what is on the glass.
+  if (!stickyPower::wokeFromDeepSleep()) {
+    const int64_t startUs = esp_timer_get_time();
+    screen.clear();
+    Serial1.printf("  cold start: %lu ms of pre-clear\n",
+                   static_cast<unsigned long>((esp_timer_get_time() - startUs) / 1000));
+  }
+
+  {
+    const int64_t startUs = esp_timer_get_time();
+    screen.listening();
+    g_listeningEndUs = esp_timer_get_time();
+    g_listeningMs = static_cast<uint32_t>((g_listeningEndUs - startUs) / 1000);
+  }
 
   // Everything from here until the release is the capture task's; this loop
   // only watches. A drop is the vision's rule that a recording with nowhere to
@@ -495,26 +378,68 @@ void setup() {
 
   mic.end();
 
-  g_row.heldMs = static_cast<uint16_t>(button.heldMs());
-  g_releaseUs = tEntry + static_cast<int64_t>(button.heldMs()) * 1000;
+  g_releaseUs = g_entryUs + static_cast<int64_t>(button.heldMs()) * 1000;
+
+  // A hold shorter than the refresh ends inside it, and the rest of the refresh
+  // is then the first thing the question waits for -- this thread cannot act on
+  // the release until it returns. Both moments are the ones they happened at
+  // rather than the ones this thread noticed, which is why neither is a poll.
+  if (g_listeningEndUs > g_releaseUs) {
+    g_listeningLeftMs = static_cast<uint32_t>((g_listeningEndUs - g_releaseUs) / 1000);
+  }
 
   Serial1.printf("  recording: %s after %lu ms held -- %lu ms of audio, %lu bytes to send\n",
                  capture.stopName(), static_cast<unsigned long>(button.heldMs()),
                  static_cast<unsigned long>(audio.recordedMs()),
                  static_cast<unsigned long>(audio.wavBytes()));
+  Serial1.printf("  Listening screen: %lu ms, and the release was %s it%s\n",
+                 static_cast<unsigned long>(g_listeningMs),
+                 g_listeningLeftMs != 0 ? "inside" : "after",
+                 g_listeningLeftMs != 0 ? " -- the question waits out the rest" : "");
 
   if (capture.stop() == Capture::Stop::ReadFailed) {
     fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
   }
+
+  // Silent on purpose -- D7. The chirp below is the first sound a question
+  // makes after the ready chirp, and a tap must not make it.
   if (button.isTap()) {
-    Serial1.println("  too short to be a question -- nothing sent, the row is unchanged");
-    finish(Outcome::Tap, false);
+    Serial1.println("  too short to be a question -- nothing sent");
+    finish(Outcome::Tap);
+  }
+
+  // The vision's step 6, in two parts. The chirp says the question was taken
+  // and costs milliseconds; the screen says the same thing to somebody who was
+  // not listening, and costs whatever a partial refresh costs on this panel --
+  // which is the number S8 exists to find out.
+  stickyBuzzer::taken();
+  {
+    const int64_t startUs = esp_timer_get_time();
+    const bool drawn = screen.working();
+    g_workingMs = static_cast<uint32_t>((esp_timer_get_time() - startUs) / 1000);
+    if (drawn) {
+      Serial1.printf("  working screen: %lu ms partial\n",
+                     static_cast<unsigned long>(g_workingMs));
+    } else {
+      // The panel keeps reading LISTENING until the answer lands, which is what
+      // the question would have looked like without this screen at all.
+      Serial1.printf("  working screen refused after %lu ms: %s\n",
+                     static_cast<unsigned long>(g_workingMs), screen.lastError());
+    }
   }
 
   // A release that arrives before the address does is not a failure: the
   // association has a budget of its own and NO WIFI is what happens when that
-  // runs out. S7 found this the hard way and the note is there.
+  // runs out.
+  //
+  // Timed from here rather than from the release on purpose: this is the poll
+  // loop's own view and the question it answers is the poller's -- how much of
+  // the wait was left once the panel let go. The radio's view of the same
+  // moment is wifi.onlineMs(), two lines down.
+  const int64_t networkWaitStartUs = esp_timer_get_time();
   while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+  const uint32_t networkWaitMs =
+      static_cast<uint32_t>((esp_timer_get_time() - networkWaitStartUs) / 1000);
 
   if (!wifi.online()) {
     Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
@@ -522,58 +447,36 @@ void setup() {
     fail(Outcome::NoWifi, "NO WIFI", nullptr);
   }
 
-  g_onlineUs = g_beginUs + static_cast<int64_t>(wifi.onlineMs()) * 1000;
-  if (g_onlineUs > g_releaseUs) {
-    g_row.waitedMs = static_cast<uint16_t>((g_onlineUs - g_releaseUs) / 1000);
-  }
+  // Timed by the WiFi task rather than by this one, because this one spent the
+  // Listening refresh not polling anything -- see WifiLink::onlineMs(). It is
+  // the radio's answer to "when was there a network", and it is not the same
+  // question as networkWaitMs above: an address that lands 2.6 s after the
+  // release lands under the refresh and costs the question nothing.
+  const int64_t onlineUs = g_beginUs + static_cast<int64_t>(wifi.onlineMs()) * 1000;
+  const uint32_t addressAfterReleaseMs =
+      onlineUs > g_releaseUs ? static_cast<uint32_t>((onlineUs - g_releaseUs) / 1000) : 0;
 
-  g_row.linkMs = static_cast<uint16_t>(wifi.linkMs());
-  g_row.connectMs = static_cast<uint16_t>(wifi.onlineMs());
-  g_row.bootMs = static_cast<uint16_t>((g_onlineUs - tEntry) / 1000);
-
-  // The two numbers E6 put side by side, now from the firmware: a wake that
-  // asks for an address against a wake that already has one, measured from the
-  // top of setup() both times. The third number is what the thread doing the
-  // asking believed, which is the panel refresh and not the network.
-  Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- link at %lu ms, %lu ms from the"
-                 " top of setup(), %lu ms waited for after the release, first noticed at %lu ms\n",
+  Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- %lu ms from the wake, the"
+                 " address landed %lu ms after the release\n",
                  static_cast<unsigned long>(wifi.onlineMs()),
-                 wifi.usedCache() ? "cached" : "scanned", wifi.usedLease() ? "installed" : "leased",
-                 wifi.ip(), static_cast<unsigned long>(wifi.linkMs()),
-                 static_cast<unsigned long>(g_row.bootMs),
-                 static_cast<unsigned long>(g_row.waitedMs),
-                 static_cast<unsigned long>(wifi.elapsedMs()));
+                 wifi.usedCache() ? "cached" : "scanned",
+                 wifi.usedLease() ? "installed" : "leased", wifi.ip(),
+                 static_cast<unsigned long>((onlineUs - g_entryUs) / 1000),
+                 static_cast<unsigned long>(addressAfterReleaseMs));
 
   // The one way the cache can fail without anything looking wrong: DHCP ran,
   // the address is fine, and the client never said how long it lives -- so
   // there is nothing to age an entry against and none is written. It would show
-  // up only as every question paying for DHCP forever, which is the state this
-  // step exists to leave behind.
+  // up only as every question paying for DHCP forever.
   if (!wifi.usedLease() && wifi.leaseSeconds() == 0) {
     Serial1.println("  the client did not say how long the lease lives -- nothing cached for the"
                     " next question");
   }
 
-  g_row.sentBytes = static_cast<uint32_t>(audio.wavBytes());
+  const Backend::Result result = askAbout();
+  const uint32_t roundTripMs = backend.elapsedMs();
 
-  // **The network stops being what the question waits for, and the panel
-  // starts.** With the address installed the network is usable 200 ms into the
-  // wake, but this thread cannot act on that until the LISTENING refresh
-  // returns -- so a question shorter than the refresh reaches the upload when
-  // the panel lets it, not when the radio does. The gap between this number and
-  // `wait` is the whole of S8's open question, in one column.
-  g_row.toPostMs = static_cast<uint16_t>((esp_timer_get_time() - g_releaseUs) / 1000);
-  Serial1.printf("  %lu ms from the release to the upload starting, of which %lu ms was the"
-                 " network\n",
-                 static_cast<unsigned long>(g_row.toPostMs),
-                 static_cast<unsigned long>(g_row.waitedMs));
-
-  const Backend::Result result = askAbout(url);
-
-  g_row.status = static_cast<int16_t>(backend.status());
-
-  Serial1.printf("  round trip: %lu ms, first byte at %lu ms",
-                 static_cast<unsigned long>(backend.elapsedMs()),
+  Serial1.printf("  round trip: %lu ms, first byte at %lu ms", static_cast<unsigned long>(roundTripMs),
                  static_cast<unsigned long>(backend.firstByteMs()));
   if (backend.status() != 0 && backend.firstByteMs() != 0) {
     Serial1.printf(" (%lu KB/s up)",
@@ -588,37 +491,56 @@ void setup() {
 
   // The vision's error table, in the one place that owns it. Every outcome
   // chirps before it draws, answers included -- S7's note has why.
+  Outcome outcome = Outcome::Broken;
+  char detail[16] = {0};
+  const char* title = nullptr;
+
   switch (result) {
     case Backend::Result::Ok:
-      stickyBuzzer::answer();
-      screen.answer(backend.answer());
-      finish(Outcome::Answered, true);
-
+      outcome = Outcome::Answered;
+      break;
     case Backend::Result::NoServer:
-      stickyBuzzer::error();
-      screen.error("NO SERVER", nullptr);
-      finish(Outcome::NoServer, true);
-
-    case Backend::Result::ServerError: {
-      char detail[16];
+      outcome = Outcome::NoServer;
+      title = "NO SERVER";
+      break;
+    case Backend::Result::ServerError:
+      outcome = Outcome::ServerError;
+      title = "SERVER ERROR";
       snprintf(detail, sizeof(detail), "%d", backend.status());
-      stickyBuzzer::error();
-      screen.error("SERVER ERROR", detail);
-      finish(Outcome::ServerError, true);
-    }
-
+      break;
     case Backend::Result::BadResponse:
-      stickyBuzzer::error();
-      screen.error("BAD RESPONSE", nullptr);
-      finish(Outcome::BadResponse, true);
-
+      outcome = Outcome::BadResponse;
+      title = "BAD RESPONSE";
+      break;
     case Backend::Result::TimedOut:
-      stickyBuzzer::error();
-      screen.error("TIMED OUT", nullptr);
-      finish(Outcome::TimedOut, true);
+      outcome = Outcome::TimedOut;
+      title = "TIMED OUT";
+      break;
   }
 
-  finish(Outcome::Broken, false);
+  // The chirp is timed out of the refresh rather than into it: it sounds first
+  // on purpose -- the vision's sound section -- so the wait ends where it starts
+  // and the refresh behind it is the panel's number and only the panel's.
+  g_toChirpMs = sinceReleaseMs();
+  if (title == nullptr) {
+    stickyBuzzer::answer();
+  } else {
+    stickyBuzzer::error();
+  }
+
+  const int64_t refreshStartUs = esp_timer_get_time();
+  if (title == nullptr) {
+    screen.answer(backend.answer());
+  } else {
+    screen.error(title, detail[0] != '\0' ? detail : nullptr);
+  }
+  g_answerMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
+  Serial1.printf("  %s screen: %lu ms %s\n", title == nullptr ? "answer" : "error",
+                 static_cast<unsigned long>(g_answerMs),
+                 screen.lastWasPartial() ? "partial" : "full");
+
+  logTiming(outcome, networkWaitMs, roundTripMs);
+  finish(outcome);
 }
 
 void loop() {

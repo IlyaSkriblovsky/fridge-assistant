@@ -25,12 +25,16 @@ It is a personal device, built for one user, powered by battery.
    Draw the "Listening" screen whenever the panel gets round to it; it will be
    late and that is accepted.
 5. **Release.** Debounce, then stop capturing.
-6. **Working.** Say that the question was taken and is being answered. The
-   backend runs speech recognition and a language model, which is seconds --
-   `kResponseTimeoutMs` allows thirty of them -- and until the answer is drawn
-   the panel still reads "Listening", which stops being true the moment the
-   button comes up. The answer chirp marks the end of that wait rather than
-   covering it: it sounds when the refresh starts, so it says the answer has
+6. **Working.** Say that the question was taken and is being answered, twice
+   over: a chirp the moment the button comes up, and the word on the panel
+   changing from "Listening" to "Working". The backend runs speech recognition
+   and a language model, which is seconds -- `kResponseTimeoutMs` allows thirty
+   of them -- and the panel would otherwise still read "Listening", which stops
+   being true the moment the button comes up. The word is a partial refresh, not
+   a screen of its own: this is the one transition the user waits through, and a
+   full refresh would put two and a half seconds in front of a wait that is
+   usually half a second. The answer chirp then marks the end of the wait rather
+   than covering it: it sounds when the refresh starts, so it says the answer has
    arrived and not that it is finished being drawn.
 7. **Upload.** POST the recording to the backend as a WAV.
 8. **Answer.** The backend replies with text. Render it on the e-paper.
@@ -219,21 +223,46 @@ whole pipeline.
 ### Screen
 
 Four transitions exist: asleep -> Listening, Listening -> working, working ->
-answer, working -> error. All take a full refresh for now -- [D6](deferred.md).
+answer, working -> error.
 
-**The working transition is the only one that costs the user anything**, and
-that is what makes its form an open question rather than a fourth call on the
-screen module. Every other transition happens while the user is waiting for
-nothing: the Listening refresh runs under the recording, and the answer refresh
-runs when the question is over. This one sits on the critical path -- released,
-draw, upload, wait, draw again -- so a full refresh adds its 2.4 s to the wait
-for every answer, to show a screen that a fast backend may not leave up long
-enough to read.
+**One of them is a full refresh and it is the first one.** A partial update is
+differential -- the controller picks each pixel's waveform from the pair (what
+is on the glass, what should be) -- and after a deep sleep the firmware knows
+nothing about what is on the glass: the previous-image plane is rebuilt from
+zero on every boot while the panel still holds the last answer. Only a full
+refresh drives every pixel whatever it was, so exactly one is needed per wake to
+reconcile the two, and it is `Listening`. It also clears accumulated ghosting,
+which is the other thing full refreshes are for -- [D6](deferred.md).
 
-Three shapes are plausible and the choice needs a backend that actually thinks
-behind it, so it is settled at S8 rather than here: a screen of its own, a
-partial refresh of the word alone ([D6](deferred.md)), or no screen at all and a
-fourth buzzer pattern on release.
+That is the cheap place to spend it. The Listening refresh runs under the
+recording, where the user is still talking; everything after it is on the far
+side of the button coming up, where a second is a second the user waits.
+
+**So working, answer and error are partial**, and on this panel that is 1344 ms
+against 2400 ms for the same area full -- measured at
+[S8](implementation.md#s8----the-flow), where taking the two window sizes apart
+also showed the difference is waveform and not transfer. Every transition comes
+out clean: no smear, no residue, checked by eye over a run of consecutive
+questions. That run was the first time the partial-refresh correction in
+`src/sticky/epaper.h` had ever executed.
+
+**The working transition is the only one that costs the user anything**, and it
+is what settled the shape of all of this. Every other transition happens while
+the user is waiting for nothing. This one sits on the critical path -- released,
+draw, upload, wait, draw again -- so whatever it costs is added to the wait for
+every answer, to show a screen that a fast backend may not leave up long enough
+to read. It repaints the word and nothing else: `LISTENING` and `WORKING` are
+one screen with two words in it, drawn in the same face at the same size and
+centred, so the strip of panel the word occupies belongs to the face rather than
+to the word, and a partial refresh of that strip -- 990 ms -- is the whole
+transition.
+
+The two shapes it was chosen over were a screen of its own at the full 2.4 s,
+which would have been slower than the wait it announced three times in four, and
+no screen at all with only a chirp, which would have left the panel saying
+`LISTENING` after it had stopped being true. The chirp is there as well; it is
+not an alternative to the word but the part of the answer that arrives
+immediately.
 
 **Landscape, with the three buttons along the bottom edge on the right.** That
 is where the AI button falls under the right thumb, which is the hand the device
@@ -247,6 +276,20 @@ ways round.
 The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
 answer disappears as soon as a new question starts.
+
+**That is likely to change, and to an idle screen.** The intent is that some
+seconds after the answer the device draws a screen of its own and only then
+sleeps, so what lives on the glass between questions is that rather than the
+last answer. It belongs to the UI/UX pass and is not decided here. Two things
+about the panel already hang on it, which is why it is written down:
+
+- Its content is not expected to be reconstructible after a wake, which is what
+  keeps the Listening screen a full refresh -- [D6](deferred.md) has the
+  reasoning, and it is the reason that refresh needs a thread rather than a
+  cheaper waveform.
+- Drawn by a full refresh, it settles what the panel holds overnight: the image
+  that has to survive without power is then always one a full waveform drove,
+  and how well a partial one keeps stops being worth measuring.
 
 Battery level belongs on the **answer and error screens**, not on the Listening
 screen -- read from the BQ27220 fuel gauge on the sensor I2C bus (address
@@ -281,11 +324,18 @@ looking:
 | Event | Pattern |
 | --- | --- |
 | Ready to listen | two very short notes, low then high |
+| Question taken | one short note, between the two |
 | Answer received | two short notes, high then low |
 | Error | one longer note |
 
 The rising pair opens a question and the falling pair closes it, so the two
 normal outcomes are opposites, and the single sustained note is neither.
+
+The taken note has to survive being heard about half a second before the
+answer's pair, which is what the round trip usually is ([E7](experiments.md)),
+so it is placed where neither pair can absorb it: one note rather than two,
+between the pair's two pitches so it is neither of them, and far too short to be
+the error's sustained note.
 
 The ready chirp sounds *after* capture has started, so the microphone records
 it. That is the cheaper trade: chirping first and then starting capture would
@@ -436,15 +486,17 @@ Also worth knowing:
 
 ## What is still moving
 
-One thing is: **what the device does between the button coming up and the
-answer arriving**, in the interaction flow's step 6. That the gap has to be
-covered is settled; which of the three shapes covers it is not, and cannot be
-until there is a model behind the backend to be slow. It is the one open
-question in this document and it belongs to S8.
+Nothing in this document is open any more. The last question in it was **what
+the device does between the button coming up and the answer arriving**, in the
+interaction flow's step 6, and [S8](implementation.md#s8----the-flow) answered
+it: a chirp and a partial refresh of the word. What has not been decided cannot
+be decided here -- the backend still answers a fixed phrase, so the thinking
+time that will dominate that wait in the end is still unmeasured, and the wider
+UI is deliberately unconsidered until the proof of concept works.
 
-Everything else that remains is tracked elsewhere, deliberately kept out of this
-document so it does not age every time a shortcut is taken, a number comes in or
-a step is finished:
+What remains is tracked elsewhere, deliberately kept out of this document so it
+does not age every time a shortcut is taken, a number comes in or a step is
+finished:
 
 - **[deferred.md](deferred.md)** -- simplifications taken on purpose, each with
   the end state it stands in for and what triggers the change.
