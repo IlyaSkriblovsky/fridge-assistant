@@ -40,7 +40,7 @@ bool Recording::begin(uint32_t sampleRate, uint32_t maxSeconds) {
   const uint32_t capacity = sampleRate * maxSeconds;
   if (_buffer != nullptr) {
     if (capacity == _capacity && sampleRate == _sampleRate) {
-      reset();
+      _samples = 0;
       return true;
     }
     end();
@@ -95,11 +95,6 @@ uint32_t Recording::recordedMs() const {
 const int16_t* Recording::samples() const {
   if (_buffer == nullptr) return nullptr;
   return reinterpret_cast<const int16_t*>(_buffer + kHeaderBytes);
-}
-
-size_t Recording::allocatedBytes() const {
-  if (_buffer == nullptr) return 0;
-  return kHeaderBytes + static_cast<size_t>(_capacity) * sizeof(int16_t);
 }
 
 const uint8_t* Recording::wav() {

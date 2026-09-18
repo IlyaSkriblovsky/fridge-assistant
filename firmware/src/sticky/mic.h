@@ -30,30 +30,6 @@ struct MicLevel {
   uint32_t samples; // how many samples actually went into the numbers
 };
 
-// The arithmetic behind a MicLevel, kept apart from where the samples come
-// from: readLevel() feeds it one I2S read at a time, and a walk over a finished
-// recording feeds it a slice of the PSRAM buffer.
-//
-// One pass collects everything a level needs. The sums give mean and variance
-// (variance = mean of squares - square of mean, which is the DC-free power),
-// and the extremes give the peak deviation once the mean is known. int64
-// accumulators, because 32768^2 per sample overflows int32 after two samples.
-class MicLevelMeter {
- public:
-  void add(const int16_t* samples, uint32_t count);
-  MicLevel result() const;
-
- private:
-  int64_t _sum = 0;
-  int64_t _sumSquares = 0;
-  int32_t _smallest = INT16_MAX;
-  int32_t _largest = INT16_MIN;
-  uint32_t _count = 0;
-};
-
-// One-shot form, for a block that is already in memory.
-MicLevel micLevelOf(const int16_t* samples, uint32_t count);
-
 class StickyMic {
  public:
   static constexpr int kPinClk = 19;
@@ -85,7 +61,6 @@ class StickyMic {
   // Stops I2S and cuts power to the mic.
   void end();
 
-  bool started() const { return _started; }
   uint32_t sampleRate() const { return _sampleRate; }
 
   // Reads `samples` PCM samples and reduces them to one level reading. Blocks

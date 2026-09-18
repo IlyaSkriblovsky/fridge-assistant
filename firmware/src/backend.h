@@ -67,16 +67,14 @@ class Backend {
   // a string the panel cuts at 128 characters.
   static constexpr size_t kMaxBodyBytes = 4096;
 
-  // The configured endpoint, written in one place so nothing else concatenates
-  // it. Exposed because the S7 driver prints it and asks elsewhere.
-  static void endpoint(char* out, size_t size);
-
   // The question. Returns how it ended; everything below narrows that down.
   Result ask(const uint8_t* wav, size_t bytes);
 
-  // The same, somewhere else. The S7 driver provokes each row of the vision's
-  // error table with it -- a closed port, an address nothing answers at, a
-  // backend that returns 500 -- without a rebuild between rows.
+  // The same, somewhere else: the seam that provokes each row of the vision's
+  // error table -- a closed port, an address nothing answers at, a backend that
+  // returns 500 -- without a rebuild between rows. Nothing in the firmware calls
+  // it. S7's driver did, and S11 needs it again: the four results get mapped
+  // onto esp_http_client there, and each row has to be walked once more.
   Result ask(const char* url, const uint8_t* wav, size_t bytes);
 
   // Meaningful after Ok. Always a valid string: empty before the first ask().
@@ -110,6 +108,10 @@ class Backend {
   const char* lastError() const { return _error; }
 
  private:
+  // The configured endpoint, written in one place so nothing else concatenates
+  // it.
+  static void endpoint(char* out, size_t size);
+
   // One exit, so no path can return without stopping the clock.
   Result finish(Result result, const char* format, ...);
 

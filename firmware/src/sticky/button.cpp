@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
+#include <esp_timer.h>
 
 #include "config.h"
 

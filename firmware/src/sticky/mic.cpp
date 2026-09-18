@@ -26,6 +26,52 @@ void releaseUsbJtagPins() {
   gpio_reset_pin(GPIO_NUM_20);
 }
 
+// The arithmetic behind a MicLevel, kept apart from where the samples come
+// from: readLevel() feeds it one I2S read at a time.
+//
+// One pass collects everything a level needs. The sums give mean and variance
+// (variance = mean of squares - square of mean, which is the DC-free power),
+// and the extremes give the peak deviation once the mean is known. int64
+// accumulators, because 32768^2 per sample overflows int32 after two samples.
+class MicLevelMeter {
+ public:
+  void add(const int16_t* samples, uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) {
+      const int32_t s = samples[i];
+      _sum += s;
+      _sumSquares += static_cast<int64_t>(s) * s;
+      if (s < _smallest) _smallest = s;
+      if (s > _largest) _largest = s;
+    }
+    _count += count;
+  }
+
+  MicLevel result() const {
+    MicLevel out{0.0f, StickyMic::kSilenceDbfs, 0.0f, _count};
+    if (_count == 0) return out;
+
+    const double mean = static_cast<double>(_sum) / _count;
+    double variance = static_cast<double>(_sumSquares) / _count - mean * mean;
+    if (variance < 0.0) variance = 0.0;  // rounding can push a silent block below zero
+
+    const double rms = sqrt(variance);
+    const double peakHigh = _largest - mean;
+    const double peakLow = mean - _smallest;
+
+    out.rms = static_cast<float>(rms);
+    out.peak = static_cast<float>(peakHigh > peakLow ? peakHigh : peakLow);
+    if (rms > 0.0) out.dbfs = static_cast<float>(20.0 * log10(rms / 32768.0));
+    return out;
+  }
+
+ private:
+  int64_t _sum = 0;
+  int64_t _sumSquares = 0;
+  int32_t _smallest = INT16_MAX;
+  int32_t _largest = INT16_MIN;
+  uint32_t _count = 0;
+};
+
 }  // namespace
 
 bool StickyMic::begin(uint32_t sampleRate, uint32_t settleMs) {
@@ -66,41 +112,6 @@ void StickyMic::end() {
     _started = false;
   }
   digitalWrite(kPinPowerEnable, LOW);
-}
-
-void MicLevelMeter::add(const int16_t* samples, uint32_t count) {
-  for (uint32_t i = 0; i < count; ++i) {
-    const int32_t s = samples[i];
-    _sum += s;
-    _sumSquares += static_cast<int64_t>(s) * s;
-    if (s < _smallest) _smallest = s;
-    if (s > _largest) _largest = s;
-  }
-  _count += count;
-}
-
-MicLevel MicLevelMeter::result() const {
-  MicLevel out{0.0f, StickyMic::kSilenceDbfs, 0.0f, _count};
-  if (_count == 0) return out;
-
-  const double mean = static_cast<double>(_sum) / _count;
-  double variance = static_cast<double>(_sumSquares) / _count - mean * mean;
-  if (variance < 0.0) variance = 0.0;  // rounding can push a silent block below zero
-
-  const double rms = sqrt(variance);
-  const double peakHigh = _largest - mean;
-  const double peakLow = mean - _smallest;
-
-  out.rms = static_cast<float>(rms);
-  out.peak = static_cast<float>(peakHigh > peakLow ? peakHigh : peakLow);
-  if (rms > 0.0) out.dbfs = static_cast<float>(20.0 * log10(rms / 32768.0));
-  return out;
-}
-
-MicLevel micLevelOf(const int16_t* samples, uint32_t count) {
-  MicLevelMeter meter;
-  if (samples != nullptr) meter.add(samples, count);
-  return meter.result();
 }
 
 bool StickyMic::readLevel(MicLevel& out, uint32_t samples) {

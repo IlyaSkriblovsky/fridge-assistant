@@ -59,11 +59,6 @@ class Recording {
   // Releases the PSRAM.
   void end();
 
-  bool allocated() const { return _buffer != nullptr; }
-
-  // Rewinds to an empty recording, keeping the allocation.
-  void reset() { _samples = 0; }
-
   // Where the next I2S read lands, and how many samples it may write there.
   // The count reaches 0 exactly at the cap, which is what ends capture.
   int16_t* writeHead();
@@ -86,10 +81,6 @@ class Recording {
   // on: the body is sent straight from PSRAM.
   const uint8_t* wav();
   size_t wavBytes() const { return kHeaderBytes + recordedBytes(); }
-
-  uint32_t sampleRate() const { return _sampleRate; }
-  uint32_t capacitySamples() const { return _capacity; }
-  size_t allocatedBytes() const;
 
   // Human-readable reason the last begin() returned false.
   const char* lastError() const { return _lastError; }

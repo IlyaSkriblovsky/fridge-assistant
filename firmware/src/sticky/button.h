@@ -1,6 +1,5 @@
 #pragma once
 
-#include <esp_timer.h>
 #include <stdint.h>
 
 #include "sticky/power.h"
@@ -45,17 +44,12 @@ class StickyButton {
 
   // Takes the pad back from the RTC subsystem and starts timing a press that is
   // assumed to be already down. pressStartUs is an esp_timer_get_time() reading
-  // from the top of setup(); the no-argument form starts from now, which is
-  // right when the press did not wake the board.
+  // from the top of setup().
   void begin(int64_t pressStartUs);
-  void begin() { begin(esp_timer_get_time()); }
 
-  // Non-blocking. Returns true once the release has been debounced -- the same
-  // thing released() reports -- and keeps returning true afterwards, so a late
-  // bounce cannot end the same press twice.
+  // Non-blocking. Returns true once the release has been debounced, and keeps
+  // returning true afterwards, so a late bounce cannot end the same press twice.
   bool poll();
-
-  bool released() const { return _released; }
 
   // How long the button has been down, or how long it was down once poll() has
   // reported the release. The press ends when the line first goes high; the
@@ -63,8 +57,8 @@ class StickyButton {
   uint32_t heldMs() const;
 
   // True while the press is too short to count as a question. Meaningful once
-  // released() is true; before that it only says the press is not long enough
-  // yet.
+  // poll() has returned true; before that it only says the press is not long
+  // enough yet.
   bool isTap() const;
 
   // The raw level, with no debouncing -- true while the contact is closed.
