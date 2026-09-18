@@ -275,8 +275,8 @@ split exists for, so a clean recording under both loads is the result.
 ### What it turned out to involve
 
 `src/capture.h/.cpp`. `Capture` is `start()`, `abort()`,
-`finished()`, `wait()` and `stop()`, and the orchestrator's half of it is five
-lines:
+`finished()`, `wait()` and `stopReason()`, and the orchestrator's half of it is
+five lines:
 
 ```
 if (!mic.begin()) fail("microphone", mic.lastError());

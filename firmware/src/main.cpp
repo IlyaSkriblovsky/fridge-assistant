@@ -113,7 +113,7 @@ int64_t g_listeningEndUs = 0;
 // has the shape it has, and because D4's display task is weighed against it.
 uint32_t g_listeningMs = 0;
 uint32_t g_workingMs = 0;
-uint32_t g_answerMs = 0;
+uint32_t g_finalScreenMs = 0;
 
 // The release to the moment the last chirp starts, which is the whole of what
 // the user waits through: the refresh behind it is readable long before it ends
@@ -184,7 +184,7 @@ void logTiming(Outcome outcome, uint32_t networkWaitMs, uint32_t roundTripMs) {
                  static_cast<unsigned long>(g_workingMs),
                  static_cast<unsigned long>(networkWaitMs),
                  static_cast<unsigned long>(roundTripMs),
-                 static_cast<unsigned long>(g_answerMs),
+                 static_cast<unsigned long>(g_finalScreenMs),
                  screen.lastWasPartial() ? "partial" : "full");
 }
 
@@ -224,15 +224,14 @@ void waitForRelease() {
 [[noreturn]] void fail(Outcome outcome, const char* title, const char* detail) {
   Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
 
-  g_toChirpMs = sinceReleaseMs();
   stickyBuzzer::error();
 
   const int64_t refreshStartUs = esp_timer_get_time();
   const bool drawn = screen.begin();
   if (drawn) screen.error(title, detail);
-  g_answerMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
+  g_finalScreenMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
   if (drawn) {
-    Serial1.printf("  error screen: %lu ms %s\n", static_cast<unsigned long>(g_answerMs),
+    Serial1.printf("  error screen: %lu ms %s\n", static_cast<unsigned long>(g_finalScreenMs),
                    screen.lastWasPartial() ? "partial" : "full");
   }
 
@@ -396,7 +395,7 @@ void setup() {
   }
 
   Serial1.printf("  recording: %s after %lu ms held -- %lu ms of audio, %lu bytes to send\n",
-                 capture.stopName(), static_cast<unsigned long>(button.heldMs()),
+                 capture.stopReasonName(), static_cast<unsigned long>(button.heldMs()),
                  static_cast<unsigned long>(audio.recordedMs()),
                  static_cast<unsigned long>(audio.wavBytes()));
   Serial1.printf("  Listening screen: %lu ms, and the release was %s it%s\n",
@@ -404,7 +403,7 @@ void setup() {
                  g_listeningLeftMs != 0 ? "inside" : "after",
                  g_listeningLeftMs != 0 ? " -- the question waits out the rest" : "");
 
-  if (capture.stop() == Capture::Stop::ReadFailed) {
+  if (capture.stopReason() == Capture::StopReason::ReadFailed) {
     fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
   }
 
@@ -541,9 +540,9 @@ void setup() {
   } else {
     screen.error(title, detail[0] != '\0' ? detail : nullptr);
   }
-  g_answerMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
+  g_finalScreenMs = static_cast<uint32_t>((esp_timer_get_time() - refreshStartUs) / 1000);
   Serial1.printf("  %s screen: %lu ms %s\n", title == nullptr ? "answer" : "error",
-                 static_cast<unsigned long>(g_answerMs),
+                 static_cast<unsigned long>(g_finalScreenMs),
                  screen.lastWasPartial() ? "partial" : "full");
 
   logTiming(outcome, networkWaitMs, roundTripMs);

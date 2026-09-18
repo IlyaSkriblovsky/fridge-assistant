@@ -56,7 +56,7 @@ class Capture {
 
   // Why the recording ended. Released and Full are both normal questions --
   // the vision counts the cap as a question that was simply long enough.
-  enum class Stop : uint8_t {
+  enum class StopReason : uint8_t {
     None,        // still running, or never started
     Released,    // the button came back up and stayed up
     Full,        // the 30 s cap
@@ -91,10 +91,10 @@ class Capture {
   bool wait(uint32_t timeoutMs = UINT32_MAX);
 
   // Meaningful once finished() is true.
-  Stop stop() const { return _stop; }
-  const char* stopName() const;
+  StopReason stopReason() const { return _stopReason; }
+  const char* stopReasonName() const;
 
-  // Why the microphone stopped, when stop() is ReadFailed.
+  // Why the microphone stopped, when stopReason() is ReadFailed.
   const char* lastError() const { return _lastError; }
 
   // What the run cost, for the log. The wall clock the task spent reading is
@@ -134,7 +134,7 @@ class Capture {
   volatile bool _abort = false;
   bool _joined = false;
 
-  Stop _stop = Stop::None;
+  StopReason _stopReason = StopReason::None;
   const char* _lastError = "";
   int64_t _elapsedUs = 0;
   uint32_t _chunks = 0;

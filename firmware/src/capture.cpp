@@ -34,7 +34,7 @@ bool Capture::start(StickyMic& mic, Recording& audio, StickyButton& button) {
 
   _abort = false;
   _joined = false;
-  _stop = Stop::None;
+  _stopReason = StopReason::None;
   _lastError = "";
   _elapsedUs = 0;
   _chunks = 0;
@@ -72,13 +72,13 @@ bool Capture::join(TickType_t ticks) {
   return true;
 }
 
-const char* Capture::stopName() const {
-  switch (_stop) {
-    case Stop::Released: return "released";
-    case Stop::Full: return "cap reached";
-    case Stop::Aborted: return "aborted";
-    case Stop::ReadFailed: return "read failed";
-    case Stop::None: break;
+const char* Capture::stopReasonName() const {
+  switch (_stopReason) {
+    case StopReason::Released: return "released";
+    case StopReason::Full: return "cap reached";
+    case StopReason::Aborted: return "aborted";
+    case StopReason::ReadFailed: return "read failed";
+    case StopReason::None: break;
   }
   return "still running";
 }
@@ -101,13 +101,13 @@ void Capture::run() {
     // Checked first, so an abort that arrives while a read is in flight costs
     // one chunk and not two.
     if (_abort) {
-      _stop = Stop::Aborted;
+      _stopReason = StopReason::Aborted;
       break;
     }
 
     const uint32_t want = _audio->nextChunkSamples();
     if (want == 0) {
-      _stop = Stop::Full;  // the 30 s cap, which is a question like any other
+      _stopReason = StopReason::Full;  // the 30 s cap, which is a question like any other
       break;
     }
 
@@ -117,7 +117,7 @@ void Capture::run() {
     const uint32_t got = _mic->readSamples(_audio->writeHead(), want);
     if (got == 0) {
       _lastError = _mic->lastError();
-      _stop = Stop::ReadFailed;
+      _stopReason = StopReason::ReadFailed;
       break;
     }
     _audio->commit(got);
@@ -133,7 +133,7 @@ void Capture::run() {
     ++_chunks;
 
     if (_button->poll()) {
-      _stop = Stop::Released;
+      _stopReason = StopReason::Released;
       break;
     }
   }
