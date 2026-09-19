@@ -1,0 +1,45 @@
+name: firmware
+
+# Builds every PlatformIO environment: the firmware and each experiment rig. A
+# rig that no longer builds cannot be re-run when its experiment has to be, and
+# exp_e1_firmware wraps main.cpp's functions by mangled name, so a rename there
+# fails its link. Nothing is flashed or run: there are no tests yet.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firmware/**
+      - .github/workflows/firmware.yml
+  pull_request:
+    paths:
+      - firmware/**
+      - .github/workflows/firmware.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v7
+
+      # The toolchain and framework come to about 5 GB unpacked, half the
+      # repository's cache quota, so they are downloaded fresh every run.
+      - name: Install PlatformIO
+        run: pipx install platformio==6.2.0
+
+      # Empty credentials build fine; they only fail at runtime, on the device.
+      - name: Stand in for the gitignored secrets.h
+        run: cp src/secrets.example.h src/secrets.h
+
+      # default_envs names only the firmware; this overrides it with every
+      # [env:...] in platformio.ini, one per line, so a new rig is built too.
+      - name: Build every environment
+        run: PLATFORMIO_DEFAULT_ENVS="$(grep -oP '^\[env:\K[^]]+' platformio.ini)" pio run

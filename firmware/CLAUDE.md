@@ -24,8 +24,8 @@ the hardware traps.
 | `src/display.h/.cpp` | The display task: owns the screen, draws what the orchestrator posts, off its thread |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
-| `src/config.h` | Tracked settings: backend URL, timeouts, button thresholds |
-| `src/secrets.h` | Credentials. Gitignored. Template: `src/secrets.example.h` |
+| `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
+| `src/secrets.h` | WiFi credentials, the backend's base URL and token. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
 | `tools/` | The host half of an experiment: the serial logger, the pcap reader E7 needs |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
@@ -63,6 +63,11 @@ The board enumerates as a CH343P bridge (`1A86:55D3`), typically
 A PlatformIO monitor left running in the user's editor holds the port and makes
 uploads fail with "port is busy"; ask the user to close it rather than killing
 their process.
+
+CI (`../.github/workflows/firmware.yml`) builds every `[env:...]` in
+`platformio.ini`, a new rig included, with `src/secrets.example.h` copied in as
+`src/secrets.h`. So every environment has to build without real credentials.
+A green CI only means it builds: nothing runs on hardware there.
 
 ## Things that will bite
 

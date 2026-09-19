@@ -1,15 +1,16 @@
 """Server for the Seeed Sticky voice assistant.
 
-The device POSTs a question as a WAV recording to /audio. The recording is
-collected in memory, handed to the assistant (Gemini and its tools, see
-assistant.py) and dropped; the assistant's reply goes back as the text for the
-device's screen.
+The device POSTs a question as a WAV recording to /audio, with its token in the
+Authorization header. The recording is collected in memory, handed to the
+assistant (Gemini and its tools, see assistant.py) and dropped; the assistant's
+reply goes back as the text for the device's screen.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import io
 import os
 import socket
@@ -20,7 +21,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import errors
@@ -33,7 +34,13 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
 
 # Everything the server cannot work without; .env is where they live.
-REQUIRED_ENV = ("GEMINI_API_KEY", "KEEP_EMAIL", "KEEP_MASTER_TOKEN", "KEEP_NOTE_ID")
+REQUIRED_ENV = (
+    "GEMINI_API_KEY",
+    "KEEP_EMAIL",
+    "KEEP_MASTER_TOKEN",
+    "KEEP_NOTE_ID",
+    "DEVICE_TOKEN",
+)
 
 # The recording is held in memory, and this is as much of it as is kept. The
 # device stops at 30 s, which is under 1 MB; Gemini takes up to 20 MB inline.
@@ -143,7 +150,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.gemini.aio.aclose()
 
 
-app = FastAPI(title="Assistant Server", lifespan=lifespan)
+async def drain(request: Request) -> int:
+    """Read the upload and throw it away.
+
+    Whatever answers without using the recording -- a refusal, and every fault
+    below -- reads it to the end first: a response sent while the device is
+    still uploading closes the connection under it, which the firmware would
+    report as NO SERVER instead of as the answer it was sent.
+    """
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+    return size
+
+
+async def authorize(request: Request) -> None:
+    """Let through only the device: `Authorization: Bearer <DEVICE_TOKEN>`.
+
+    Every endpoint depends on this. Anything else gets 401, which the device
+    shows as SERVER ERROR 401.
+    """
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    given = token.strip().encode()
+    expected = os.environ["DEVICE_TOKEN"].encode()
+    if scheme.lower() == "bearer" and hmac.compare_digest(given, expected):
+        return
+
+    with contextlib.suppress(ClientDisconnect):
+        await drain(request)
+    client = request.client.host if request.client else "-"
+    reason = "wrong token" if header else "no token"
+    print(f"[auth] {request.method} {request.url.path} from {client}: {reason}")
+    raise HTTPException(401, headers={"WWW-Authenticate": "Bearer"})
+
+
+app = FastAPI(
+    title="Assistant Server", lifespan=lifespan, dependencies=[Depends(authorize)]
+)
 
 
 @app.post("/audio")
@@ -212,20 +256,6 @@ async def audio(request: Request) -> dict[str, str]:
 # a backend that works. These three endpoints are exactly those cases, so a
 # firmware test can walk the whole error table without anyone breaking the real
 # endpoint to do it. They store nothing.
-
-
-async def drain(request: Request) -> int:
-    """Read the upload and throw it away.
-
-    Every fault below answers without having a recording to store, and a
-    response sent while the device is still uploading closes the connection
-    under it -- which the firmware would report as NO SERVER instead of as the
-    fault being tested.
-    """
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-    return size
 
 
 @app.post("/audio/fault/500")

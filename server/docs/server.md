@@ -17,7 +17,7 @@ uv run --env-file .env python main.py
 Без `--env-file .env` сервер не стартует: ключи и настройки лежат в `.env`.
 
 При старте сервер печатает модель, заметку Keep и адрес, который нужно
-вписать в прибор (`kBackendBaseUrl` в `src/config.h` прошивки):
+вписать в прибор (`kBackendBaseUrl` в `src/secrets.h` прошивки):
 
 ```
   Assistant server
@@ -43,10 +43,32 @@ uv run --env-file .env python main.py
 | `KEEP_EMAIL` | обязательна | Google-аккаунт ассистента |
 | `KEEP_MASTER_TOKEN` | обязательна | Его master token, как получить — в docstring `experiments/keep_list.py` |
 | `KEEP_NOTE_ID` | обязательна | Id заметки со списком покупок, его показывает `experiments/keep_list.py lists` |
+| `DEVICE_TOKEN` | обязательна | Токен прибора, тот же, что `kDeviceToken` в `src/secrets.h` прошивки, см. [Токен прибора](#токен-прибора) |
 | `HOST` | `0.0.0.0` | Адрес, который слушает сервер |
 | `PORT` | `8000` | Порт |
 
 Если обязательной переменной нет, сервер не запускается и называет её.
+
+## Токен прибора
+
+Каждый запрос, к `/audio` и к [намеренным сбоям](#намеренные-сбои), должен нести
+заголовок `Authorization: Bearer <DEVICE_TOKEN>`. Это делает зависимость
+`authorize()`, общая для всех эндпоинтов. Токен статичный, один на прибор и
+сервер, почему так — в [vision.md](vision.md#один-пользователь-один-прибор-один-токен).
+Сгенерировать новый:
+
+```sh
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+Запрос без токена или с чужим токеном сервер не выполняет и отвечает `401`.
+Прибор показывает это как `SERVER ERROR 401`. Тело перед этим дочитывается до
+конца, как и в остальных случаях: иначе прибор показал бы `NO SERVER`. В лог
+пишется одна строка, из которой видно, пришёл ли токен вообще:
+
+```
+[auth] POST /audio from 203.0.113.7: wrong token
+```
 
 ## `POST /audio`
 
@@ -127,7 +149,7 @@ WAV-заголовок, раунды Gemini с токенами, вызовы ф
 
 ```sh
 curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
-  http://localhost:8000/audio
+  -H "Authorization: Bearer $DEVICE_TOKEN" http://localhost:8000/audio
 ```
 
 Записи, сделанные прототипом, лежат в `recordings/`. Каждый такой запрос
@@ -138,7 +160,7 @@ curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
 Прошивка различает четыре плохих исхода запроса: `NO SERVER`, `SERVER ERROR`,
 `BAD RESPONSE`, `TIMED OUT`. Три из них от работающего сервера получить
 невозможно, поэтому для них есть отдельные эндпоинты. Они ничего не
-сохраняют и в Gemini не ходят:
+сохраняют и в Gemini не ходят, но токен прибора им нужен так же, как `/audio`:
 
 | Эндпоинт | Что делает | Что показывает прибор |
 | --- | --- | --- |
@@ -157,12 +179,111 @@ curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
 30 с), чтобы прибор сдался первым. Если в прошивке таймаут увеличат, это
 значение нужно поднять вслед за ним.
 
+## Деплой
+
+Сервер работает в Docker на арендованном сервере, за `nginxproxy/nginx-proxy`
+и `nginxproxy/acme-companion`, которые там уже обслуживают другие проекты.
+Образ собирает CI, а на сервере его запускает docker compose.
+
+### Образ
+
+`Dockerfile` ставит зависимости из `uv.lock` в virtualenv, кладёт рядом
+модули `*.py` из корня `server/` и запускает `python main.py`, как при
+локальном запуске. Секретов в образе нет, настройки приходят теми же
+переменными окружения. Лог выводится через `print()`, поэтому в образе
+выставлен `PYTHONUNBUFFERED=1`, иначе `docker logs` показывал бы его с
+задержкой.
+
+`.github/workflows/server.yml` запускается на каждый push и PR, который
+трогает `server/`. Он собирает образ, запускает его с фиктивными настройками и
+проверяет, что `POST /audio/fault/empty` с токеном отвечает `{}`, а без
+токена — `401`. Этот эндпоинт не ходит ни в Gemini, ни в Keep. Образ из `main` после этого уходит в GHCR:
+
+| Образ | Что |
+| --- | --- |
+| `ghcr.io/ilyaskriblovsky/fridge-assistant-server:latest` | Последний коммит в `main` |
+| `ghcr.io/ilyaskriblovsky/fridge-assistant-server:sha-<коммит>` | Конкретный коммит, на него можно откатиться |
+
+Образ собирается под `linux/amd64`. Собрать и запустить его локально:
+
+```sh
+docker build -t fridge-assistant-server .
+docker run --rm -p 8000:8000 --env-file .env fridge-assistant-server
+```
+
+При старте в контейнере сервер печатает адрес самого контейнера. Прибору этот
+адрес не подходит: за nginx-proxy прибор ходит на `http://<домен>/audio`.
+
+### За nginx-proxy
+
+```yaml
+services:
+  assistant:
+    image: ghcr.io/ilyaskriblovsky/fridge-assistant-server:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      VIRTUAL_HOST: assistant.example.com
+      VIRTUAL_PORT: "8000"
+      LETSENCRYPT_HOST: assistant.example.com
+      HTTPS_METHOD: noredirect
+      FORWARDED_ALLOW_IPS: "*"
+    networks: [proxy]
+
+networks:
+  proxy:
+    external: true
+    name: <сеть, в которой nginx-proxy>
+```
+
+В `.env` на сервере те же переменные, что и локально, `DEVICE_TOKEN` в том
+числе. Порты наружу не публикуются, до контейнера добирается только
+nginx-proxy.
+
+- **`HTTPS_METHOD: noredirect`.** По умолчанию nginx-proxy отвечает на HTTP
+  редиректом `301` на HTTPS. Прошивка пока ходит только по HTTP (D5 в её
+  `docs/deferred.md`) и редиректам не следует, поэтому прибор показал бы
+  `SERVER ERROR 301`. Токен при этом идёт открытым текстом, см.
+  [open-questions.md](open-questions.md). С `noredirect` домен отвечает и по HTTP, и по HTTPS, а
+  HSTS nginx-proxy не включает.
+- **`FORWARDED_ALLOW_IPS: "*"`.** uvicorn верит `X-Forwarded-For` только с
+  `127.0.0.1`, поэтому без этой настройки в логе вместо адреса клиента был бы
+  адрес nginx-proxy. Верить всем тут можно: до контейнера доходит только
+  прокси.
+
+Ещё два файла кладутся в каталог, который смонтирован в nginx-proxy как
+`/etc/nginx/vhost.d`. Имя каждого файла начинается со значения `VIRTUAL_HOST`:
+
+```nginx
+# vhost.d/assistant.example.com
+client_max_body_size 10m;
+```
+
+nginx по умолчанию не принимает тело больше 1 МБ, а 30 с записи — это 960 КБ.
+Запись помещается, но впритык: если прибор начнёт писать дольше 32 с, nginx
+ответит `413`, и до сервера запрос не дойдёт. 10 МБ — это `MAX_AUDIO_BYTES`.
+
+```nginx
+# vhost.d/assistant.example.com_location
+proxy_request_buffering off;
+```
+
+Без этой настройки nginx сначала получает тело целиком и только потом отдаёт
+его серверу, одним куском. Ответу это не мешает, но
+[поток](device-contract.md#звук-приходит-потоком) до сервера не доходит: в
+логе время загрузки получается нулевым, а пометки `chunked` нет.
+
+Все четыре настройки проверены на `nginx-proxy` 1.11 с самоподписанным
+сертификатом. Выпуск сертификата через acme-companion не проверялся.
+
 ## Устройство
 
 | Где | Что |
 | --- | --- |
 | `main.py` | FastAPI-приложение: `POST /audio`, намеренные сбои, запуск |
+| `main.py`: `authorize()`, `drain()` | Токен прибора, общая зависимость всех эндпоинтов; тело, дочитанное перед отказом или сбоем |
 | `main.py`: `settle_wav_lengths()`, `describe_wav()` | Длины в заголовке потокового WAV, строка с его параметрами для лога |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |
 | `shopping_list.py` | Список покупок в Keep через gkeepapi |
 | `translit.py` | Временная транслитерация ответа для прибора |
+| `Dockerfile` | Образ для деплоя, см. [Деплой](#деплой) |

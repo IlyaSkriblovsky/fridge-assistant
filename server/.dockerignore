@@ -1,0 +1,8 @@
+# The image takes pyproject.toml, uv.lock and the top-level *.py. Everything
+# else stays out of the build context, secrets and recordings first of all.
+.env
+.venv/
+recordings/
+__pycache__/
+*.pyc
+.DS_Store

@@ -14,9 +14,8 @@ in one place rather than archaeology through commit messages.
 | D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
 | D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
-| D5 | Plain HTTP | HTTPS | [E2](experiments.md) |
+| D5 | Plain HTTP, the device's token included | HTTPS | [E2](experiments.md) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
-| D8 | The request carries no credentials | Some device authentication | The backend leaving the LAN, with [D5](deferred.md) |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
 
 ---
@@ -73,19 +72,6 @@ minimum hold shorter than the chirp is not a minimum hold.
 
 Feedback of its own for the discarded tap waits for the UI/UX pass -- along with
 [D9](deferred.md), which may remove the case entirely.
-
-## D8 -- No authentication
-
-The POST carries no `Authorization` header and the backend does not ask for one.
-
-Nothing is protected by this that the WiFi password does not already protect:
-the backend is a LAN address, so reaching it means already being on the network.
-A token in the firmware image would not change that -- it is readable by anyone
-who can read the flash, which is anyone holding the device.
-
-It becomes real the day the backend moves to a public host, which is the same
-day TLS does ([D5](deferred.md)) -- and a bearer token sent in clear would be
-worse than none, so the two arrive together or not at all.
 
 ## D9 -- Press and hold
 

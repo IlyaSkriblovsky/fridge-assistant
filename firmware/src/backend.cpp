@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <string>
+
 #include "config.h"
 
 namespace {
@@ -22,10 +24,18 @@ uint32_t millisSince(int64_t fromUs) {
 
 }  // namespace
 
+Backend::Backend(const char* baseUrl, const char* token) : _baseUrl(baseUrl), _token(token) {}
+
 Backend::~Backend() { close(); }
 
-void Backend::endpoint(char* out, size_t size) {
-  snprintf(out, size, "%s%s", config::kBackendBaseUrl, config::kAudioPath);
+void Backend::endpoint(char* out, size_t size) const {
+  // No base URL stays no URL rather than becoming a bare path, so that open()
+  // can say what is missing instead of that the library would not take it.
+  if (_baseUrl[0] == '\0') {
+    out[0] = '\0';
+    return;
+  }
+  snprintf(out, size, "%s%s", _baseUrl, config::kAudioPath);
 }
 
 bool Backend::open() {
@@ -59,6 +69,11 @@ bool Backend::open(const char* url) {
   // follow it. esp-tls also puts it on the socket as SO_SNDTIMEO, which only
   // splits a send that blocks longer than that into two; the write's own poll
   // is what decides the connection has failed.
+  if (url[0] == '\0') {
+    finish(Result::NoServer, "no backend URL in src/secrets.h");
+    return false;
+  }
+
   esp_http_client_config_t cfg = {};
   cfg.url = url;
   cfg.method = HTTP_METHOD_POST;
@@ -69,6 +84,12 @@ bool Backend::open(const char* url) {
   if (_client == nullptr) {
     finish(Result::NoServer, "esp_http_client would not take \"%s\"", url);
     return false;
+  }
+
+  // The library keeps a copy of the value, so it is built here and dropped.
+  if (_token[0] != '\0') {
+    const std::string authorization = std::string("Bearer ") + _token;
+    esp_http_client_set_header(_client, "Authorization", authorization.c_str());
   }
 
   esp_http_client_set_header(_client, "Content-Type", "audio/wav");
@@ -214,6 +235,11 @@ Backend::Result Backend::receive() {
   }
 
   _status = esp_http_client_get_status_code(_client);
+  if (_status == 401) {
+    return finish(Result::ServerError, "HTTP 401: %s",
+                  _token[0] == '\0' ? "there is no token in src/secrets.h to send"
+                                     : "the backend does not take this token");
+  }
   if (_status != 200) return finish(Result::ServerError, "HTTP %d", _status);
 
   if (declared > static_cast<int64_t>(kMaxReplyBytes)) {

@@ -46,7 +46,6 @@
 #include <lwip/netif.h>
 #include <lwip/prot/dhcp.h>  // the DHCP_STATE_* names; lwip/dhcp.h has only the struct
 
-#include "config.h"
 #include "secrets.h"
 
 #include "sticky/buzzer.h"
@@ -238,7 +237,7 @@ Probe probeNetwork(const IPAddress& gateway) {
 
   char host[48] = {0};
   unsigned int port = 80;
-  if (sscanf(config::kBackendBaseUrl, "http://%47[^:/]:%u", host, &port) < 1) host[0] = '\0';
+  if (sscanf(secrets::kBackendBaseUrl, "http://%47[^:/]:%u", host, &port) < 1) host[0] = '\0';
   if (host[0] == '\0') {
     return {false, false, gatewayMs, kNothing};
   }

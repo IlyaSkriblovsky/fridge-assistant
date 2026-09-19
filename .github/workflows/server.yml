@@ -1,0 +1,88 @@
+name: server
+
+# Builds the server's image, checks that it starts and answers, and on main
+# pushes it to GHCR as :latest and :sha-<commit>. See server/docs/server.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - server/**
+      - .github/workflows/server.yml
+  pull_request:
+    paths:
+      - server/**
+      - .github/workflows/server.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/ilyaskriblovsky/fridge-assistant-server
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: server
+          load: true
+          tags: server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The fault endpoint answers without Gemini or Keep, so placeholder
+      # settings are enough to see the image start, listen, check the token and
+      # answer.
+      - name: Smoke test
+        run: |
+          docker run -d --name server -p 8000:8000 \
+            -e GEMINI_API_KEY=ci -e KEEP_EMAIL=ci -e KEEP_MASTER_TOKEN=ci -e KEEP_NOTE_ID=ci \
+            -e DEVICE_TOKEN=ci \
+            server:ci
+          url=http://localhost:8000/audio/fault/empty
+          reply=$(curl -fsS --retry 30 --retry-all-errors --retry-delay 1 \
+            -X POST --data-binary x -H "Authorization: Bearer ci" $url) || true
+          refused=$(curl -sS -o /dev/null -w '%{http_code}' -X POST --data-binary x $url) || true
+          docker logs server
+          test "$reply" = "{}"
+          test "$refused" = 401
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The same build again, all of it from the cache the first one left.
+      - name: Push
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v7
+        with:
+          context: server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

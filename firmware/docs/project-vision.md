@@ -84,7 +84,8 @@ nginx, `proxy_request_buffering off`).
 ### The request contract
 
 ```
-POST {config::kBackendBaseUrl}{config::kAudioPath}      ->  POST /audio
+POST {secrets::kBackendBaseUrl}{config::kAudioPath}     ->  POST /audio
+Authorization: Bearer {secrets::kDeviceToken}
 Content-Type: audio/wav
 Transfer-Encoding: chunked
 
@@ -118,9 +119,18 @@ prototype keeps it, with its lengths filled in from what arrived; the real
 backend will forward the stream to an external API rather than keep
 recordings, so nothing has to be done about it.
 
-The request carries no credentials -- [D8](deferred.md). The backend is on the
-LAN and answers anyone who can reach it, which is the same trust boundary the
-WiFi password already draws.
+The request carries one credential, a static token in `src/secrets.h` that the
+backend holds as well, and the backend turns away anything without it with a
+401. The backend lives on a public host, so the WiFi password no longer draws the
+trust boundary. One device and one user need nothing finer than a shared
+secret: no accounts, no expiry, no exchange.
+
+The token goes over plain HTTP until [D5](deferred.md) is paid off, so anyone
+who can watch the traffic can read it. It keeps out whoever merely finds the
+address, which is the likely visitor, and HTTPS waits for [E2](experiments.md)
+to say what the handshake costs a device that wakes for every question. Anyone
+holding the device can read it from the flash as well, like everything else in
+`src/secrets.h`.
 
 The response is JSON with the answer in `response`:
 
@@ -134,9 +144,10 @@ error reporting can come later.
 
 ### Transport security
 
-Plain HTTP to start -- [D5](deferred.md). HTTPS is wanted, because the backend is meant to live in
-the cloud rather than at home, but on a device that wakes from deep sleep for
-every question the TLS handshake is paid every single time. Whether that cost is
+Plain HTTP to start -- [D5](deferred.md). HTTPS is wanted, because the backend
+lives on a public host rather than at home and the device's token crosses the
+internet in clear, but on a device that wakes from deep sleep for every question
+the TLS handshake is paid every single time. Whether that cost is
 acceptable is [E2](experiments.md); the alternative is a proxy on the home
 network, which is one more component to maintain and so a worse answer if the
 number turns out to be small.
@@ -473,10 +484,10 @@ Two cases are not errors:
 
 Split in two, by whether a value can be committed:
 
-- **`src/config.h`** -- tracked. Backend base URL and path, recording cap,
-  response timeout, button debounce and minimum hold. Meant to be edited.
-- **`src/secrets.h`** -- gitignored. WiFi credentials, and whatever else turns
-  out not to be committable.
+- **`src/config.h`** -- tracked. Backend path, recording cap, response
+  timeout, button debounce and minimum hold. Meant to be edited.
+- **`src/secrets.h`** -- gitignored. WiFi credentials, the backend's base URL
+  and token, and whatever else turns out not to be committable.
   `src/secrets.example.h` is the committed template and must be kept in step
   when a constant is added. A missing `secrets.h` breaks the build at the
   include; empty values are reported over Serial1 at runtime.
@@ -485,9 +496,10 @@ Secrets are plain strings in the firmware image and anyone who can read the
 flash can read them. Acceptable for a personal device; they should not be
 credentials that matter elsewhere.
 
-The backend URL sits in `config.h` because it is currently a LAN address. If the
-backend moves to a public host whose address is worth not publishing, it moves
-to `secrets.h`.
+The backend's base URL sits in `secrets.h` rather than `config.h`: the backend
+lives on a public host and the repository is public, so the address stays out of
+it. The token is what actually keeps strangers out; not publishing the address
+only means fewer of them try. The path is not secret and stays in `config.h`.
 
 ## Hardware notes
 

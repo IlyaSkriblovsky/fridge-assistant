@@ -11,7 +11,8 @@ struct esp_http_client;
 //
 // The contract is the vision's and it is deliberately small --
 //
-//     POST {config::kBackendBaseUrl}{config::kAudioPath}
+//     POST {base URL}{config::kAudioPath}
+//     Authorization: Bearer <token>
 //     Content-Type: audio/wav
 //     Transfer-Encoding: chunked
 //     <WAV: PCM, 16 kHz, mono, signed 16-bit little-endian>
@@ -23,8 +24,9 @@ struct esp_http_client;
 // rate and the format in the WAV header rather than in headers of our own. The
 // header's two length fields say 0xFFFFFFFF, because it goes up before the
 // recording has a length; the terminating chunk is where the body ends, and the
-// backend takes the length from there. It carries no credentials (D8) and goes
-// over plain HTTP (D5).
+// backend takes the length from there. The token is the device's one
+// credential, a static string from src/secrets.h that the backend holds too, and
+// it goes over plain HTTP (D5): anyone on the path can read it.
 //
 // **The request is four calls, because the body is a stream:**
 // open() while the button is held, write() as the capture task commits, end()
@@ -74,7 +76,7 @@ class Backend {
   // the log shows more than the panel does.
   static constexpr size_t kMaxAnswerChars = 256;
 
-  // config::kBackendBaseUrl plus config::kAudioPath, comfortably.
+  // The base URL plus config::kAudioPath, comfortably.
   static constexpr size_t kMaxUrlChars = 96;
 
   // A reply longer than this is not an answer. Without a ceiling a backend that
@@ -89,6 +91,12 @@ class Backend {
   // opened, or during a stall -- and the buffer it is framed in.
   static constexpr size_t kFrameBytes = 2048;
 
+  // Both come from src/secrets.h and have to outlive the Backend, since they
+  // are kept by pointer; its string constants do. `baseUrl` is the backend
+  // without the path, and an empty one fails every open() as NoServer, saying
+  // why. `token` goes up with every request as `Authorization: Bearer`; an
+  // empty one is not sent at all, and the backend's 401 is how that shows.
+  Backend(const char* baseUrl, const char* token);
   ~Backend();
 
   // Connects and sends the request line and headers, within
@@ -190,7 +198,7 @@ class Backend {
  private:
   // The configured endpoint, written in one place so nothing else concatenates
   // it.
-  static void endpoint(char* out, size_t size);
+  void endpoint(char* out, size_t size) const;
 
   // One exit for every ending, the answer's and every failure's: stops the
   // clock, records how, and closes the connection. So a request that failed is
@@ -199,6 +207,9 @@ class Backend {
 
   // Puts `bytes` on the socket, all of them or a failure. Times the write.
   bool send(const uint8_t* data, size_t bytes);
+
+  const char* _baseUrl;
+  const char* _token;
 
   esp_http_client* _client = nullptr;
   bool _ended = false;

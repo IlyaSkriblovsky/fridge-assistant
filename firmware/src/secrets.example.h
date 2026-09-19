@@ -18,4 +18,18 @@ namespace secrets {
 constexpr const char* kWifiSsid = "";
 constexpr const char* kWifiPassword = "";
 
+// Backend that takes the recording and answers with text, as http://host[:port]
+// with no trailing slash; the path is config::kAudioPath. Here rather than in
+// config.h because the repository is public and the backend's address need not
+// be. Plain HTTP for now -- see docs/experiments.md, E2, before switching to
+// HTTPS.
+constexpr const char* kBackendBaseUrl = "";
+
+// Sent to the backend with every question as `Authorization: Bearer`. The same
+// string as DEVICE_TOKEN in the backend's environment; any long random one will
+// do:
+//
+//     python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+constexpr const char* kDeviceToken = "";
+
 }  // namespace secrets

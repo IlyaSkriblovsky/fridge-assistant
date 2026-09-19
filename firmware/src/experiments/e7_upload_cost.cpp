@@ -146,7 +146,7 @@ RTC_DATA_ATTR Row g_log[kLogRows];
 
 WifiLink wifi;
 Recording audio;
-Backend backend;
+Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 
 uint16_t g_chunkMs[kMaxChunks];
 uint32_t g_chunkCount = 0;
@@ -227,7 +227,7 @@ size_t drainBody(NetworkClient& client, uint32_t budgetMs) {
 // The connect goes to the host string rather than to an IPAddress, which is
 // what HTTPClient does and therefore what the firmware pays. The host here is a
 // dotted quad, so the resolution inside it is a parse and not a query -- but
-// that is a property of config.h rather than of the code, and it is worth
+// that is a property of src/secrets.h rather than of the code, and it is worth
 // remembering before this number is read as "the TCP handshake".
 Row postBare(const uint8_t* body, size_t bytes) {
   Row row = {};
@@ -260,12 +260,13 @@ Row postBare(const uint8_t* body, size_t bytes) {
   client.setNoDelay(true);
   client.setConnectionTimeout(config::kResponseTimeoutMs);
 
-  char head[256];
+  // Room for a host name and a token as well as the fields around them.
+  char head[384];
   const int headLen =
       snprintf(head, sizeof(head),
-               "POST %s HTTP/1.1\r\nHost: %s:%u\r\nContent-Type: audio/wav\r\n"
-               "Content-Length: %u\r\nConnection: close\r\n\r\n",
-               config::kAudioPath, g_host, static_cast<unsigned>(g_port),
+               "POST %s HTTP/1.1\r\nHost: %s:%u\r\nAuthorization: Bearer %s\r\n"
+               "Content-Type: audio/wav\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
+               config::kAudioPath, g_host, static_cast<unsigned>(g_port), secrets::kDeviceToken,
                static_cast<unsigned>(bytes));
 
   const int64_t tHead = esp_timer_get_time();
@@ -488,10 +489,10 @@ void setup() {
                  static_cast<unsigned long>(cycle), sleepOff ? "OFF" : "on (the default)",
                  stickyPower::wakeupCauseName());
 
-  if (sscanf(config::kBackendBaseUrl, "http://%47[^:/]:%hu", g_host, &g_port) < 1 ||
+  if (sscanf(secrets::kBackendBaseUrl, "http://%47[^:/]:%hu", g_host, &g_port) < 1 ||
       g_host[0] == '\0') {
-    Serial1.printf("FAILED: config::kBackendBaseUrl (\"%s\") is not http://host:port\n",
-                   config::kBackendBaseUrl);
+    Serial1.printf("FAILED: secrets::kBackendBaseUrl (\"%s\") is not http://host:port\n",
+                   secrets::kBackendBaseUrl);
     Serial1.flush();
     stickyBuzzer::error();
     stickyPower::deepSleep();

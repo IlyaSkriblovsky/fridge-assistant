@@ -103,7 +103,7 @@ Recording audio;
 Capture capture;
 WifiLink wifi;
 Display display;
-Backend backend;
+Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 
 // The moments the question is measured against, and two of them are not the
 // moment this thread reaches them:
