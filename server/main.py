@@ -1,13 +1,16 @@
-"""Prototype server for the Seeed Sticky AI assistant.
+"""Server for the Seeed Sticky voice assistant.
 
-Single endpoint: the device POSTs a WAV recording, the server stores it on disk
-under a timestamped name and reports back what it got. No processing yet.
+The device POSTs a question as a WAV recording to /audio. The recording is
+collected in memory, handed to the assistant (Gemini and its tools, see
+assistant.py) and dropped; the assistant's reply goes back as the text for the
+device's screen.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import os
 import socket
 import time
@@ -15,21 +18,26 @@ import urllib.request
 import wave
 from collections.abc import AsyncIterator
 from datetime import datetime
-from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from google import genai
+from google.genai import errors
 from starlette.requests import ClientDisconnect
-# The form parser yields starlette's UploadFile; fastapi's is a subclass of it,
-# so an isinstance check against the fastapi one would miss every upload.
-from starlette.datastructures import UploadFile
+
+import assistant
+from translit import transliterate
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
-RECORDINGS_DIR = Path(os.environ.get("RECORDINGS_DIR", "recordings"))
 
-# The device may stream a long recording; never buffer it whole in memory.
-CHUNK_SIZE = 64 * 1024
+# Everything the server cannot work without; .env is where they live.
+REQUIRED_ENV = ("GEMINI_API_KEY", "KEEP_EMAIL", "KEEP_MASTER_TOKEN", "KEEP_NOTE_ID")
+
+# The recording is held in memory, and this is as much of it as is kept. The
+# device stops at 30 s, which is under 1 MB; Gemini takes up to 20 MB inline.
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 # What the device's WAV header says in both length fields. It streams the
 # recording while the button is still held, so the header goes up before the
@@ -63,10 +71,10 @@ def public_ip(timeout: float = 2.0) -> str | None:
         return None
 
 
-def describe_wav(path: Path) -> str:
+def describe_wav(data: bytes) -> str:
     """Read back the WAV header so the device's audio params are visible in the log."""
     try:
-        with wave.open(str(path), "rb") as wav:
+        with wave.open(io.BytesIO(data), "rb") as wav:
             frames = wav.getnframes()
             rate = wav.getframerate()
             duration = frames / rate if rate else 0.0
@@ -78,51 +86,51 @@ def describe_wav(path: Path) -> str:
         return f"not a readable WAV ({exc})"
 
 
-def settle_wav_lengths(path: Path) -> bool:
+def settle_wav_lengths(wav: bytearray) -> bool:
     """Write the true lengths into a WAV header that could not know them.
 
-    Only fields that say UNKNOWN_LENGTH are touched, so a file that arrived with
-    real lengths is left as it came. Python's wave reads such a file anyway, as
-    one of unknown length, but players and the log's duration do not. Returns
-    True if anything was rewritten.
+    Only fields that say UNKNOWN_LENGTH are touched, so a recording that arrived
+    with real lengths is left as it came. Python's wave reads such a file
+    anyway, as one of unknown length, but other readers and the log's duration
+    do not. Returns True if anything was rewritten.
     """
-    size = path.stat().st_size
+    size = len(wav)
+    if size < 12 or wav[:4] != b"RIFF" or wav[8:12] != b"WAVE":
+        return False
     changed = False
-    with path.open("r+b") as f:
-        head = f.read(12)
-        if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
-            return False
-        if int.from_bytes(head[4:8], "little") == UNKNOWN_LENGTH:
-            f.seek(4)
-            f.write((size - 8).to_bytes(4, "little"))
-            changed = True
+    if int.from_bytes(wav[4:8], "little") == UNKNOWN_LENGTH:
+        wav[4:8] = (size - 8).to_bytes(4, "little")
+        changed = True
 
-        # The data chunk is found by walking the chunks rather than assumed at
-        # offset 36, which is where the device puts it but not where every WAV
-        # does.
-        offset = 12
-        while offset + 8 <= size:
-            f.seek(offset)
-            chunk = f.read(8)
-            length = int.from_bytes(chunk[4:8], "little")
-            if chunk[:4] == b"data":
-                if length == UNKNOWN_LENGTH:
-                    f.seek(offset + 4)
-                    f.write((size - offset - 8).to_bytes(4, "little"))
-                    changed = True
-                break
-            offset += 8 + length + (length & 1)
+    # The data chunk is found by walking the chunks rather than assumed at
+    # offset 36, which is where the device puts it but not where every WAV does.
+    offset = 12
+    while offset + 8 <= size:
+        length = int.from_bytes(wav[offset + 4 : offset + 8], "little")
+        if wav[offset : offset + 4] == b"data":
+            if length == UNKNOWN_LENGTH:
+                wav[offset + 4 : offset + 8] = (size - offset - 8).to_bytes(4, "little")
+                changed = True
+            break
+        offset += 8 + length + (length & 1)
     return changed
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError(
+            f"Set {', '.join(missing)}: run with --env-file .env (see docs/server.md)"
+        )
+    app.state.gemini = genai.Client()  # takes GEMINI_API_KEY from the environment
+
     lan = lan_ip()
     public = public_ip()
     print()
     print("  Assistant server")
-    print(f"  recordings -> {RECORDINGS_DIR.resolve()}")
+    print(f"  model      -> {assistant.MODEL}")
+    print(f"  Keep list  -> {os.environ['KEEP_NOTE_ID']}")
     print(f"  listening  -> {HOST}:{PORT}")
     print()
     print("  Put this URL into the device (same WiFi network):")
@@ -132,65 +140,69 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     print()
     yield
+    await app.state.gemini.aio.aclose()
 
 
 app = FastAPI(title="Assistant Server", lifespan=lifespan)
 
 
 @app.post("/audio")
-async def upload_audio(request: Request) -> dict[str, object]:
-    """Accept a WAV recording and store it under a timestamped name.
+async def audio(request: Request) -> dict[str, str]:
+    """Answer the question in a WAV recording with the text for the screen.
 
-    Takes the audio either as the raw request body (any content type) or as a
-    multipart form field — the device firmware may end up doing either. The
-    firmware streams it chunked while the button is held, so the body arrives
-    over as long as the question took to ask, and the header's lengths are
-    filled in here once it has all arrived.
+    The firmware streams the recording chunked while the button is held, so the
+    body arrives over as long as the question took to ask. It is collected in
+    memory, lengths filled in once it has all arrived, and dropped as soon as
+    the assistant has it.
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
-    path = RECORDINGS_DIR / f"{stamp}.wav"
+
+    def log(message: str) -> None:
+        print(f"[{stamp}] {message}")
 
     content_type = request.headers.get("content-type", "")
     chunked = "chunked" in request.headers.get("transfer-encoding", "").lower()
     started = time.monotonic()
+    wav = bytearray()
     size = 0
-    disconnected = False
-    with path.open("wb") as out:
-        if content_type.startswith("multipart/form-data"):
-            form = await request.form()
-            for value in form.values():
-                if not isinstance(value, UploadFile):
-                    continue
-                while chunk := await value.read(CHUNK_SIZE):
-                    out.write(chunk)
-                    size += len(chunk)
-        else:
-            # A stream that dies mid-question leaves a truncated file, and that
-            # is accepted: it is what arrived, and its header is settled below
-            # like any other.
-            try:
-                async for chunk in request.stream():
-                    out.write(chunk)
-                    size += len(chunk)
-            except ClientDisconnect:
-                disconnected = True
+    try:
+        async for chunk in request.stream():
+            size += len(chunk)
+            # Past the limit the rest is still read, only not kept: answering
+            # before the body ends would cut the device off mid-upload, and it
+            # would show NO SERVER instead of the answer below.
+            if size <= MAX_AUDIO_BYTES:
+                wav += chunk
+    except ClientDisconnect:
+        # The device has already shown an error and the question will be asked
+        # again, so carrying this one out would do it twice.
+        log(f"{size} bytes, then the device went away; nothing done")
+        return {"response": ""}
     took = time.monotonic() - started
+    # The device's wait for the answer starts here, at the end of the body.
+    ended = time.monotonic()
 
-    settled = settle_wav_lengths(path)
-    print(
-        f"[{stamp}] {path.name}  {size} bytes"
-        f"{' chunked' if chunked else ''} over {took:.2f} s  "
-        f"content-type={content_type or '-'}  {describe_wav(path)}"
+    settled = settle_wav_lengths(wav)
+    log(
+        f"{size} bytes{' chunked' if chunked else ''} over {took:.2f} s  "
+        f"content-type={content_type or '-'}  {describe_wav(wav)}"
         f"{'  (lengths filled in)' if settled else ''}"
-        f"{'  -- the device went away before the end' if disconnected else ''}"
     )
-    return {
-        "status": "ok",
-        "filename": path.name,
-        "bytes": size,
-        "response": f"Received {size} bytes",
-    }
 
+    if size > MAX_AUDIO_BYTES:
+        log(f"over the {MAX_AUDIO_BYTES} byte limit, not sent to Gemini")
+        reply = "Слишком длинная запись."
+    else:
+        try:
+            reply = await assistant.answer(request.app.state.gemini, bytes(wav), log)
+        except errors.APIError as exc:
+            log(f"Gemini error: {exc}")
+            reply = f"Gemini ответил ошибкой {exc.code}, попробуй ещё раз."
+        except httpx.HTTPError as exc:
+            log(f"Gemini unreachable: {exc!r}")
+            reply = "Не получилось связаться с Gemini, попробуй ещё раз."
+    log(f"reply: {reply}  ({time.monotonic() - ended:.2f} s after the body ended)")
+    return {"response": transliterate(reply)}
 
 
 # --- Deliberate failures ------------------------------------------------------
