@@ -1,4 +1,3 @@
-// S8 -- The flow, with S10's display task and S11's streaming upload under it.
 // The orchestrator: wake, latch, microphone, capture task, ready chirp, WiFi and
 // the Listening screen, the request opened and the recording streamed into it
 // while the button is held, release, the tail of the body, taken chirp, answer
@@ -12,47 +11,30 @@
 //
 // **The panel is posted to, never waited on**, except at the exit. A screen is
 // 0.8 to 2.3 s of the panel's own timeline against 300 ms of network and
-// 500 ms of round trip (S5, S7b, E7, E8), and until S10 this thread sat inside
-// every one of them: a release during LISTENING waited out the rest of it, and
-// WORKING stood between the release and the upload on every question. Display
-// draws on a task of its own now, so this thread sees the release when it
-// happens and asks the backend while the panel catches up. The one wait left
-// is past the last chirp, where deep sleep would otherwise cut a refresh in
-// half. Two things about the screens are unchanged from S8, and both follow
-// from what the panel costs:
+// 500 ms of round trip (S5, S7b, E7, E8), so Display draws on a task of its
+// own: this thread sees the release when it happens and asks the backend while
+// the panel catches up. The one wait is past the last chirp, where deep sleep
+// would otherwise cut a refresh in half.
 //
-//  * The pre-clear is a cold-start thing. A full white frame before the first
-//    real screen is what a controller whose previous-image RAM has nothing to
-//    do with the glass needs; on a wake it is 2373 ms spent flushing a panel
-//    the Listening screen overwrites anyway.
-//  * The working screen is a partial refresh -- S8 settled the vision's step 6
-//    that way. It is no longer in the wait at all, but it is still the screen
-//    the user reads while waiting, and a full refresh would put the answer
-//    2.4 s behind it on the panel's own queue.
-//
-// **The upload goes up under the hold** -- D4, taken at S11. The request opens
-// once the press can no longer turn out to be a tap and the network is up,
-// whichever is later, and every pass of the loop that watches the recording
-// sends what the capture task has committed since the last one. What is left
-// after the release is the last few chunks of audio, the terminating chunk and
-// the backend's answer. A request that fails while the user is still talking
-// ends the question there and then, for the reason the vision gives a WiFi
-// drop: a recording with nowhere to go is abandoned rather than finished.
+// **The upload goes up under the hold.** The request opens once the press can
+// no longer turn out to be a tap and the network is up, whichever is later, and
+// every pass of the loop that watches the recording sends what the capture task
+// has committed since the last one. What is left after the release is the last
+// few chunks of audio, the terminating chunk and the backend's answer. A
+// request that fails while the user is still talking ends the question there
+// and then, for the reason the vision gives a WiFi drop: a recording with
+// nowhere to go is abandoned rather than finished.
 //
 // **Nothing prints between the release and the last chirp** unless the
 // question has already failed. Serial1 at 115200 is a millisecond for every
-// eleven characters and blocks once the UART's FIFO is full, and that wait is
-// the number S10 is about; the lines that describe it are written once it is
-// over.
+// eleven characters and blocks once the UART's FIFO is full; the lines that
+// describe the wait are written once it is over.
 //
 // **Every exit is deep sleep with the latch held**, the error paths and the
 // discarded tap included, and there is exactly one of them: finish().
 //
-// Two things came across from the S7b driver rather than dying with it. The
-// stale-lease rule is openRenewingStaleLease() below -- connect again, then drop
-// the lease, take an address and connect once more -- and it lives here because
-// it spans Backend and WifiLink and neither half can see it alone. The
-// pre-clear branch on stickyPower::wokeFromDeepSleep() is the other.
+// The stale-lease rule, openRenewingStaleLease(), lives here because it spans
+// Backend and WifiLink and neither half can see it alone.
 
 #include <Arduino.h>
 #include <esp_timer.h>
@@ -77,10 +59,9 @@ constexpr int kPinLogRx = 44;
 constexpr int kPinLogTx = 43;
 
 // How often the association and the capture task are looked at while the button
-// is held. Small, because it is also the resolution of WifiLink::elapsedMs() --
-// and, since S10, how late this thread can be to a release. Since S11 it is also
-// what a chunk of the body carries: whatever the capture task committed in one
-// pass, which is a 16 ms read or two.
+// is held. Small, because it is also the resolution of WifiLink::elapsedMs(),
+// how late this thread can be to a release, and what a chunk of the body
+// carries: whatever the capture task committed in one pass, a 16 ms read or two.
 constexpr uint32_t kPollMs = 10;
 
 // A press held through the log would wake the board again the moment it goes to
@@ -152,8 +133,8 @@ uint32_t g_takenChirpMs = 0;
 uint32_t g_networkWaitMs = 0;
 uint32_t g_answerWaitMs = 0;
 
-// Display::start(), which brings the panel up on this thread. S10 settled that
-// it stays here rather than on the task, and this is the number that says so.
+// Display::start(), which brings the panel up on this thread rather than on the
+// task -- display.h has why.
 uint32_t g_panelUpMs = 0;
 
 uint32_t millisBetween(int64_t fromUs, int64_t toUs) {
@@ -196,11 +177,10 @@ void logRecording() {
                  static_cast<unsigned long>(audio.recordedMs()),
                  static_cast<unsigned long>(audio.wavBytes()));
 
-  // The drop detector, and the baseline S10 is checked against. The task's own
-  // clock beyond the audio it kept is audio the DMA threw away, and should be a
-  // chunk or two. Slow reads come one in fifteen from the DMA's own block size;
-  // more than that is something else competing for the core. Capture's
-  // accessors have the rest.
+  // The drop detector. The task's own clock beyond the audio it kept is audio
+  // the DMA threw away, and should be a chunk or two. Slow reads come one in
+  // fifteen from the DMA's own block size; more than that is something else
+  // competing for the core. Capture's accessors have the rest.
   Serial1.printf("  capture task: %lu ms reading for %lu ms kept, %lu chunks, %lu slow, the"
                  " longest %lu us at chunk %lu\n",
                  static_cast<unsigned long>(capture.elapsedMs()),
@@ -213,7 +193,7 @@ void logRecording() {
 
 // One screen, off Display's record of it, on the same axis as the hold: the
 // top of setup(). A screen that waited says how long, which is the panel's own
-// queue -- the one thing S10 cannot take out of a question (E8).
+// queue -- the one thing the display task cannot take out of a question (E8).
 void logScreen(const char* name, Display::Screen which) {
   const Display::Record& shown = display.record(which);
   if (shown.postedUs == 0) return;
@@ -240,8 +220,9 @@ void logScreen(const char* name, Display::Screen which) {
 // What the question cost the user, which is the release to the last chirp --
 // the refresh after it is time the panel is readable through, not time spent
 // waiting. Printed as its parts because each of them belongs to a different
-// decision: the confirmation to the debounce and the poll, the tail to S11, the
-// network to S7b, the answer to the backend and E2.
+// decision: the confirmation to the debounce and the poll, the tail to the
+// streaming upload, the network to the lease cache, the answer to the backend
+// and E2.
 //
 // **The parts are the chain and not the calendar.** Everything here is time
 // this thread spent in one thing after the release, in the order it spent it,
@@ -251,9 +232,9 @@ void logScreen(const char* name, Display::Screen which) {
 // count the same milliseconds twice. What is counted is the wait that was left
 // when this thread got there, which is nothing at all on a wake with a lease.
 //
-// The second line is the answer on the glass, which S10 shortens less: the
-// screens of one question still queue on one controller, and the answer waits
-// for whatever is ahead of it there.
+// The second line is the answer on the glass: the screens of one question
+// queue on one controller, and the answer waits for whatever is ahead of it
+// there.
 void logTiming(Outcome outcome, bool panelIdle) {
   if (g_lastChirpUs == 0 || g_releaseUs == 0) return;
 
@@ -286,8 +267,6 @@ void logTiming(Outcome outcome, bool panelIdle) {
                  shown.partial ? "partial" : "full");
 }
 
-// A press held through the log is still down when the sleep is armed, and ext1
-// wakes on the level.
 void waitForRelease() {
   if (!button.isDown()) return;
 
@@ -374,18 +353,18 @@ bool startDisplay() {
   finish(outcome);
 }
 
-// The request, opened with S7b's stale-lease rule around it. False means it
+// The request, opened with the stale-lease rule around it. False means it
 // could not be, and backend.result() says how.
 //
 // **A connect that nothing answered is the only thing that can say a cached
 // lease has gone stale**, because a lease that has outlived its network installs
 // exactly as well as a good one and fails only when a packet needs to go
-// somewhere. So it is read that way -- but not on the first one. S7 found a
-// healthy network on this desk producing a connect that fails outright about
-// once in fifteen questions, and E7 went looking for the mechanism and could not
-// reproduce it; a lease dropped on one of those costs 3.2 s on a wake where
-// nothing was wrong. Connecting twice costs one connect timeout on a wake that
-// was already going to be slow, which is the cheaper of the two mistakes.
+// somewhere. So it is read that way -- but not on the first one. A healthy
+// network on this desk produces a connect that fails outright about once in
+// fifteen questions (S7, and E7 could not find why), and a lease dropped on one
+// of those costs 3.2 s on a wake where nothing was wrong. Connecting twice costs
+// one connect timeout on a wake that was already going to be slow, which is the
+// cheaper of the two mistakes.
 //
 // Everything else the backend can do -- refuse the connection, answer 500,
 // answer nothing, answer nonsense -- proves there is something at the address
@@ -393,8 +372,8 @@ bool startDisplay() {
 // connect can fail this way, so only the open is retried: a connection that
 // answered and then died is not the lease.
 //
-// Since S11 this usually runs while the button is held, and the recording goes
-// on underneath it: a retry costs the user nothing until the release, and every
+// This usually runs while the button is held, and the recording goes on
+// underneath it: a retry costs the user nothing until the release, and every
 // retry is a new request that starts again from the header.
 bool openRenewingStaleLease() {
   if (backend.open()) return true;
@@ -452,8 +431,8 @@ bool endBody() { return sendCommitted() && backend.end(); }
 
 // The request's own story, for the log: when it opened against the hold, what
 // it carried, where its longest write was, and the two halves the round trip
-// splits into since S11 -- the tail after the release, which is what streaming
-// exists to shrink, and the answer after the terminating chunk. The second is
+// splits into -- the tail after the release, which is what streaming exists to
+// shrink, and the answer after the terminating chunk. The second is
 // read after the taken chirp, so a backend quicker than the chirp reads as the
 // chirp: Backend::firstByteUs() has why.
 void logStream(Backend::Result result) {
@@ -536,9 +515,9 @@ void logStream(Backend::Result result) {
   }
 
   // Posted first and chirped second: the post costs nothing and the chirp is
-  // 230 ms of blocking, so the panel starts on the answer while it sounds -- and
-  // the answer still appears a second after the chirp, which is what S7 moved
-  // the chirp in front of the refresh for. The wait ends where the chirp starts.
+  // 230 ms of blocking, so the panel starts on the answer while it sounds, and
+  // the answer still appears a second after the chirp. The wait ends where the
+  // chirp starts.
   g_lastChirpUs = esp_timer_get_time();
   if (title == nullptr) {
     display.answer(backend.answer());
@@ -599,9 +578,8 @@ void setup() {
   stickyPower::holdLatch();
   button.begin(g_entryUs);  // takes GPIO4 back from the RTC pad and pulls it up
 
-  // No settling delay after it. The delay(50) that used to follow came with the
-  // first demo, waited for nothing, and was a third of the wake-to-chirp time
-  // -- S9 measured it on the firmware's own image.
+  // No settling delay after it: nothing waits on one, and it would come
+  // straight off the wake-to-chirp time.
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
 
   Serial1.println();
@@ -621,19 +599,17 @@ void setup() {
     Serial1.println("  no lease in RTC memory -- this question pays for DHCP");
   }
 
-  // The microphone comes first and the chirp comes after it: the chirp means
-  // "the microphone is live", so nothing that can delay capture may sit between
-  // them. E1 and E3, and the vision's step 3.
+  // Capture before the chirp, and nothing that can block between them -- see
+  // the top of this file.
   if (!mic.begin()) fail(Outcome::Broken, "NO MICROPHONE", mic.lastError());
   if (!audio.begin(mic.sampleRate())) fail(Outcome::Broken, "NO MEMORY", audio.lastError());
   if (!capture.start(mic, audio, button)) {
     fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
   }
   // Timed as the chirp starts, not as it returns: the chirp is 110 ms of
-  // blocking, and a timestamp taken after it reports the end of the chirp as the
-  // moment the microphone went live -- which is how S8 came to record 203 ms for
-  // a chirp that started at 93. Measured from the top of setup(), so the boot is
-  // not in it; S9 has the boot.
+  // blocking, and a timestamp taken after it would report the end of the chirp
+  // as the moment the microphone went live. Measured from the top of setup(),
+  // so the boot is not in it; S9 has the boot.
   const int64_t chirpUs = esp_timer_get_time();
   stickyBuzzer::ready();
   Serial1.printf("  ready chirp %lu ms into setup(), with the recording already running\n",
@@ -731,8 +707,8 @@ void setup() {
 
   // A release that arrives before the address does is not a failure: the
   // association has a budget of its own and NO WIFI is what happens when that
-  // runs out. The question is then the pre-S11 one -- the whole body after the
-  // release -- which is also why the chirp above did not wait for it.
+  // runs out. The whole body then goes up after the release, which is also why
+  // the chirp above did not wait for it.
   //
   // Timed from here rather than from the release on purpose: this is the poll
   // loop's own view and the question it answers is the poller's -- how much of

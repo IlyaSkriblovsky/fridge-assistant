@@ -35,9 +35,7 @@ void stickyPower::holdLatch() {
 
   // A cold start is the only path where the rail is actually coming up. On a
   // deep sleep wake the pads were held through the sleep, so the latch never
-  // went low and the rail never dropped -- there is nothing to settle. The wait
-  // was 101 ms of the 169 ms before capture started; see docs/experiments.md,
-  // E1.
+  // went low and the rail never dropped -- there is nothing to settle.
   if (!wokeFromDeepSleep()) {
     delay(100);  // let the rail settle before anything else draws on it
   }

@@ -11,7 +11,7 @@
 // association makes progress by itself; what would break the rule is
 // waitForConnectResult(), which parks this task for as long as the AP takes.
 // So the class is begin() plus a poll() that is cheap enough to call from a
-// loop that is also refreshing the panel.
+// loop that is also feeding the upload.
 //
 // **The AP is cached in RTC memory across the sleep** -- BSSID and channel, so
 // the next wake connects to a known radio on a known channel instead of
@@ -61,9 +61,7 @@
 //  * **WL_CONNECTED means an IP, not an association.** The status goes to
 //    WL_IDLE_STATUS when the link comes up and only reaches WL_CONNECTED on
 //    DHCP's reply, which is why linkMs() and onlineMs() are reported apart:
-//    the gap between them is DHCP and nothing else. It is also almost all of a
-//    connect -- 3.15 s against an 87 ms link on the network this was measured
-//    on, which is docs/experiments.md, E6.
+//    the gap between them is DHCP and nothing else.
 //  * **The first failed attempt is retried once by the library**, whatever
 //    setAutoReconnect() was told (WiFiSTA's `first_connect` static). It reuses
 //    the config it was given, cached BSSID included, so a stale cache costs two
@@ -143,12 +141,10 @@ class WifiLink {
   // to the event, and both are zero until it happens.
   //
   // **They are separate from elapsedMs() because polling is not measurement.**
-  // The orchestrator spends two and a half seconds inside a panel refresh
-  // between one poll and the next, and an address that arrives 40 ms in is not
-  // noticed until that is over -- which is how S7b's first run came to report
-  // an installed lease as costing 2.6 s, to the millisecond, four wakes
-  // running. Anything comparing this firmware against E6's rig has to use these
-  // two; elapsedMs() answers a different question and is right about it.
+  // A caller busy with something slow between two polls notices an address
+  // that arrived 40 ms in only once it is done, and elapsedMs() then charges
+  // the slow thing to the network. Anything comparing this firmware against
+  // E6's rig has to use these two.
   uint32_t linkMs() const;
   uint32_t onlineMs() const;
 

@@ -37,9 +37,8 @@ constexpr uint32_t kWifiCachedApAttemptMs = 3000;
 // longer to send than to ask is a failure whatever the radio thinks.
 //
 // The budget is spent as one attempt on the cached AP and then fresh scans of
-// 6 s each, which is 3 + 6 + 6 -- this number exactly. With the network switched off it
-// came out at 15005 ms and three attempts, so the arithmetic is real rather
-// than decorative: changing either constant changes how many attempts fit.
+// 6 s each, which is 3 + 6 + 6 -- this number exactly, so changing either
+// constant changes how many attempts fit.
 constexpr uint32_t kWifiConnectTimeoutMs = 15000;
 
 // Recording stops here whether or not the button is still held. At 16 kHz mono
@@ -51,8 +50,8 @@ constexpr uint32_t kMaxRecordSeconds = 30;
 // seconds, not milliseconds. On expiry the connection is dropped and an error is
 // shown.
 //
-// It is the backend's thinking time and nothing else: since S11 the body goes up
-// while the button is held, and a 30 s hold must not spend it.
+// It is the backend's thinking time and nothing else: it counts from the
+// terminating chunk, so a 30 s hold does not spend it.
 constexpr uint32_t kResponseTimeoutMs = 30000;
 
 // How long the TCP connection to the backend gets before the device decides
@@ -60,7 +59,7 @@ constexpr uint32_t kResponseTimeoutMs = 30000;
 // a backend that is thinking: one is normal and the other is not.
 //
 // It is also the price of being wrong about the network, which is what makes it
-// a constant of ours rather than the HTTP client's own default. From S7b the failed
+// a constant of ours rather than the HTTP client's own default. The failed
 // connect is the only thing that can tell a stale cached DHCP lease from a good
 // one, so this number is exactly what the wake that notices costs before it
 // starts DHCP and asks again.

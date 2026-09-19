@@ -137,10 +137,10 @@ int32_t signedTicksUs(int64_t ticks, uint32_t cal) {
 }
 
 // The boot: the RTC counter now, less the alarm that woke the board. esp_timer
-// cannot do this -- it restarts on every wake and does not carry the sleep, the
-// correction S2 made to E1 -- and the RTC counter can, because the alarm is in
-// the same ticks. Converting only the short difference keeps the calibration
-// error off the absolute counter, which is hours wide.
+// cannot do this -- it restarts on every wake and does not carry the sleep --
+// and the RTC counter can, because the alarm is in the same ticks. Converting
+// only the short difference keeps the calibration error off the absolute
+// counter, which is hours wide.
 //
 // E1's rig worked the alarm out instead of reading it: the counter just before
 // esp_deep_sleep_start() plus the duration, converted with the calibration of

@@ -42,9 +42,8 @@ class StickyMic {
   // Measured -- docs/experiments.md, E3. The power-up transient is above speech
   // level for the first 8 ms only; after 16 ms it sits more than 13 dB below
   // speech and keeps falling. The level does not reach the room's noise floor
-  // for about 200 ms, which is what the old value waited for, but everything
-  // after the first few milliseconds is usable audio that was being thrown away.
-  // Three 8 ms blocks of margin is the compromise.
+  // for about 200 ms, but everything after the first few milliseconds is usable
+  // audio. Three 8 ms blocks of margin is the compromise.
   //
   // begin() takes it as an argument so the experiment can set it to zero.
   static constexpr uint32_t kSettleMs = 24;

@@ -13,7 +13,7 @@
 // Two modes, alternating wake by wake so both see the same network within a
 // minute of each other:
 //
-//   dhcp    what the firmware does today. The lwIP client's own state machine
+//   dhcp    an ordinary DHCP exchange. The lwIP client's own state machine
 //           is sampled every 2 ms through netif_dhcp_data(), so a row carries
 //           the whole timeline: SELECTING (a DISCOVER is out), REQUESTING (an
 //           OFFER came back), CHECKING (the ARP check that this build's
@@ -70,7 +70,7 @@ constexpr uint32_t kPollMs = 2;
 // enough that a wake spent waiting for one is still a short wake.
 constexpr uint32_t kProbeTimeoutMs = 1500;
 
-// Every sixth wake installs a lease that cannot work -- the right address on
+// Every fourth wake installs a lease that cannot work -- the right address on
 // the wrong network -- because a cached lease is only worth having if the
 // firmware can notice it has gone stale and recover inside the same question.
 // This is the number that says how much that costs.
@@ -208,11 +208,10 @@ struct Probe {
   uint8_t target;
 };
 
-// One TCP connect, to prove the address is not just installed but usable. The
-// backend is the target the firmware actually needs; the gateway is the one
-// that is always there. A connection refused inside the timeout is as good an
-// answer as a connection accepted -- something on the network replied to this
-// address -- so the two are reported apart.
+// One TCP connect, to prove the address is not just installed but usable. A
+// connection refused inside the timeout is as good an answer as a connection
+// accepted -- something on the network replied to this address -- so the two
+// are reported apart.
 Probe probeNetwork(const IPAddress& gateway) {
   // Without an address of our own nothing can be proved: lwIP fails a connect
   // in microseconds because it has nowhere to send from, and that fast failure
@@ -267,12 +266,9 @@ uint32_t recoverWithDhcp(const IPAddress& stale) {
 
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
 
-  // Waiting on WiFi.status() is what the first version did, and it returned in
-  // a millisecond with no address at all: the status was still the
-  // WL_CONNECTED the static address had set, and nothing had happened yet to
-  // replace it. The address itself is the only thing here that cannot be
-  // history -- so the wait is for one that is real and is not the one just
-  // thrown away.
+  // Not WiFi.status(): it is still the WL_CONNECTED the static address set,
+  // and nothing has happened yet to replace it. The wait is for an address that
+  // is real and is not the one just thrown away.
   for (;;) {
     const uint32_t ms = static_cast<uint32_t>((esp_timer_get_time() - startUs) / 1000);
     const IPAddress now = WiFi.localIP();
@@ -370,12 +366,10 @@ void setup() {
   // The netif has to exist before a static address will take, and WiFi.mode()
   // is what creates it. WifiLink::begin() calls it again, which is free.
   //
-  // **persistent(false) goes first**, and the first run of this rig is how that
-  // was learned: with it after the mode, every wake spent over a second more
-  // before the association even started. Arduino's default storage is FLASH, so
-  // a mode set while that is still true goes through NVS. WifiLink does it in
-  // this order already; the rig has to as well, or it measures a different
-  // firmware than the one it is reporting on.
+  // **persistent(false) goes first.** Arduino's default storage is FLASH, so a
+  // mode set while that is still true goes through NVS and costs over a second.
+  // WifiLink does it in this order; the rig has to as well, or it measures a
+  // different firmware than the one it is reporting on.
   const int64_t tSerial = esp_timer_get_time();
   WiFi.persistent(false);
   const int64_t tPersistent = esp_timer_get_time();

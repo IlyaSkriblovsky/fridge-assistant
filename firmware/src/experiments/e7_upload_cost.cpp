@@ -36,17 +36,17 @@
 //                  upload 4 goes through Backend, unchanged. It anchors the
 //                  rig's four clocks to the one number S7 reported, so the
 //                  finding transfers to the firmware rather than to the rig.
-//                  Backend has been a chunked esp_http_client request since
-//                  S11, where the result in docs/experiments.md went through
-//                  HTTPClient; the payload goes up as a body of one write.
+//                  The result in docs/experiments.md was taken through
+//                  HTTPClient; Backend is a chunked esp_http_client request,
+//                  and the payload goes up through it as a body of one write.
 //
 // **The connects that never arrive are the other half of the question.** Four of
 // S7's questions could not open a connection to a backend that was running and
 // gave up at the 5 s timeout, with nothing reaching the backend at all. That is
-// about one in fifteen, and S7b plans to read exactly that as a stale DHCP
-// lease -- so it has to be counted here. Every failed connect is retried once,
-// immediately: a lost SYN and a path that is not there look the same from one
-// attempt and different from two.
+// about one in fifteen, and the stale-lease rule reads exactly that as a stale
+// DHCP lease -- so it has to be counted here. Every failed connect is retried
+// once, immediately: a lost SYN and a path that is not there look the same from
+// one attempt and different from two.
 //
 // The payload is Recording's own buffer, filled with a tone rather than by the
 // microphone -- 4 s at 16 kHz mono, 128044 bytes with the WAV header, in the

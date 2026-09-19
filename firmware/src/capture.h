@@ -24,19 +24,18 @@ class StickyMic;
 //
 // **The button poll lives here too**, between reads. A gpio_get_level() costs
 // nothing and never blocks, and it buys a stop that does not depend on what the
-// orchestrator is inside: until S10 that was a panel refresh, from S11 it is an
-// upload write that can block through a retransmission timeout, and either
-// would otherwise add a second or two of room noise to the end of every
-// recording. Polled every chunk -- 256 samples, 16 ms -- which is comfortably
-// inside the 40 ms release debounce, so the release is seen 40-56 ms after the
-// line goes high and not later.
+// orchestrator is inside -- an upload write can block through a retransmission
+// timeout, which would otherwise add a second or two of room noise to the end
+// of the recording. Polled every chunk -- 256 samples, 16 ms -- which is
+// comfortably inside the 40 ms release debounce, so the release is seen
+// 40-56 ms after the line goes high and not later.
 //
 // **The microphone and the button are handed over; the buffer is shared.**
 // From start() until the task reports finished(), the microphone and the button
 // belong to the task and the orchestrator must not touch them; after that they
 // are the orchestrator's again. The buffer is written by the task and read by
-// the orchestrator at the same time, from S11 on, because the upload streams
-// the recording while it is still being made -- Recording's committed count is
+// the orchestrator at the same time, because the upload streams the recording
+// while it is still being made -- Recording's committed count is
 // what makes that safe without a lock, and recording.h has how. Three flags
 // cross the boundary while the task runs, and each goes through a primitive
 // that carries the barrier with it: the abort request going in, and the
@@ -53,7 +52,7 @@ class Capture {
   static constexpr BaseType_t kCore = 1;
 
   // Above loopTask, which runs at 1, so a DMA buffer coming ready preempts the
-  // orchestrator instead of queueing behind a panel refresh. Well below lwIP
+  // orchestrator instead of queueing behind it. Well below lwIP
   // (18) and WiFi (23), which sit on the other core anyway.
   static constexpr UBaseType_t kPriority = 10;
 

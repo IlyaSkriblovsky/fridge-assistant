@@ -26,7 +26,7 @@ struct esp_http_client;
 // backend takes the length from there. It carries no credentials (D8) and goes
 // over plain HTTP (D5).
 //
-// **The request is four calls, because since S11 the body is a stream:**
+// **The request is four calls, because the body is a stream:**
 // open() while the button is held, write() as the capture task commits, end()
 // once it has stopped, receive() for the answer. The orchestrator's thread makes
 // all four, and every one of them blocks it -- which is allowed here because
@@ -97,8 +97,7 @@ class Backend {
   // unreachable() and lastError() say how.
   //
   // Opening again drops whatever request was open and starts a new one from
-  // byte zero -- which is what a retry is, now that it can happen while the user
-  // is still talking.
+  // byte zero, which is what a retry is.
   bool open();
 
   // The same, somewhere else: the seam that provokes each row of the vision's
@@ -142,10 +141,10 @@ class Backend {
   // True when open() failed because nothing at all answered at the address --
   // a connect that ran out of its own budget rather than one that was refused.
   // It is the one distinction inside NoServer that the device can act on, and
-  // S7b is what acts on it: a refusal proves something is at the address and
-  // therefore that the address works, while silence is also the shape of a
-  // cached DHCP lease that has outlived its network. esp-tls reports the two
-  // apart, which HTTPClient never did.
+  // the stale-lease rule in main.cpp is what acts on it: a refusal proves
+  // something is at the address and therefore that the address works, while
+  // silence is also the shape of a cached DHCP lease that has outlived its
+  // network.
   bool unreachable() const { return _unreachable; }
 
   // What went up in this request, counted without the framing: the number the
@@ -175,10 +174,9 @@ class Backend {
   //
   // firstByteUs is when this thread read the headers, and the orchestrator
   // comes to receive() only after the taken chirp: an answer that arrives inside
-  // the chirp's 60 ms reads as the chirp, which is exactly what the prototype
-  // backend's does (S11). So firstByteUs - endUs is the backend's own time only
-  // once the backend is slower than a chirp -- as one with a model behind it
-  // will be, and as E2 will need.
+  // the chirp's 60 ms reads as the chirp, as the prototype backend's does. So
+  // firstByteUs - endUs is the backend's own time only once the backend is
+  // slower than a chirp.
   int64_t openUs() const { return _openUs; }
   int64_t connectedUs() const { return _connectedUs; }
   int64_t endUs() const { return _endUs; }

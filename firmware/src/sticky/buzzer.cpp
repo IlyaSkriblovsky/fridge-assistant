@@ -21,9 +21,7 @@ constexpr uint8_t kResolutionBits = 10;
 // pitches so it is neither of them, and short enough that it cannot be taken
 // for the error's sustained note.
 //
-// Kept near 2-3 kHz because that is where a small piezo is loudest; the E1 rig
-// measured nothing about this, it just used 3 kHz and was audible across a
-// room.
+// Kept near 2-3 kHz, where a small piezo is loudest.
 constexpr uint16_t kLowHz = 2000;
 constexpr uint16_t kMidHz = 2500;
 constexpr uint16_t kHighHz = 3000;

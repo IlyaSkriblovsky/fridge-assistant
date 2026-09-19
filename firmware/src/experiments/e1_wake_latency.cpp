@@ -166,9 +166,7 @@ void summarise(const char* label, const uint32_t* values, uint32_t count) {
 // The boot half of the measurement. esp_timer is useless for this: it restarts
 // on every wake and does not carry the sleep, so it reads the same small value
 // at the top of every setup() however long the board slept, and it cannot see a
-// boot that ran before it started. (This comment used to give the opposite
-// reason -- that esp_timer carries the sleep -- which S2 disproved; see E1 in
-// docs/experiments.md. The method was right either way.)
+// boot that ran before it started.
 //
 // The RTC counter works because the alarm is in the same ticks. Working in ticks
 // and converting only the short difference keeps the calibration error off the
@@ -176,13 +174,13 @@ void summarise(const char* label, const uint32_t* values, uint32_t count) {
 //
 // **The alarm is read, not worked out.** esp_deep_sleep_start() writes it into
 // RTC_CNTL, which stays up through the sleep and is not reset by the wake, so
-// the register holds the exact tick the wake event happened at. Until S9 this
-// rig worked it out instead -- the counter just before esp_deep_sleep_start()
-// plus the duration, converted with the previous boot's calibration -- and that
-// misses what the sleep entry does before reading the counter itself, IDF's
-// overhead compensation, and any difference between the calibration it used and
-// the one IDF did. `skew` keeps the old number on every row, as the programmed
-// alarm less the worked-out one: the old boot is boot + skew.
+// the register holds the exact tick the wake event happened at. Working it out
+// -- the counter just before esp_deep_sleep_start() plus the duration,
+// converted with the previous boot's calibration -- misses what the sleep entry
+// does before reading the counter itself, IDF's overhead compensation, and any
+// difference between the calibration it used and the one IDF did. `skew` is the
+// programmed alarm less the worked-out one, so a boot worked out that way is
+// boot + skew.
 uint64_t programmedAlarm() {
   return (static_cast<uint64_t>(REG_GET_FIELD(RTC_CNTL_SLP_TIMER1_REG, RTC_CNTL_SLP_VAL_HI))
           << 32) |
@@ -514,10 +512,8 @@ void setup() {
 
   if (index <= 1 || (buttonWake && g_buttonWakes == 0)) printCurve();
 
-  // A press is answered wherever it lands. The timer phase sleeps with ext1
-  // armed too, so a press during it used to be swallowed -- the rig printed its
-  // row and went straight back to sleep, which from outside was just a chirp
-  // arriving early and no reaction to the hold.
+  // A press is answered wherever it lands: the timer phase sleeps with ext1
+  // armed too.
   if (buttonWake) {
     ++g_buttonWakes;
     if (reportHold(tEntry) >= kDumpHoldMs) printLog();

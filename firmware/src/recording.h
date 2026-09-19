@@ -16,9 +16,9 @@
 //
 // **The 44-byte WAV header sits at the front of the allocation**, written once
 // by begin() and never again. It declares a length of 0xFFFFFFFF in both of its
-// length fields, because from S11 on the header goes up before the recording
-// has a length: the body is streamed while the button is held, and the
-// terminating chunk is where it ends. The backend takes the length from there
+// length fields, because the header goes up before the recording has a length:
+// the body is streamed while the button is held, and the terminating chunk is
+// where it ends. The backend takes the length from there
 // -- the vision's request contract has why the body stays a WAV, and why that
 // value rather than zero. The alternative to reserving the bytes -- capturing
 // into a bare PCM buffer and prepending a header at send time -- copies a
@@ -32,8 +32,7 @@
 //     const uint32_t got = mic.readSamples(audio.writeHead(), want);
 //     audio.commit(got);
 //
-// which from S4 on is the body of the capture task's loop, with the button
-// poll between two passes of it.
+// which is the body of the capture task's loop.
 //
 // The samples keep the microphone's DC bias: the ESP32-S3's PDM-to-PCM path has
 // no high-pass stage, and removing the bias here would be a second pass over a
@@ -42,7 +41,7 @@
 //
 // **Two tasks use the buffer at once, and the committed count is what makes
 // that safe.** One writes: the capture task, through writeHead(), nextChunkSamples()
-// and commit(), and nothing else may call those. The other reads: from S11 the
+// and commit(), and nothing else may call those. The other reads: the
 // orchestrator streams wav() up to wavBytes() while the recording is still
 // growing behind it. commit() publishes the count with release ordering and
 // every reader of it loads with acquire, so the samples below a count that has
@@ -95,8 +94,8 @@ class Recording {
   uint32_t recordedMs() const;
 
   // The recording as a file, header first: the start of the buffer, and how
-  // much of it is there so far. This is the body of the request from S11 on,
-  // streamed straight from PSRAM while wavBytes() is still growing, and it is a
+  // much of it is there so far. This is the body of the request, streamed
+  // straight from PSRAM while wavBytes() is still growing, and it is a
   // complete WAV at every length -- the header never declared one.
   const uint8_t* wav() const { return _buffer; }
   size_t wavBytes() const { return kHeaderBytes + recordedBytes(); }

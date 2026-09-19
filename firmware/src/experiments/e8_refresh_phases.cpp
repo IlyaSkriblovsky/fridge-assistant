@@ -5,10 +5,9 @@
 //     ~/.platformio/penv/bin/pio run -e exp_e8 -t upload --upload-port <port>
 //
 // This replaces main.cpp in its own environment; nothing here is part of the
-// firmware. S5 timed the three screens from the outside and got 2373-2446 ms,
-// deterministic to the millisecond, and every decision since -- D4's display
-// task, D6's partial refresh, the working screen at S8 -- has argued about that
-// number as if it were one thing. It is not. Between `refresh()` and its return
+// firmware. A full refresh is 2373-2446 ms from the outside (S5),
+// deterministic to the millisecond, and it is not one thing. Between
+// `refresh()` and its return
 // the panel is reset and re-initialised, two 48000-byte planes go out over SPI
 // at 10 MHz, a waveform runs, the controller powers its analog side down, and
 // then two separate delay(100) calls run back to back with the image already on

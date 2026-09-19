@@ -7,12 +7,9 @@
 
 // The four screens the device draws, and the only place the panel is touched.
 //
-// The interface is deliberately four calls wide, and since S10 it has one
-// caller: Display, in src/display.h, owns the only instance and draws it on a
-// task of its own. That split was cheap exactly because nothing outside this
-// class had ever called the panel -- the four became messages in a slot and
-// nothing here changed. Everything below runs on that task and blocks it for
-// the length of a refresh, which is what the task is for.
+// Its one caller is Display, in src/display.h, which owns the only instance and
+// draws it on a task of its own. Everything below runs on that task and blocks
+// it for the length of a refresh, which is what the task is for.
 //
 // The panel is a 3.97" 800x480 monochrome e-paper on an SSD1677 controller,
 // through the two corrections in src/sticky/epaper.h -- which is included by
@@ -23,8 +20,7 @@
 //
 //  * **No setRotation().** Seeed_GFX2's Board_reTerminal_Sticky already puts
 //    the panel the way the vision's screen section settles on -- buttons along
-//    the bottom edge, on the right, under the right thumb. A rotation appearing
-//    here later is a regression, not a fix.
+//    the bottom edge, on the right, under the right thumb.
 //  * **One full refresh per question, and it is the first one** -- the
 //    vision's screen section. listening() is full and everything after it is
 //    partial, which is not a preference but the only arrangement that works. A
@@ -92,12 +88,9 @@ class StickyScreen {
   // is on its way, and the panel would otherwise still read LISTENING until the
   // answer lands. The word alone is repainted, through a partial refresh: the
   // answer queues behind it on the one controller, so a full refresh here
-  // would put its two and a half seconds in front of the answer's own.
-  //
-  // **It has to follow a full refresh in the same boot**, which listening()
-  // always is: a partial update is differential against what the controller was
-  // last told is on the glass, and after a wake the only thing that has told it
-  // anything is that refresh.
+  // would put its two and a half seconds in front of the answer's own. It has
+  // to follow a full refresh in the same boot, which listening() is -- see the
+  // note on partial updates above.
   //
   // False when the controller refused the partial update, which leaves
   // LISTENING on the glass and lastError() with the reason. It is not worth

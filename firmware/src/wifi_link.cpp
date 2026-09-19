@@ -17,10 +17,8 @@
 
 namespace {
 
-// RTC slow memory survives deep sleep and a reset but not a power cycle, which
-// is the boundary this cache wants: a board that has been switched off may well
-// be somewhere else. The magic is what tells a real entry from whatever the
-// section happens to hold on the first boot.
+// What tells a real entry from whatever the section happens to hold on the
+// first boot.
 constexpr uint32_t kCacheMagic = 0x571FCA01;
 
 struct ApCache {
@@ -52,11 +50,9 @@ struct LeaseCache {
 RTC_DATA_ATTR ApCache g_ap;
 RTC_DATA_ATTR LeaseCache g_lease;
 
-// When the radio got there, as opposed to when anyone looked. Both are written
-// from the Arduino event task, which keeps running while this one is inside a
-// panel refresh -- and that is the whole point of them: a poll cannot time
-// something that happens while its caller is busy, and the caller here is busy
-// for two and a half seconds at exactly the wrong moment.
+// When the radio got there, as opposed to when anyone looked: both are written
+// from the Arduino event task, so a caller that is busy between two polls does
+// not end up in them.
 //
 // File-static rather than members because the callback carries no context of
 // its own, and there is one station on this chip and one class in front of it.
@@ -90,9 +86,7 @@ bool apCacheHolds(uint32_t ssid) {
 }
 
 // How long an attempt that is not using the cached AP gets before it is started
-// again from scratch. With config.h's numbers the budget is spent as one attempt
-// on the cached AP of 3 s and then two fresh scans of 6 s -- 15 s, the timeout
-// exactly.
+// again from scratch. config::kWifiConnectTimeoutMs has how the budget divides.
 //
 // The window is what decides a retry, rather than WiFi.status() saying the
 // attempt has ended, because the status is not a reliable answer to that
@@ -122,9 +116,8 @@ const struct dhcp* stationDhcp() {
 
 // Seconds since an RTC counter reading, across however many deep sleeps. It has
 // to be the RTC counter rather than esp_timer, which restarts on every wake and
-// does not carry the sleep -- the correction S2 made to E1, in docs/
-// implementation.md. The calibration is read now rather than stored: a lease is
-// counted in hours and the slow clock's drift does not reach that far.
+// does not carry the sleep. The calibration is read now rather than stored: a
+// lease is counted in hours and the slow clock's drift does not reach that far.
 uint32_t secondsSince(uint64_t ticks) {
   const uint64_t now = rtc_time_get();
   if (now <= ticks) return 0;
@@ -269,25 +262,14 @@ WifiLink::State WifiLink::poll() {
     _settledMs = ms;
     _state = State::Failed;
     _lastError = "no association inside the budget";
-    // An entry that has just cost a full timeout is worth less than no entry:
-    // the next wake should scan rather than pay for it a second time.
     forgetAp();
     return _state;
   }
 
   // The attempt in flight has had its window. For one on the cached AP that
-  // means the AP cache has had its chance and the scan the firmware would have
-  // done without it starts instead; for a scan it means starting over. Either
-  // way it is inside the same budget, so the fallback costs the user no time
-  // beyond what the cached AP was given.
-  //
-  // **Only while there is no link.** A window is for an association that is not
-  // happening; once the link is up the attempt has done the hard part and is
-  // waiting for DHCP, which on this network is seconds (S6 in
-  // docs/implementation.md) and is not made faster by throwing the association
-  // away and doing it again. The first run of the S6 driver did exactly that
-  // and turned a 3.9 s connect into a 6.3 s one. Past that point the budget is
-  // the only thing left that can end the attempt.
+  // means the scan the firmware would have done without the cache starts
+  // instead; for a scan it means starting over. Either way it is inside the same
+  // budget. Only while there is no link -- see wifi_link.h.
   //
   // A begin() that refused to start anything is the one case that does not wait
   // for a window: there is nothing in flight to disturb.
@@ -339,8 +321,7 @@ WifiLink::State WifiLink::pollRenew() {
   // no event coming to replace it; and the address the server hands back is
   // usually the one just dropped, so "it changed" would wait for something that
   // is not going to happen. The client's own state is the only thing that
-  // answers the question actually being asked -- E6's rig read the same field
-  // for its timeline.
+  // answers the question actually being asked.
   const struct dhcp* client = stationDhcp();
   if (client != nullptr && client->state == DHCP_STATE_BOUND &&
       static_cast<uint32_t>(WiFi.localIP()) != 0) {

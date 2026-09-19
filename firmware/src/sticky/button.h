@@ -22,17 +22,15 @@
 //    press; a press shorter than config::kButtonMinHoldMs is a tap, which the
 //    caller discards without contacting the backend.
 //
-// poll() never blocks: from S4 on it is called by the capture task between I2S
-// reads, where anything that waits costs audio. One task owns the object at a
-// time -- S4 hands it to the capture task rather than sharing it, so there is
-// no locking here.
+// poll() never blocks: it is called by the capture task between I2S reads,
+// where anything that waits costs audio. One task owns the object at a time --
+// the capture task while it runs -- so there is no locking here.
 //
 // **Every hold reads short**, by the boot time plus however long the contact
 // takes to become a wake event: 61 ms and an unmeasured millisecond or so
-// (docs/experiments.md, E1, as re-run on the firmware at S9). Nothing on this path can do better -- a button
+// (docs/experiments.md, E1). Nothing on this path can do better -- a button
 // wake carries no deadline to measure the boot against -- so the 300 ms minimum
-// hold asks for roughly 360 ms of real press, and the first ~60 ms of every
-// press is spent booting rather than being timed.
+// hold asks for roughly 360 ms of real press.
 //
 // The side buttons on GPIO5 and GPIO6 are not used.
 

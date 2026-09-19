@@ -9,20 +9,15 @@
 
 #include "sticky/screen.h"
 
-// The panel, on a thread of its own -- S10, and the last of D6.
+// The panel, on a thread of its own.
 //
-// A refresh is 0.8 to 2.3 s of the panel's own timeline, and until this class
-// the orchestrator sat inside every one of them: it could not act on the button
-// coming up while LISTENING was still refreshing, and it could not start the
-// upload while WORKING was. S8 measured what that cost a question -- the 889 ms
-// working screen always, and on a hold shorter than the Listening refresh up to
-// two seconds more -- and none of it needed the orchestrator's thread. So the
-// orchestrator posts a screen and carries on, and this task draws it.
+// A refresh is 0.8 to 2.3 s of the panel's own timeline, and none of it needs
+// the orchestrator's thread, which has a release to act on and an upload to
+// feed. So the orchestrator posts a screen and carries on, and this task draws
+// it.
 //
-// **It wraps StickyScreen rather than replacing it.** The four screens stay
-// where they were, and this class owns the only instance of them, so nothing
-// outside it can reach the panel at all -- the rule StickyScreen's interface was
-// kept four calls wide for, now held by construction rather than by care.
+// **It wraps StickyScreen** and owns the only instance of it, so nothing outside
+// this class can reach the panel at all.
 //
 // **A slot of one, with replacement.** A screen posted while another is still
 // waiting for the panel replaces it; the refresh already on the panel is never
@@ -44,9 +39,9 @@
 class Display {
  public:
   // Core 0, beside the WiFi and lwIP tasks, which outrank it by a mile and
-  // sleep most of the time. Core 1 is capture's, and the orchestrator's: after
-  // S11 the orchestrator streams the upload while the button is held, and the
-  // start of that stream is exactly when this task is drawing LISTENING and
+  // sleep most of the time. Core 1 is capture's, and the orchestrator's: the
+  // orchestrator streams the upload while the button is held, and the start of
+  // that stream is exactly when this task is drawing LISTENING and
   // pushing its planes -- half a second of CPU that would otherwise be
   // time-sliced against the stream at the same priority.
   //
@@ -58,9 +53,8 @@ class Display {
   static constexpr UBaseType_t kPriority = 1;
 
   // The library's drawing and refresh paths, the FreeFont glyph code, and two
-  // 128-byte strings in StickyScreen::error(). They ran on loopTask's 8 KB
-  // until this step, so that is the size. S10 measured 1.8 to 2.0 KB of it in
-  // use and the log keeps reporting it; the rest stays, because the library's
+  // 128-byte strings in StickyScreen::error(). 1.8 to 2.0 KB of it is in use
+  // (S10), and the log keeps reporting it; the rest stays because the library's
   // fallback paths -- a refused partial, a BUSY timeout -- have never run here,
   // and a task that overflows takes the question with it.
   static constexpr uint32_t kStackBytes = 8192;
