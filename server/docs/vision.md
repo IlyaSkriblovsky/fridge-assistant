@@ -112,7 +112,12 @@ Seeed reTerminal Sticky (E1005) — небольшой прибор на бат�
 | Сценарий | Состояние | Документ |
 | --- | --- | --- |
 | Список покупок | Добавление работает: Google Keep через gkeepapi, пока в тестовую заметку | [use-cases/shopping-list.md](use-cases/shopping-list.md) |
+| Таймеры и напоминания | Идея, нужна прошивка | [use-cases/timers-reminders.md](use-cases/timers-reminders.md) |
+| Сводка на экране покоя | Идея, что показывать — не решено | [use-cases/idle-screen.md](use-cases/idle-screen.md) |
+| Семейные записки | Идея, живут на сводке | [use-cases/family-notes.md](use-cases/family-notes.md) |
+| Telegram-бот | Идея, что он делает — не решено | [use-cases/telegram.md](use-cases/telegram.md) |
 
 Скорее всего, дальше появятся другие интеграции с внешними сервисами и
 автоматизация каких-то ещё повседневных дел. Каждый новый сценарий получает
-свой файл в `docs/use-cases/` и строку в этой таблице.
+свой файл в `docs/use-cases/` и строку в этой таблице. Идеи, за которые ещё не
+брались, записываются так же, с состоянием «Идея».
