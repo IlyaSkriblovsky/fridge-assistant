@@ -537,10 +537,11 @@ void logStream(Backend::Result result) {
   // network wait: an address that lands during the recording costs the
   // question nothing.
   const int64_t onlineUs = g_beginUs + static_cast<int64_t>(wifi.onlineMs()) * 1000;
-  Serial1.printf("  online in %lu ms (%s AP, %s address), %s -- %lu ms from the wake",
+  Serial1.printf("  online in %lu ms (%s AP, %s address), %s, DNS %s (%s) -- %lu ms from the wake",
                  static_cast<unsigned long>(wifi.onlineMs()),
                  wifi.usedCachedAp() ? "cached" : "scanned",
-                 wifi.usedLease() ? "installed" : "leased", wifi.ip(),
+                 wifi.usedLease() ? "installed" : "leased", wifi.ip(), wifi.dns(),
+                 wifi.usedCustomDns() ? "secrets.h" : "the network's",
                  static_cast<unsigned long>(millisBetween(g_entryUs, onlineUs)));
   if (g_releaseUs != 0) {
     Serial1.printf(", the address landed %lu ms after the release",
@@ -616,7 +617,7 @@ void setup() {
                  static_cast<unsigned long>((chirpUs - g_entryUs) / 1000));
 
   g_beginUs = esp_timer_get_time();
-  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
+  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
     fail(Outcome::NoWifi, "NO WIFI", wifi.lastError());
   }
 

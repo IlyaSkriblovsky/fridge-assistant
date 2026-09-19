@@ -18,6 +18,16 @@ namespace secrets {
 constexpr const char* kWifiSsid = "";
 constexpr const char* kWifiPassword = "";
 
+// DNS server to use in place of the one the network's DHCP hands out, as a
+// dotted IPv4 address -- "1.1.1.1", say. Empty keeps DHCP's. For a router that
+// stops answering DNS now and then while everything else keeps working: the
+// backend's host name is looked up on every question, and a lookup nobody
+// answers ends that question with NO SERVER.
+//
+// Here next to the network rather than in config.h because it is a fact about
+// this network, like the SSID, not about the firmware.
+constexpr const char* kDnsServer = "";
+
 // Backend that takes the recording and answers with text, as http://host[:port]
 // with no trailing slash; the path is config::kAudioPath. Here rather than in
 // config.h because the repository is public and the backend's address need not

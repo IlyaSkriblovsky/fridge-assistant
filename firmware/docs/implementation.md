@@ -30,6 +30,7 @@ which means asking.
 | S9 | Re-run E1 | Wake latency of the real firmware | Done |
 | S10 | Display task | The panel off the orchestrator's thread | Done |
 | S11 | Streaming upload | The body going up under the hold | Done |
+| S12 | DNS server | Names looked up past a router that stops answering | Built, not yet run on the device |
 
 ## Why this order
 
@@ -1781,6 +1782,41 @@ backend is nothing -- 115 to 154 ms in all. The two small findings above, the
 questions and cost the short ones at most a few tens of milliseconds on the
 glass. The next number that matters is the backend's own, which needs a model
 behind it; [E2](experiments.md) now says what streaming moved out of its way.
+
+---
+
+## S12 -- DNS server
+
+The home router stops answering DNS now and then while it goes on routing
+everything else. Phones do not notice, because they bring a resolver of their
+own; the device looks the backend's host name up on every question, and a
+lookup nobody answers ends that question with NO SERVER. `secrets::kDnsServer`
+names a DNS server to use in place of the one DHCP hands out, and empty keeps
+the network's.
+
+### What it turned out to involve
+
+`src/wifi_link.h/.cpp`, and a third argument to `WifiLink::begin()`, which
+refuses anything that is not an IPv4 address the way it refuses a missing SSID.
+
+**It cannot go in before the address.** lwIP's DHCP client hands the servers in
+its ACK to `dns_setserver()`, up to `DNS_MAX_SERVERS` of them -- three in this
+build -- over whatever was there, and with `LWIP_DNS_SETSERVER_WITH_NETIF` off
+that is one table for the whole stack. A DNS argument to `WiFi.config()` ahead
+of DHCP is exactly what gets overwritten. So the server goes in on the poll that
+turns Online: DHCP, the cached lease and `renewAddress()` all end there, and
+nothing can look a name up before it.
+
+**In place of the network's, not ahead of it.** `WiFi.setDNS()` clears the
+backup slot as well, so the server the log line names is the only one asked.
+
+**The lease cache keeps the network's server.** `installDns()` runs after
+`recordSuccess()`, so the entry holds what DHCP said, and emptying the setting
+takes effect on the next wake rather than once the lease ages out.
+
+The flow's `online in` line now names the DNS server and where it came from, read
+back from the stack rather than from the setting, so a replacement that did not
+take shows up as the network's.
 
 ---
 

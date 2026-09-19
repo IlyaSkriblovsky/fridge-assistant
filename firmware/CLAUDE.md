@@ -25,7 +25,7 @@ the hardware traps.
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
-| `src/secrets.h` | WiFi credentials, the backend's base URL and token. Gitignored. Template: `src/secrets.example.h` |
+| `src/secrets.h` | WiFi credentials, an optional DNS server, the backend's base URL and token. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
 | `tools/` | The host half of an experiment: the serial logger, the pcap reader E7 needs |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |

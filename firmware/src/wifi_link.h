@@ -55,6 +55,15 @@
 // and starting over would throw away the part that worked. Past the link only
 // the deadline can end the attempt.
 //
+// **A DNS server given to begin() goes in once the address has arrived, not
+// before.** lwIP's DHCP client writes the network's DNS servers into the stack
+// when the lease is granted, over whatever was there, so one installed ahead of
+// it is gone by the time a name is looked up. Nothing is looked up before
+// poll() says Online, so that is where it goes in, on all three paths: DHCP,
+// the cached lease and renewAddress(). The lease cache keeps the network's DNS
+// server rather than this one, so emptying the setting takes effect on the next
+// wake instead of when the lease ages out.
+//
 // Two things about arduino-esp32's WiFi are worth knowing before reading a log
 // from this module:
 //
@@ -96,9 +105,13 @@ class WifiLink {
   static bool cachedLease(Lease& lease);
 
   // Starts the association and returns immediately. False means nothing was
-  // started: no credentials, which is a build-time mistake rather than a
-  // network failure, and lastError() says so.
-  bool begin(const char* ssid, const char* password);
+  // started: no credentials, or a DNS server that is not an IPv4 address --
+  // build-time mistakes rather than network failures, and lastError() says
+  // which.
+  //
+  // dns replaces the DNS server the network hands out, as dotted IPv4; null or
+  // empty keeps the network's.
+  bool begin(const char* ssid, const char* password, const char* dns = nullptr);
 
   // Advances the attempt and reports where it is. Cheap: one WiFi.status() and
   // some arithmetic, no blocking, safe to call from a loop that is also doing
@@ -174,6 +187,12 @@ class WifiLink {
   uint32_t ipv4() const { return _ipv4; }
   const char* ip() const { return _ip; }
 
+  // The DNS server names are looked up with, read back from the stack once
+  // online, and whether it is the one begin() was given. A replacement the
+  // stack did not take reads as the network's, with this false.
+  const char* dns() const { return _dns; }
+  bool usedCustomDns() const { return _usedCustomDns; }
+
  private:
   // Drops the cached AP, so the next begin() scans. Called when an attempt fails
   // outright -- an entry that has just cost a full timeout is worse than no
@@ -198,8 +217,14 @@ class WifiLink {
   // to RTC memory.
   void recordSuccess();
 
+  // Puts begin()'s DNS server in place of the network's, and reads back what is
+  // in place either way. Called after recordSuccess(), so the lease cache has
+  // already taken the network's.
+  void installDns();
+
   const char* _ssid = nullptr;
   const char* _password = nullptr;
+  uint32_t _customDns = 0;  // begin()'s, or zero to keep the network's
 
   State _state = State::Idle;
   const char* _lastError = "";
@@ -225,4 +250,7 @@ class WifiLink {
   int8_t _rssi = 0;
   uint32_t _ipv4 = 0;
   char _ip[16] = {0};
+
+  bool _usedCustomDns = false;
+  char _dns[16] = {0};
 };

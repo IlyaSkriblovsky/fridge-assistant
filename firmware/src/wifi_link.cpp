@@ -160,11 +160,24 @@ bool WifiLink::cachedLease(Lease& lease) {
 
 void WifiLink::forgetLease() { g_lease.magic = 0; }
 
-bool WifiLink::begin(const char* ssid, const char* password) {
+bool WifiLink::begin(const char* ssid, const char* password, const char* dns) {
   if (ssid == nullptr || ssid[0] == '\0') {
     _state = State::Failed;
     _lastError = "no WiFi credentials in src/secrets.h";
     return false;
+  }
+
+  // An IPv6 address or 0.0.0.0 comes out of IPAddress as zero, and neither is
+  // anything the stack could look a name up with.
+  _customDns = 0;
+  if (dns != nullptr && dns[0] != '\0') {
+    IPAddress parsed;
+    if (!parsed.fromString(dns) || static_cast<uint32_t>(parsed) == 0) {
+      _state = State::Failed;
+      _lastError = "the DNS server in src/secrets.h is not an IPv4 address";
+      return false;
+    }
+    _customDns = static_cast<uint32_t>(parsed);
   }
 
   _ssid = ssid;
@@ -187,6 +200,8 @@ bool WifiLink::begin(const char* ssid, const char* password) {
   _rssi = 0;
   _ipv4 = 0;
   _ip[0] = '\0';
+  _usedCustomDns = false;
+  _dns[0] = '\0';
   memset(_bssid, 0, sizeof(_bssid));
 
   // None of this belongs in NVS. The credentials are compiled in and the AP
@@ -254,6 +269,7 @@ WifiLink::State WifiLink::poll() {
   if (status == WL_CONNECTED) {
     _settledMs = ms;
     recordSuccess();
+    installDns();
     _state = State::Online;
     return _state;
   }
@@ -328,6 +344,7 @@ WifiLink::State WifiLink::pollRenew() {
     _renewMs = ms;
     _renewing = false;
     recordSuccess();
+    installDns();
     _state = State::Online;
     return _state;
   }
@@ -429,4 +446,13 @@ void WifiLink::recordSuccess() {
   g_lease.dns = static_cast<uint32_t>(WiFi.dnsIP(0));
   g_lease.seconds = _leaseSeconds;
   g_lease.ticks = rtc_time_get();
+}
+
+void WifiLink::installDns() {
+  // In place of the network's, not ahead of it: setDNS() clears the backup slot
+  // as well, so the server read back below is the only one asked.
+  _usedCustomDns = _customDns != 0 && WiFi.setDNS(IPAddress(_customDns));
+
+  const IPAddress dns = WiFi.dnsIP(0);
+  snprintf(_dns, sizeof(_dns), "%u.%u.%u.%u", dns[0], dns[1], dns[2], dns[3]);
 }

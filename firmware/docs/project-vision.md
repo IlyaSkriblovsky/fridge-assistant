@@ -217,6 +217,14 @@ that has outlived its network is dropped by the first question that cannot reach
 anything through it -- which costs that one question and nothing afterwards. The
 upload is the probe, so nothing on the happy path pays for the check.
 
+**The DNS server can be set in `src/secrets.h`**, in place of the one the
+network hands out. The home router stops answering DNS now and then while it
+goes on routing everything else, and the backend is reached by name, so a
+question asked during one of those spells ends in NO SERVER on a network that is
+otherwise fine. Empty keeps the network's. It goes in once the address is in
+hand, because DHCP writes its own over anything installed earlier
+([S12](implementation.md#s12----dns-server)).
+
 ### Framework: stay on Arduino
 
 `framework = arduino` in arduino-esp32 3.3.7 *is* ESP-IDF 5.x with a library
@@ -486,8 +494,9 @@ Split in two, by whether a value can be committed:
 
 - **`src/config.h`** -- tracked. Backend path, recording cap, response
   timeout, button debounce and minimum hold. Meant to be edited.
-- **`src/secrets.h`** -- gitignored. WiFi credentials, the backend's base URL
-  and token, and whatever else turns out not to be committable.
+- **`src/secrets.h`** -- gitignored. WiFi credentials and an optional DNS
+  server, the backend's base URL and token, and whatever else turns out not to
+  be committable.
   `src/secrets.example.h` is the committed template and must be kept in step
   when a constant is added. A missing `secrets.h` breaks the build at the
   include; empty values are reported over Serial1 at runtime.

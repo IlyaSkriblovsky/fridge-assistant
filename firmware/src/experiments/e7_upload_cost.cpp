@@ -519,7 +519,7 @@ void setup() {
   // so there is nothing to undo on the wakes that leave it alone.
   if (sleepOff) WiFi.setSleep(false);
 
-  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
+  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
     Serial1.printf("FAILED: %s\n", wifi.lastError());
     Serial1.flush();
     stickyBuzzer::error();
