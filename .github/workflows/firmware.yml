@@ -41,5 +41,28 @@ jobs:
 
       # default_envs names only the firmware; this overrides it with every
       # [env:...] in platformio.ini, one per line, so a new rig is built too.
+      - name: List every environment
+        run: |
+          {
+            echo 'PLATFORMIO_DEFAULT_ENVS<<EOF'
+            grep -oP '^\[env:\K[^]]+' platformio.ini
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Install the platform and libraries
+        run: pio pkg install
+
+      # Seeed_GFX2 names four headers *_EPaper_* and includes all four as
+      # *_ePaper_*. macOS finds them anyway; Linux does not. Upstream main is the
+      # same, so each gets a link under the name it is included by, made here
+      # every run and never over a file that already has that name.
+      - name: Work around the case of Seeed_GFX2's includes
+        run: |
+          find .pio/libdeps/*/Seeed_GFX2/src -name '*_EPaper_*' | while read -r file; do
+            name=$(basename "$file")
+            link="$(dirname "$file")/${name/_EPaper_/_ePaper_}"
+            [ -e "$link" ] || ln -s "$name" "$link"
+          done
+
       - name: Build every environment
-        run: PLATFORMIO_DEFAULT_ENVS="$(grep -oP '^\[env:\K[^]]+' platformio.ini)" pio run
+        run: pio run
