@@ -11,33 +11,13 @@ in one place rather than archaeology through commit messages.
 
 | # | For now | End state | What triggers the change |
 | --- | --- | --- | --- |
-| D1 | Answers transliterated to ASCII on the backend | Cyrillic rendered on the device | Taking on fonts |
-| D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass |
+| D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass -- felt harder since D1 went |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
 | D5 | Plain HTTP, the device's token included | HTTPS | [E2](experiments.md) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
 
 ---
-
-## D1 -- Cyrillic on the display
-
-Answers can be in Russian and the display cannot draw Cyrillic at all. The GFXFF
-FreeFonts declare the range `0x20`-`0x7E`, the built-in GLCD font is ASCII, and
-`font/Custom` holds only Latin display faces.
-
-The real answer is Seeed_GFX2's `SmoothFont`, which loads VLW fonts and looks
-glyphs up by Unicode code point. Two things make it a job rather than a switch:
-it is a separate drawing API from `drawString`, and it renders with alpha
-blending, so on a 1bpp panel the intermediate levels need thresholding.
-
-Until then the backend transliterates. Putting it there rather than in firmware
-means the day the device can render Cyrillic, this is a server-side switch and
-not a reflash. The device should still degrade gracefully if a non-ASCII byte
-arrives rather than drawing garbage.
-
-This costs nothing on the parsing side either way: ArduinoJson decodes `\uXXXX`
-escapes, surrogate pairs included, into UTF-8 by itself.
 
 ## D3 -- No battery reading
 

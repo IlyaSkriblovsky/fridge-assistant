@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "text.h"
+
 // The four screens the device draws, and the only place the panel is touched.
 //
 // Its one caller is Display, in src/display.h, which owns the only instance and
@@ -39,14 +41,19 @@
 //    the recording; the three that follow it are partial and each is a little
 //    over a third of the price. clear() is the cold-start form of the same
 //    reconciliation and is full for the same reason.
-//  * **ASCII only** -- D1. Only LOAD_GLCD and LOAD_GFXFF are compiled into
-//    Seeed_GFX2 and the FreeFonts cover 0x20-0x7E, so answers arrive
-//    transliterated on the backend. Anything outside that range is drawn as
-//    '?', one per character rather than one per byte: a Russian answer that
-//    slipped through has to look like text that could not be shown, not like a
-//    blank screen and not like garbage.
+//  * **Latin, Greek and Cyrillic, and nothing else drawn as itself.** The
+//    faces are in src/fonts/, laid out by src/text.h, which is also where the
+//    reasons for both live. Nothing here measures or centres through
+//    Seeed_GFX2: its textWidth() reads bytes rather than characters, so it
+//    measures every non-Latin string as empty, and drawString() centres on
+//    that. Anything outside the faces is drawn as '?', one per character
+//    rather than one per byte: a word in a script we never built has to look
+//    like text that could not be shown, not like a blank screen and not like
+//    garbage.
 //  * **No word wrap** -- D2. A long answer runs off the right edge, which is
-//    accepted while the backend returns a fixed phrase.
+//    accepted while the backend returns a fixed phrase. It is felt harder now
+//    than it was under D1, because a Russian sentence is longer than the
+//    transliteration that used to stand in for it.
 //
 // **listening() and working() are one screen with two words in it**, which is
 // what makes the second a partial refresh rather than a fourth full one. Both
@@ -61,10 +68,11 @@
 // orchestrator's call, and clear() is what it calls.
 class StickyScreen {
  public:
-  // The longest string any screen draws, sanitised copy included. Well past
-  // what fits on a line at the sizes below -- at the answer's 24 pt that is
-  // about 45 characters -- so the truncation only ever loses text that was
-  // already off the right edge under D2.
+  // The longest string any screen draws, in bytes. Well past what fits on a
+  // line at the sizes below -- at the answer's 24 pt that is about 45
+  // characters, and Cyrillic costs two bytes each, so this still holds more
+  // than the panel can show -- which means the truncation in textCopy() only
+  // ever loses text that was already off the right edge under D2.
   static constexpr size_t kMaxTextChars = 128;
 
   // Brings the panel up. False is the one display failure the orchestrator
@@ -119,19 +127,19 @@ class StickyScreen {
 
  private:
   // Every screen starts from the same state: white, black text, size 1. Set
-  // rather than assumed, so no screen can inherit the last one's font.
+  // rather than assumed, so no screen can inherit the last one's colour.
   void startFrame();
 
-  // The one word of listening() and working(): the face, the size and the
-  // centring the two share. Called by both, so neither can drift out of the
-  // band the other refreshes.
-  void startWord();
+  // Draws `text` with its box centred on the point, which is the placement
+  // MC_DATUM used to give. Done here rather than through a datum because
+  // Seeed_GFX2 would measure the string with the textWidth() described above.
+  void drawCentred(const TextFace& face, const char* text, int32_t centreX,
+                   int32_t middleY, uint8_t size);
 
-  // The band that word occupies, full panel width. The height comes from the
-  // face rather than from a constant: drawString centres a FreeFont's glyphs
-  // within its ascent plus descent, while fontHeight() is the line advance,
-  // which is larger -- so a band of fontHeight() clears the word top and bottom
-  // without measuring a single glyph. startWord() must have run first.
+  // The band the one word of listening() and working() occupies, full panel
+  // width. Both draw in the same face at the same size and both centre on the
+  // same point, so the band is the face's box plus a margin and neither word
+  // can leave it.
   void wordBand(int32_t& y, int32_t& height);
 
   // The whole panel, refreshed differentially against the shadow. Falls back to
@@ -147,12 +155,3 @@ class StickyScreen {
   bool _lastWasPartial = false;
   const char* _lastError = "";
 };
-
-// Copies `text` into `out` as something the FreeFonts can draw: printable ASCII
-// as it is, one '?' per character outside 0x20-0x7E, and at most size-1
-// characters. UTF-8 continuation bytes are skipped, so a multi-byte character
-// costs one '?' and not two or three.
-//
-// Exposed because it is ordinary logic with no panel behind it, and the only
-// part of this module that can be reasoned about away from the device.
-void screenDrawableText(char* out, size_t size, const char* text);

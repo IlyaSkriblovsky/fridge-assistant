@@ -28,7 +28,6 @@ from google.genai import errors
 from starlette.requests import ClientDisconnect
 
 import assistant
-from translit import transliterate
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -246,7 +245,7 @@ async def audio(request: Request) -> dict[str, str]:
             log(f"Gemini unreachable: {exc!r}")
             reply = "Не получилось связаться с Gemini, попробуй ещё раз."
     log(f"reply: {reply}  ({time.monotonic() - ended:.2f} s after the body ended)")
-    return {"response": transliterate(reply)}
+    return {"response": reply}
 
 
 # --- Deliberate failures ------------------------------------------------------

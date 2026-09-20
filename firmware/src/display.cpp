@@ -2,6 +2,8 @@
 
 #include <esp_timer.h>
 
+#include "text.h"
+
 namespace {
 
 // Set while nothing is waiting and the panel is not refreshing. Cleared by a
@@ -70,13 +72,13 @@ void Display::error(const char* title, const char* detail) { post(Screen::Error,
 void Display::post(Screen screen, const char* text, const char* detail) {
   if (_task == nullptr) return;
 
-  // Made drawable here rather than copied raw, so the slot's bound is in
-  // characters the panel can show and not in bytes of UTF-8 -- a Cyrillic
-  // answer cut at a byte count would lose half its letters to the copy.
+  // Copied through textCopy() rather than raw, so that the slot's bound --
+  // which is in bytes, because the buffer is -- falls between characters. A
+  // Cyrillic answer cut at a byte count would end in half a letter.
   Slot next;
   next.screen = screen;
-  screenDrawableText(next.text, sizeof(next.text), text);
-  screenDrawableText(next.detail, sizeof(next.detail), detail);
+  textCopy(next.text, sizeof(next.text), text);
+  textCopy(next.detail, sizeof(next.detail), detail);
 
   xSemaphoreTake(_lock, portMAX_DELAY);
   if (_slot.screen != Screen::Count) {

@@ -399,13 +399,22 @@ The wider UI is deliberately unconsidered until the proof of concept works.
 
 ### Text rendering
 
-Answers can be in Russian, so the display has to render Cyrillic eventually.
-Seeed_GFX2's `SmoothFont` loads VLW fonts and looks glyphs up by Unicode code
-point, which is the path; nothing else in the library can draw anything outside
-ASCII.
+Answers can be in Russian, so the display renders Cyrillic. It renders Greek
+and the typography a Russian sentence brings -- guillemets, the em dash, the
+numero sign -- for the same reason and at the same time, because the work is
+in the machinery and not in the glyphs. Anything else is drawn as `?`, one per
+character.
 
-Until that is taken on, answers arrive already transliterated, done on the
-backend -- [D1](deferred.md).
+The faces are GNU FreeFont, the design Seeed_GFX2 already bundles, regenerated
+with those scripts in them by `tools/gfxfont.py`. Layout is the firmware's own,
+in `src/text.h`, which is where both reasons for that are written down.
+
+`SmoothFont` was the obvious path and is the wrong one. It loads VLW fonts,
+which carry eight bits of alpha per pixel for anti-aliasing, and the panel is
+one bit: `Panel_EPaper::writePixel` makes every colour but pure black white, so
+every blended edge pixel disappears and only the fully-opaque interior of a
+glyph survives. It would cost eight times the storage, a parse on every boot
+and about 2 KB of RAM to arrive at a one-bit render either way.
 
 ### Sound
 
@@ -572,8 +581,14 @@ Also worth knowing:
   auto-detect exists but its SSD1677 path renders inverted, so this project binds
   the corrected driver directly.
 - Only `LOAD_GLCD` (font 1) and `LOAD_GFXFF` are compiled into Seeed_GFX2. Fonts
-  2/4/6/7/8 are unavailable. Rendering a paragraph of answer text will need a
-  FreeFont via `setFreeFont()` plus word wrapping.
+  2/4/6/7/8 are unavailable, so everything is drawn as a FreeFont.
+- Two things in Seeed_GFX2's text path are broken for anything but ASCII, and
+  both are in non-virtual code. `textWidth()` walks bytes rather than
+  characters, so a UTF-8 string measures as empty and `drawString()` centres it
+  wrongly; and `drawCharGfx()` reads `GFXglyph::bitmapOffset` with
+  `pgm_read_word` although the field is a `uint32_t`, so a font whose bitmaps
+  pass 64 KiB silently draws from the wrong offset. `src/text.cpp` works around
+  the first and `tools/gfxfont.py` asserts against the second.
 - Sources disagree on whether the Sticky has microSD enable and detect pins.
   Seeed's firmware declares GPIO10 and GPIO11; Seeed_GFX2 states the slot has
   neither. Unresolved, and irrelevant until the SD card is used.

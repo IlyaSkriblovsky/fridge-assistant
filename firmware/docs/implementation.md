@@ -31,6 +31,7 @@ which means asking.
 | S10 | Display task | The panel off the orchestrator's thread | Done |
 | S11 | Streaming upload | The body going up under the hold | Done |
 | S12 | DNS server | Names looked up past a router that stops answering | Built, not yet run on the device |
+| S13 | Fonts | Cyrillic, Greek and typography on the panel; D1 gone | Built, not yet run on the device |
 
 ## Why this order
 
@@ -376,8 +377,8 @@ and that is cheap only if nothing else calls the panel directly.
 - Only `LOAD_GLCD` and `LOAD_GFXFF` are compiled into Seeed_GFX2, so the answer
   is a FreeFont through `setFreeFont()`. Font 1 at 8x8 is unreadable on a 4"
   panel without scaling.
-- ASCII only ([D1](deferred.md)). A non-ASCII byte should degrade visibly but
-  not draw garbage.
+- ASCII only (D1, since paid off in [S13](#s13----fonts)). A non-ASCII byte
+  should degrade visibly but not draw garbage.
 - No battery level ([D3](deferred.md)).
 - Error strings come from the vision's table: `NO WIFI`, `NO SERVER`,
   `SERVER ERROR` plus status, `BAD RESPONSE`, `TIMED OUT`, `NO MICROPHONE`,
@@ -420,13 +421,17 @@ wrong, on a device whose whole point is that it is glanced at.
 
 **Non-ASCII degrades per character, not per byte.** `screenDrawableText()` keeps
 0x20-0x7E, skips UTF-8 continuation bytes and writes one `?` for everything
-else, so a Russian word that slips past the backend's transliteration
-([D1](deferred.md)) comes out as one `?` per letter instead of two or three. It
-is the only part of the module that can be reasoned about away from the device,
-which is why it is a free function rather than a private method. Sanitising also
-keeps `textWidth()` honest: it walks bytes while `drawString()` decodes UTF-8,
-so the two disagree about the width of anything multi-byte, and every datum but
+else, so a Russian word that slips past the backend's transliteration (D1)
+comes out as one `?` per letter instead of two or three. It is the only part of
+the module that can be reasoned about away from the device, which is why it is
+a free function rather than a private method. Sanitising also keeps
+`textWidth()` honest: it walks bytes while `drawString()` decodes UTF-8, so the
+two disagree about the width of anything multi-byte, and every datum but
 `TL_DATUM` is computed from that width.
+
+*[S13](#s13----fonts) deleted this function and stopped using `drawString()`.
+The disagreement it worked around is real and permanent -- sanitising only hid
+it while every string was ASCII, and `src/text.cpp` measures instead.*
 
 The driver is a walkthrough -- one screen per press of the AI button, seven of
 them, covering the Listening screen, the phrase the backend really returns, an
@@ -1817,6 +1822,72 @@ takes effect on the next wake rather than once the lease ages out.
 The flow's `online in` line now names the DNS server and where it came from, read
 back from the stack rather than from the setting, so a replacement that did not
 take shows up as the network's.
+
+---
+
+## S13 -- Fonts
+
+The panel draws Latin, Greek, Cyrillic and the punctuation the latter two
+bring. `translit.py` is gone from the backend, and with it
+[D1](deferred.md) and the last place where the server knew what the device
+could draw.
+
+### What it turned out to involve
+
+`tools/gfxfont.py`, `src/fonts/`, `src/text.h/.cpp`, `src/sticky/screen.*`,
+`src/display.cpp`, and on the server side `translit.py` deleted and one call
+in `main.py`.
+
+**`SmoothFont` was the plan and was wrong.** D1 recorded VLW as the path,
+because it looks glyphs up by code point. It renders with alpha blending, and
+`Panel_EPaper::writePixel` on a 1 bpp panel is `if (color) white else black` --
+only pure `0x0000` is ink. Every blended edge pixel goes white, so a VLW glyph
+arrives as its fully-opaque interior and nothing else: eight bits of alpha per
+pixel paid for, one bit used. Against that, a GFXfont is already one bit, and
+`first`/`last` are `uint16_t`, so the format reaches Cyrillic on its own.
+
+**What blocked GFXfont was that a range cannot have holes.** Latin ends at
+0x7E, Cyrillic starts at 0x401 and the numero sign is alone at 0x2116; one
+range spanning them is 8455 descriptors, 67 KiB per face, for 250 glyphs. So a
+face is several GFXfonts, one per script, and `src/text.cpp` picks between
+them per character -- 2.3 KiB of descriptors per face, no holes, and every
+code point at its own value. Greek cost nothing structural on top of that: it
+sits at 0x370-0x3FF, immediately before Cyrillic.
+
+**Owning the layout was not optional anyway.** `Seeed_GFX2::textWidth()` reads
+bytes rather than characters, so any non-Latin string measures as empty and
+`drawString()` centres it wrongly; neither is virtual. Measuring and placing
+had to move into the firmware regardless, and once they had, several fonts per
+face cost one comparison per character. The same loop is what [D2](deferred.md)
+needs for word wrap.
+
+**The generator reproduces the bundled headers, nearly.** Regenerating
+0x20-0x7E from the same TTFs at fontconvert's 141 dpi gives a glyph table
+identical to Seeed_GFX2's, byte for byte, and bitmaps that differ in about 50
+bytes of 7464 -- single edge pixels, from a FreeType nine years newer. That is
+why all three faces are generated rather than only the new scripts: one
+rasteriser per string.
+
+**The box grew, and the band with it.** `ascent` is now 41 px rather than the
+Latin 34, because Ё's diaeresis clears the cap height, so an all-Latin word
+sits a few pixels lower than it did. The alternative -- centring on the ink of
+the actual string -- would make LISTENING and WORKING centre differently and
+break the one thing `wordBand()` guarantees, which is that the band is a
+property of the face. Checked on the host: with Ё in it, a word's ink reaches
+12 px from the band's edge, which is exactly `kWordBandMargin`.
+
+**Cost.** 44.4 KiB of flash, 1219520 to 1264991 bytes, against 3 MiB of app
+partition. No RAM: the faces are `const` and read from flash in place.
+
+### Still to check on the device
+
+Everything here was verified by compiling `src/text.cpp` and `src/fonts/`
+against a host stub of `Seeed_GFX` and rendering the four screens to an image:
+placement, script switching mid-string, the `?` fallback, the band, and that
+`textCopy()` cuts between characters. What that cannot show is the glass --
+whether 24 pt Cyrillic at 235 dpi is as readable as the Latin was, and whether
+the partial refresh of the word band still lands cleanly now that the band is
+130 px rather than 136.
 
 ---
 

@@ -281,8 +281,9 @@ Backend::Result Backend::receive() {
 
   // Hand-rolled extraction of one field breaks on the first escape sequence,
   // and an answer is exactly the kind of string that carries quotes. ArduinoJson
-  // also decodes \uXXXX into UTF-8 by itself, which is what makes D1 a
-  // backend-side decision rather than a parsing one.
+  // also decodes \uXXXX into UTF-8 by itself, surrogate pairs included, so an
+  // answer arrives here as UTF-8 whichever way the backend spelled it and
+  // src/text.cpp can take it from there.
   JsonDocument doc;
   const DeserializationError parsed = deserializeJson(doc, _reply, got);
   if (parsed) return finish(Result::BadResponse, "%s", parsed.c_str());

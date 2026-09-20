@@ -285,5 +285,4 @@ proxy_request_buffering off;
 | `main.py`: `settle_wav_lengths()`, `describe_wav()` | Длины в заголовке потокового WAV, строка с его параметрами для лога |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |
 | `shopping_list.py` | Список покупок в Keep через gkeepapi |
-| `translit.py` | Временная транслитерация ответа для прибора |
 | `Dockerfile` | Образ для деплоя, см. [Деплой](#деплой) |

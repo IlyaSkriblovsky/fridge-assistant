@@ -22,12 +22,15 @@ the hardware traps.
 | `src/recording.h/.cpp` | The recording: one PSRAM buffer that is already a WAV |
 | `src/capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
 | `src/display.h/.cpp` | The display task: owns the screen, draws what the orchestrator posts, off its thread |
+| `src/text.h/.cpp` | Laying UTF-8 out in a face made of several GFXfonts, because the library cannot |
+| `src/fonts/` | The three faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
 | `src/secrets.h` | WiFi credentials, an optional DNS server, the backend's base URL and token. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
 | `tools/` | The host half of an experiment: the serial logger, the pcap reader E7 needs |
+| `tools/gfxfont.py` | Regenerates `src/fonts/` from the GNU FreeFont TTFs. Its docstring is the format |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
 | `docs/experiments.md` | Measurements still owed, and what each one unblocks |
@@ -84,6 +87,23 @@ A green CI only means it builds: nothing runs on hardware there.
   puts 100 ms back on every screen, measured in [E8](docs/experiments.md).
 - **Don't edit `.pio/libdeps/`.** It is wiped by package updates. Library fixes
   belong in `src/` as subclasses, which is what `src/sticky/epaper.h` does.
+- **Never draw text with `drawString()` or measure it with `textWidth()`.**
+  Seeed_GFX2's are byte-oriented -- its GFXFF branch is `uniCode = *(string++)`
+  with no UTF-8 decode -- so every Cyrillic or Greek string measures as empty
+  and anything centred on that measurement lands wrong. Neither function is
+  virtual, so this cannot be subclassed away. `src/text.h` is the replacement,
+  and it is the only text path. The same applies to a new screen: measure with
+  `textWidth(face, ...)` and draw with `textDraw()`.
+- **A face's bitmaps have to stay under 64 KiB.** `drawCharGfx()` reads
+  `GFXglyph::bitmapOffset` with `pgm_read_word` although the struct field is a
+  `uint32_t`, so a larger font draws glyphs from the wrong place with no error.
+  Each range in `src/fonts/` has its own array and the largest is about 8 KB,
+  but a face added at 48 pt would not be. `tools/gfxfont.py` refuses to emit
+  one that would.
+- **Regenerate all three faces together, never one.** A newer FreeType
+  rasterises a handful of edge pixels differently from the one Adafruit used,
+  so mixing a generated face with a bundled GFXFF header puts two rasterisers
+  in one string. `tools/gfxfont.py` emits the whole set for that reason.
 - **Capture and networking must not share a task.** The I2S DMA holds only 90 ms;
   a blocking WiFi connect drops audio.
 - **A number read off a poll is a number about the poller.** The orchestrator

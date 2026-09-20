@@ -1,0 +1,3 @@
+# Build output of preview.cpp; see README.md.
+preview
+*.pgm
