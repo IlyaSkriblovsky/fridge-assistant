@@ -87,6 +87,36 @@ int32_t textWidth(const TextFace& face, const char* text, uint8_t size);
 int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text,
                  int32_t x, int32_t top, uint8_t size);
 
+// The two below break a string into lines that fit `maxWidth`, which is what
+// D2 turned into: an answer is a sentence or two from a model now, and one
+// line of 24 pt holds about 45 characters.
+//
+// A line breaks at the last space that fits. A word wider than the whole line
+// breaks inside itself, at the last character that fits, which is the only
+// way a line can break with no space in it -- and is also what keeps a string
+// with no space in it at all from looping forever. A newline in the text is a
+// break of its own, so a backend that sends two sentences on two lines gets
+// two lines. The spaces a line breaks at are not drawn at either end of it.
+
+// How many lines the string takes, which a caller needs before it can place
+// the first one: a block of text is centred as a block. Zero for an empty
+// string, so that nothing is what nothing is laid out as.
+int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size,
+                      int32_t maxWidth);
+
+// Draws the string as lines, the first line's box top-left at (x, top) and
+// each line after it one yAdvance lower. Returns how many were drawn.
+//
+// `maxLines` is the panel rather than the string: at most that many are drawn,
+// and if the string has more to say than that the last one ends in an
+// ellipsis. Dropping the tail silently would make an answer that was cut short
+// look like the whole of it, which is the one thing a screen with no scrollbar
+// must not do -- and pagination, which is where D2 goes next, has to know the
+// answer did not fit anyway.
+int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text,
+                        int32_t x, int32_t top, uint8_t size, int32_t maxWidth,
+                        int32_t maxLines);
+
 // Copies a UTF-8 string into a buffer of `size` bytes, truncating on a
 // character boundary rather than in the middle of one. `text` may be null,
 // which gives an empty string.

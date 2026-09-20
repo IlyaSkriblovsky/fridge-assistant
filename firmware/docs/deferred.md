@@ -11,13 +11,41 @@ in one place rather than archaeology through commit messages.
 
 | # | For now | End state | What triggers the change |
 | --- | --- | --- | --- |
-| D2 | Answers assumed short enough to fit, drawn as-is | Word wrap and pagination | The UI/UX pass -- felt harder since D1 went |
+| D2 | An answer longer than a panel ends in an ellipsis | The rest of it reachable -- pagination, or a smaller face | The UI/UX pass |
 | D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
 | D5 | Plain HTTP, the device's token included | HTTPS | [E2](experiments.md) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
 
 ---
+
+## D2 -- An answer longer than the panel
+
+The answer wraps as of [S14](implementation.md#s14----word-wrap) -- that half
+of D2 is paid off. What is left is the answer that does not fit even wrapped:
+seven lines of 24 pt, which is about 375 bytes of Russian. It is drawn to the
+last line the panel has room for and that line ends in an ellipsis, and the
+rest is not reachable from the device at all.
+
+The ellipsis has only ever been seen in the host preview. The assistant is
+asked for a sentence or two and gives them -- three lines was the longest
+answer of S14's run on the device -- so nothing it says in normal use reaches
+the bottom of the panel. That is worth knowing in both directions: the cut is
+rarer than it sounds, and the first person to meet it will be the first person
+to see it.
+
+That is a real cut and not a theoretical one -- the model is asked for one or
+two sentences and will sometimes give five -- but it is also visible, which is
+the part that matters while there is nothing to page with. Anything better
+needs an interaction the device does not have yet: the three buttons do
+nothing outside a question, and which of them would mean "more" is a UI/UX
+question rather than a display one. A smaller face for a long answer is the
+other candidate, and it trades the thing the panel is for -- being readable
+from across the kitchen -- for text nobody asked to be complete.
+
+Whatever it turns into, the layout already knows when it has run out of room:
+`textDrawWrapped()` returns the lines it drew and `textWrapLines()` says how
+many there were.
 
 ## D3 -- No battery reading
 

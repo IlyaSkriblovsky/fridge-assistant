@@ -52,11 +52,13 @@ class Display {
   static constexpr BaseType_t kCore = 0;
   static constexpr UBaseType_t kPriority = 1;
 
-  // The library's drawing and refresh paths, the FreeFont glyph code, and two
-  // 128-byte strings in StickyScreen::error(). 1.8 to 2.0 KB of it is in use
-  // (S10), and the log keeps reporting it; the rest stays because the library's
-  // fallback paths -- a refused partial, a BUSY timeout -- have never run here,
-  // and a task that overflows takes the question with it.
+  // The library's drawing and refresh paths, the FreeFont glyph code, and the
+  // Slot that run() takes a copy of -- which is most of a kilobyte now that an
+  // answer is a panel of text rather than a line of it. 1.8 to 2.0 KB of it was
+  // in use before that (S10), and the log keeps reporting it; the rest stays
+  // because the library's fallback paths -- a refused partial, a BUSY timeout
+  // -- have never run here, and a task that overflows takes the question with
+  // it.
   static constexpr uint32_t kStackBytes = 8192;
 
   // Every screen, and the pre-clear -- which is the record's index as well.
@@ -129,7 +131,7 @@ class Display {
   struct Slot {
     Screen screen = Screen::Count;  // Count: nothing waiting
     char text[StickyScreen::kMaxTextChars] = {0};
-    char detail[StickyScreen::kMaxTextChars] = {0};
+    char detail[StickyScreen::kMaxDetailChars] = {0};
   };
 
   static void trampoline(void* self);

@@ -13,6 +13,12 @@ constexpr uint32_t kFallback = '?';
 // face, so it resolves to kFallback like any other unknown character.
 constexpr uint32_t kReplacement = 0xFFFD;
 
+// Ends the last line of an answer with more to it than the panel had room
+// for. U+2026 rather than three periods: tools/gfxfont.py puts it in every
+// face, and it is narrower than the three would be. Spelled as an escape so
+// that no code in this file depends on being read as UTF-8.
+constexpr const char* kEllipsis = "\u2026";
+
 // A hole in a group's range -- a code point the range spans but the face does
 // not draw. tools/gfxfont.py writes these with no bitmap and no advance,
 // which is what tells them from a space: a space has no bitmap either, but it
@@ -50,8 +56,9 @@ const GFXglyph* findGlyph(const TextFace& face, uint32_t codepoint,
 
 // What actually gets drawn for a code point: the glyph, its font, and the
 // code point that reached it, which is kFallback when the face had nothing.
-// Both textWidth() and textDraw() go through this, so the width of a string
-// is the width of the string that appears.
+// Measuring and drawing both go through this -- advanceOf() below is the one
+// path to a width -- so the width of a string is the width of the string that
+// appears.
 struct Resolved {
   const GFXfont* font;
   const GFXglyph* glyph;
@@ -66,6 +73,153 @@ Resolved resolve(const TextFace& face, uint32_t codepoint) {
   out.codepoint = kFallback;
   out.glyph = findGlyph(face, kFallback, &out.font);
   return out;
+}
+
+// How far one character moves the cursor, substitution included. Everything
+// that measures goes through this and so does everything that draws, which is
+// what keeps a line from being measured as one width and drawn as another.
+int32_t advanceOf(const TextFace& face, uint32_t codepoint, uint8_t size) {
+  const Resolved resolved = resolve(face, codepoint);
+  if (resolved.glyph == nullptr) return 0;
+  return static_cast<int32_t>(pgm_read_byte(&resolved.glyph->xAdvance)) * size;
+}
+
+// A run of a string: where it starts and how many bytes of it are drawn. A
+// wrapped line is a run of the answer rather than a copy of part of it, which
+// is what keeps the wrapping from needing a buffer of its own.
+struct Run {
+  const char* text;
+  size_t bytes;
+};
+
+// The whole of a null-terminated string, as a run.
+Run wholeOf(const char* text) { return {text, text == nullptr ? 0 : strlen(text)}; }
+
+int32_t widthOf(const TextFace& face, const Run& run, uint8_t size) {
+  int32_t width = 0;
+  const char* cursor = run.text;
+  const char* const end = run.text + run.bytes;
+  while (cursor < end) {
+    const uint32_t codepoint = textNextCodepoint(&cursor);
+    if (codepoint == 0) break;
+    width += advanceOf(face, codepoint, size);
+  }
+  return width;
+}
+
+// Draws a run from its left edge along the baseline, and returns where the
+// next character would go. The caller has already called setTextSize().
+int32_t drawRun(Seeed_GFX& gfx, const TextFace& face, const Run& run, int32_t x,
+                int32_t baseline, uint8_t size) {
+  const GFXfont* current = nullptr;
+  const char* cursor = run.text;
+  const char* const end = run.text + run.bytes;
+  while (cursor < end) {
+    const uint32_t codepoint = textNextCodepoint(&cursor);
+    if (codepoint == 0) break;
+
+    const Resolved resolved = resolve(face, codepoint);
+    if (resolved.glyph == nullptr) continue;
+
+    if (resolved.font != current) {
+      // setFreeFont() walks the whole range to measure it, so it is called
+      // when the script changes rather than once per character. A Russian
+      // sentence changes font at its punctuation and nowhere else.
+      gfx.setFreeFont(resolved.font);
+      current = resolved.font;
+    }
+
+    // The advance is taken from the glyph rather than from drawChar()'s
+    // return, so that this loop and widthOf() cannot disagree about where the
+    // run ends.
+    gfx.drawChar(resolved.codepoint, x, baseline, 1);
+    x += advanceOf(face, codepoint, size);
+  }
+  return x;
+}
+
+// Past the spaces at `p`. A line breaks at a space, and the space belongs to
+// the break rather than to the line on either side of it.
+const char* pastSpaces(const char* p) {
+  while (*p == ' ') ++p;
+  return p;
+}
+
+// A run without the spaces it ends in -- the ones a break leaves behind, and
+// the ones a string can simply end in. A space is one byte and cannot be part
+// of a multi-byte character, so walking back over bytes is safe here.
+Run trimmed(const char* start, const char* end) {
+  while (end > start && end[-1] == ' ') --end;
+  return {start, static_cast<size_t>(end - start)};
+}
+
+// The next line of the string at `cursor` that fits in `maxWidth`, with
+// `cursor` left where the line after it starts. False when the string is
+// spent, which is the only way the loops below end.
+//
+// `reserve` is width held back at the right edge for something the caller
+// draws there -- the ellipsis, and nothing else so far. Held back rather than
+// subtracted afterwards, so the line ends at a word rather than at whatever
+// the ellipsis happened to cover.
+//
+// A line too narrow for one character and the reserve together still gets its
+// character, so the ellipsis after it sits past the edge. That takes a box
+// about 60 px wide; the answer's is 720.
+bool nextLine(const TextFace& face, const char** cursor, uint8_t size,
+              int32_t maxWidth, int32_t reserve, Run* line) {
+  const char* p = pastSpaces(*cursor);
+  if (*p == '\0') return false;
+
+  const char* const start = p;
+  const char* fitEnd = nullptr;   // the last space that fit: where the line ends
+  const char* fitNext = nullptr;  // and where the line after it starts
+  const int32_t limit = maxWidth - reserve;
+  int32_t width = 0;
+  bool afterSpace = false;
+
+  for (;;) {
+    const char* const charStart = p;
+    const uint32_t codepoint = textNextCodepoint(&p);
+
+    // The string's own breaks. textNextCodepoint() does not move past the
+    // terminator, so `charStart` is it and the next call ends the loop above.
+    if (codepoint == 0 || codepoint == '\n') {
+      *cursor = codepoint == 0 ? charStart : p;
+      *line = trimmed(start, charStart);
+      return true;
+    }
+
+    if (codepoint == ' ') {
+      // Somewhere the line can end, if what comes after it does not fit. A run
+      // of spaces is one such place and not several: the line ends where the
+      // first of them starts. The space's own width is counted because two
+      // words with a space between them are wider than the two words.
+      if (!afterSpace) fitEnd = charStart;
+      afterSpace = true;
+      fitNext = p;
+      width += advanceOf(face, codepoint, size);
+      continue;
+    }
+    afterSpace = false;
+
+    width += advanceOf(face, codepoint, size);
+    if (width <= limit) continue;
+
+    if (fitEnd != nullptr) {
+      *cursor = fitNext;
+      *line = {start, static_cast<size_t>(fitEnd - start)};
+      return true;
+    }
+
+    // A word wider than the whole line. It breaks inside itself, after the
+    // last character that fit, because there is nowhere else to break it and
+    // a line that cannot end is a loop. `charStart == start` is the case where
+    // not even one character fits, which takes a maxWidth narrower than a
+    // glyph -- the character still gets its line, for the same reason.
+    *cursor = charStart == start ? p : charStart;
+    *line = {start, static_cast<size_t>(*cursor - start)};
+    return true;
+  }
 }
 
 }  // namespace
@@ -119,49 +273,63 @@ bool textHasGlyph(const TextFace& face, uint32_t codepoint) {
 
 int32_t textWidth(const TextFace& face, const char* text, uint8_t size) {
   if (text == nullptr) return 0;
-
-  int32_t width = 0;
-  const char* cursor = text;
-  for (uint32_t codepoint = textNextCodepoint(&cursor); codepoint != 0;
-       codepoint = textNextCodepoint(&cursor)) {
-    const Resolved resolved = resolve(face, codepoint);
-    if (resolved.glyph != nullptr) {
-      width += pgm_read_byte(&resolved.glyph->xAdvance);
-    }
-  }
-  return width * size;
+  return widthOf(face, wholeOf(text), size);
 }
 
 int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text,
                  int32_t x, int32_t top, uint8_t size) {
   if (text == nullptr) return x;
 
-  const int32_t baseline = top + static_cast<int32_t>(face.ascent) * size;
   gfx.setTextSize(size);
+  return drawRun(gfx, face, wholeOf(text), x,
+                 top + static_cast<int32_t>(face.ascent) * size, size);
+}
 
-  const GFXfont* current = nullptr;
+int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size,
+                      int32_t maxWidth) {
+  if (text == nullptr) return 0;
+
+  int32_t lines = 0;
   const char* cursor = text;
-  for (uint32_t codepoint = textNextCodepoint(&cursor); codepoint != 0;
-       codepoint = textNextCodepoint(&cursor)) {
-    const Resolved resolved = resolve(face, codepoint);
-    if (resolved.glyph == nullptr) continue;
+  Run line = {nullptr, 0};
+  while (nextLine(face, &cursor, size, maxWidth, 0, &line)) ++lines;
+  return lines;
+}
 
-    if (resolved.font != current) {
-      // setFreeFont() walks the whole range to measure it, so it is called
-      // when the script changes rather than once per character. A Russian
-      // sentence changes font at its punctuation and nowhere else.
-      gfx.setFreeFont(resolved.font);
-      current = resolved.font;
+int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text,
+                        int32_t x, int32_t top, uint8_t size, int32_t maxWidth,
+                        int32_t maxLines) {
+  if (text == nullptr) return 0;
+
+  gfx.setTextSize(size);
+  const int32_t baseline = top + static_cast<int32_t>(face.ascent) * size;
+  const int32_t lineHeight = static_cast<int32_t>(face.yAdvance) * size;
+
+  int32_t drawn = 0;
+  const char* cursor = text;
+  Run line = {nullptr, 0};
+  while (drawn < maxLines && nextLine(face, &cursor, size, maxWidth, 0, &line)) {
+    const int32_t y = baseline + drawn * lineHeight;
+    ++drawn;
+
+    if (drawn < maxLines || *pastSpaces(cursor) == '\0') {
+      drawRun(gfx, face, line, x, y, size);
+      continue;
     }
 
-    // The advance is taken from the glyph rather than from drawChar()'s
-    // return, so that this loop and textWidth() cannot disagree about where
-    // the string ends.
-    gfx.drawChar(resolved.codepoint, x, baseline, 1);
-    x += static_cast<int32_t>(pgm_read_byte(&resolved.glyph->xAdvance)) * size;
+    // The last line there is room for, and the string still has something to
+    // say. It is laid out a second time against the room the ellipsis needs,
+    // from where it started -- rather than reserving that room on every line,
+    // which would narrow the ones that did not need it, or appending the
+    // ellipsis to a full line, which would put it past the margin.
+    const char* from = line.text;
+    const int32_t reserve = textWidth(face, kEllipsis, size);
+    nextLine(face, &from, size, maxWidth, reserve, &line);
+    const int32_t end = drawRun(gfx, face, line, x, y, size);
+    drawRun(gfx, face, wholeOf(kEllipsis), end, y, size);
   }
 
-  return x;
+  return drawn;
 }
 
 void textCopy(char* out, size_t size, const char* text) {

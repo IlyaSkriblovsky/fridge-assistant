@@ -10,11 +10,17 @@ c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
 ./preview
 ```
 
-Two PGMs come out: `screens.pgm`, which is the four screens one under the
-other, and `glyphs.pgm`, which is every script the faces carry. `preview`
-also prints the width of each string, the ink bounds of the word band, and
-what `textCopy()` does at each length -- the numbers in
-[S13](../../docs/implementation.md) came from here.
+Two PGMs come out: `screens.pgm`, which is every screen one under the other --
+the two words, three answers of different lengths, and an error -- and
+`glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
+are the band `working()` refreshes and the box an answer is wrapped into;
+nothing drawn should cross one.
+
+`preview` also prints the width of each string, the ink bounds of the word
+band, how many lines each answer wanted against how many it got, how much text
+a full panel holds, and what `textCopy()` does at each length -- the numbers in
+[S13](../../docs/implementation.md) and
+[S14](../../docs/implementation.md#s14----word-wrap) came from here.
 
 ## What it does not prove
 

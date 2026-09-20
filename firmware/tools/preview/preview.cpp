@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "Seeed_GFX.h"
 #include "fonts/fonts.h"
@@ -19,6 +20,7 @@ const TextFace& kAnswerFace = fontFreeSans24;
 const TextFace& kDetailFace = fontFreeSans18;
 constexpr uint8_t kWordSize = 2;
 constexpr int32_t kAnswerMarginX = 40;
+constexpr int32_t kAnswerMarginY = 40;
 constexpr int32_t kWordBandMargin = 12;
 constexpr int32_t kErrorBarHeight = 130;
 constexpr int32_t kErrorDetailGap = 46;
@@ -29,6 +31,41 @@ void drawCentred(Seeed_GFX& gfx, const TextFace& face, const char* text,
   const int32_t height = textBoxHeight(face, size);
   textDraw(gfx, face, text, centreX - width / 2, middleY - height / 2, size);
 }
+
+// StickyScreen::answer()'s placement, repeated for the same reason as the
+// constants above. Returns the lines it drew, and how many the text wanted.
+int32_t drawAnswer(Seeed_GFX& gfx, const char* text, int32_t* wanted) {
+  const int32_t boxWidth = gfx.width() - 2 * kAnswerMarginX;
+  const int32_t boxHeight = gfx.height() - 2 * kAnswerMarginY;
+  const int32_t lineBox = textBoxHeight(kAnswerFace, 1);
+  const int32_t lineHeight = kAnswerFace.yAdvance;
+
+  const int32_t maxLines = (boxHeight - lineBox) / lineHeight + 1;
+  *wanted = textWrapLines(kAnswerFace, text, 1, boxWidth);
+  const int32_t lines = *wanted < maxLines ? *wanted : maxLines;
+  if (lines <= 0) return 0;
+
+  const int32_t top = (gfx.height() - ((lines - 1) * lineHeight + lineBox)) / 2;
+  return textDrawWrapped(gfx, kAnswerFace, text, kAnswerMarginX, top, 1, boxWidth, maxLines);
+}
+
+// The answers the sheet shows: one line, several, and more than the panel has
+// room for.
+const char* const kAnswers[] = {
+    "Молоко стоит до четверга",
+    "Добавила в список: молоко, хлеб и десяток яиц. "
+    "Сметана там уже была, я её не трогала.",
+    "Добавила в список покупок молоко, хлеб, десяток яиц, гречку, "
+    "сливочное масло, твёрдый сыр, зелёный чай, апельсины, картошку, "
+    "морковь, лук, чеснок, подсолнечное масло, рис, макароны, томатную "
+    "пасту, сахар, соль, овсянку, кофе и пачку печенья. Сметана и "
+    "творог на списке уже были, их я трогать не стала, а йогурт ты "
+    "вычеркнул вчера, поэтому его я тоже не возвращала.",
+};
+constexpr int kAnswerCount = sizeof(kAnswers) / sizeof(kAnswers[0]);
+
+// LISTENING, WORKING, one panel per answer, and an error.
+constexpr int kScreenCount = 3 + kAnswerCount;
 
 void save(const Seeed_GFX& gfx, const char* path) {
   FILE* file = fopen(path, "wb");
@@ -50,13 +87,15 @@ void paste(Seeed_GFX& sheet, const Seeed_GFX& panel, int32_t y) {
   }
 }
 
-// The four screens, with the word band drawn as two hairlines so that it can
-// be seen to contain both words.
+// Every screen, one under the other: the two words, the answers of
+// kAnswers, and an error. The word band is drawn as two hairlines so that it
+// can be seen to contain both words, and the answer box as a rectangle so
+// that the wrapping can be seen to stay inside it.
 void screens(Seeed_GFX& sheet) {
   const int32_t band = textBoxHeight(kWordFace, kWordSize) + 2 * kWordBandMargin;
   const int32_t bandY = (480 - band) / 2;
 
-  for (int screen = 0; screen < 4; ++screen) {
+  for (int screen = 0; screen < kScreenCount; ++screen) {
     Seeed_GFX panel(800, 480);
     panel.fillScreen(TFT_WHITE);
     panel.setTextColor(TFT_BLACK);
@@ -71,9 +110,18 @@ void screens(Seeed_GFX& sheet) {
                     400, 240, kWordSize);
         break;
       case 2:
-        textDraw(panel, kAnswerFace, "Молоко стоит до четверга", kAnswerMarginX,
-                 240 - textBoxHeight(kAnswerFace, 1) / 2, 1);
+      case 3:
+      case 4: {
+        panel.fillRect(kAnswerMarginX - 1, kAnswerMarginY - 1,
+                       800 - 2 * kAnswerMarginX + 2, 1, TFT_BLACK);
+        panel.fillRect(kAnswerMarginX - 1, 480 - kAnswerMarginY,
+                       800 - 2 * kAnswerMarginX + 2, 1, TFT_BLACK);
+        int32_t wanted = 0;
+        const int32_t drawn = drawAnswer(panel, kAnswers[screen - 2], &wanted);
+        printf("answer %d: %d lines drawn, %d wanted, %zu bytes\n", screen - 2,
+               (int)drawn, (int)wanted, strlen(kAnswers[screen - 2]));
         break;
+      }
       default: {
         const int32_t barY = (480 - kErrorBarHeight) / 2;
         panel.fillRect(0, barY, 800, kErrorBarHeight, TFT_BLACK);
@@ -146,6 +194,37 @@ void glyphs() {
   save(sheet, "glyphs.pgm");
 }
 
+// How much text a full panel of answer holds, which is what
+// StickyScreen::kMaxTextChars has to clear: a buffer smaller than this would
+// cut an answer the panel had room for, and cut it without the ellipsis that
+// running out of lines puts there.
+//
+// The bound is in bytes and the worst case is the narrowest two-byte
+// character there is, repeated with nothing to break on -- a word wider than
+// the line breaks inside itself, so this really is one line's worth of the
+// narrowest glyph, times the lines.
+void capacity() {
+  const int32_t boxWidth = 800 - 2 * kAnswerMarginX;
+  const int32_t boxHeight = 480 - 2 * kAnswerMarginY;
+  const int32_t maxLines =
+      (boxHeight - textBoxHeight(kAnswerFace, 1)) / kAnswerFace.yAdvance + 1;
+  printf("answer box: %d x %d, %d lines\n", (int)boxWidth, (int)boxHeight, (int)maxLines);
+
+  // The narrowest Cyrillic letter, a realistic sentence, and the widest Latin
+  // one: the first is the bound, the other two say how far from it a real
+  // answer falls.
+  for (const char* unit : {"г", "Молоко стоит до четверга, купи ещё хлеба. ", "W"}) {
+    std::string text;
+    size_t fitted = 0;
+    while (text.size() < 4096) {
+      text += unit;
+      if (textWrapLines(kAnswerFace, text.c_str(), 1, boxWidth) > maxLines) break;
+      fitted = text.size();
+    }
+    printf("  %-8.8s fills the panel at %zu bytes\n", unit, fitted);
+  }
+}
+
 // textCopy() has to cut between characters, whatever the buffer's size lands
 // in the middle of.
 void copying() {
@@ -160,11 +239,12 @@ void copying() {
 }  // namespace
 
 int main() {
-  Seeed_GFX sheet(800, 480 * 4);
+  Seeed_GFX sheet(800, 480 * kScreenCount);
   sheet.fillScreen(TFT_WHITE);
   screens(sheet);
   save(sheet, "screens.pgm");
   glyphs();
+  capacity();
   copying();
   return 0;
 }

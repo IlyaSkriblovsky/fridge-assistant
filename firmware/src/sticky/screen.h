@@ -50,10 +50,14 @@
 //    rather than one per byte: a word in a script we never built has to look
 //    like text that could not be shown, not like a blank screen and not like
 //    garbage.
-//  * **No word wrap** -- D2. A long answer runs off the right edge, which is
-//    accepted while the backend returns a fixed phrase. It is felt harder now
-//    than it was under D1, because a Russian sentence is longer than the
-//    transliteration that used to stand in for it.
+//  * **The answer wraps, into a box with a margin on all four sides.** Lines
+//    are broken by src/text.h and the block of them is centred vertically, so
+//    a one-line answer sits where a one-line answer always sat and a longer
+//    one grows around that. An answer with more in it than the box has lines
+//    for ends in an ellipsis rather than losing its tail quietly; showing the
+//    rest is pagination, which is where D2 goes next. The error screen does
+//    not wrap: its title comes from the vision's error table and its detail is
+//    a status code, and neither has ever been longer than the panel is wide.
 //
 // **listening() and working() are one screen with two words in it**, which is
 // what makes the second a partial refresh rather than a fourth full one. Both
@@ -68,12 +72,25 @@
 // orchestrator's call, and clear() is what it calls.
 class StickyScreen {
  public:
-  // The longest string any screen draws, in bytes. Well past what fits on a
-  // line at the sizes below -- at the answer's 24 pt that is about 45
-  // characters, and Cyrillic costs two bytes each, so this still holds more
-  // than the panel can show -- which means the truncation in textCopy() only
-  // ever loses text that was already off the right edge under D2.
-  static constexpr size_t kMaxTextChars = 128;
+  // The longest string any screen draws, in bytes, and the longest detail
+  // under an error title.
+  //
+  // The answer is what sets the first: it wraps now, so the bound is a whole
+  // panel of text rather than a line of it. Measured on the host in
+  // tools/preview, the panel holds seven lines of 24 pt, and filling all seven
+  // takes 375 bytes of a real Russian sentence or 560 of the narrowest Cyrillic
+  // letter with no spaces to break on. So 640 is past anything the panel can
+  // show, and what textCopy() drops is text textDrawWrapped() would have
+  // dropped as well -- with the difference that running out of lines leaves an
+  // ellipsis to say so. The one string that beats it is a panel of the
+  // narrowest three-byte punctuation, 1260 bytes, and a sentence made of
+  // quotation marks is not an answer.
+  //
+  // The detail is an HTTP status code and has never been anything else, so it
+  // is sized as the short string it is: both buffers are copied onto a task's
+  // stack in Display::post().
+  static constexpr size_t kMaxTextChars = 640;
+  static constexpr size_t kMaxDetailChars = 64;
 
   // Brings the panel up. False is the one display failure the orchestrator
   // cannot draw a message about; the vision's answer to it is to chirp, log and
@@ -106,8 +123,9 @@ class StickyScreen {
   // everything either way -- so the caller logs it and carries on.
   bool working();
 
-  // Working -> answer. Drawn from the left margin so an answer too long to fit
-  // loses its end rather than both ends. Partial, over the whole panel.
+  // Working -> answer. Wrapped into the answer box and centred in it as a
+  // block, left-aligned: a ragged right edge reads as text, and a centred one
+  // reads as a poster. Partial, over the whole panel.
   void answer(const char* text);
 
   // Working -> error. The title is one of the vision's error table; detail is

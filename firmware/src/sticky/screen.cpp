@@ -33,8 +33,13 @@ const TextFace& kDetailFace = fontFreeSans18;
 // other than the face's own size.
 constexpr uint8_t kWordSize = 2;
 
-// The answer starts here and runs off the right edge if it has to -- D2.
+// The answer's margins, and with them the box it is wrapped into: the width
+// is what a line breaks against and the height is how many lines there is
+// room for. Equal on all four sides, because the block is centred inside the
+// box and an answer of one line should sit where the answer of one line used
+// to.
 constexpr int32_t kAnswerMarginX = 40;
+constexpr int32_t kAnswerMarginY = 40;
 
 // Added above and below the face's box to make the band working() refreshes.
 // It buys back the rounding in the centring arithmetic and a few pixels of
@@ -143,8 +148,25 @@ void StickyScreen::answer(const char* text) {
   if (!_ready) return;
 
   startFrame();
-  textDraw(_display, kAnswerFace, text, kAnswerMarginX,
-           _display.height() / 2 - textBoxHeight(kAnswerFace, 1) / 2, 1);
+
+  const int32_t boxWidth = _display.width() - 2 * kAnswerMarginX;
+  const int32_t boxHeight = _display.height() - 2 * kAnswerMarginY;
+  const int32_t lineBox = textBoxHeight(kAnswerFace, 1);
+  const int32_t lineHeight = kAnswerFace.yAdvance;
+
+  // N lines are (N - 1) gaps and one box tall, not N boxes: the last line has
+  // nothing under it to be spaced from.
+  const int32_t maxLines = (boxHeight - lineBox) / lineHeight + 1;
+  const int32_t wanted = textWrapLines(kAnswerFace, text, 1, boxWidth);
+  const int32_t lines = wanted < maxLines ? wanted : maxLines;
+
+  if (lines > 0) {
+    // Centred as a block, so a one-line answer sits where a one-line answer
+    // has always sat and a five-line one grows evenly around it.
+    const int32_t top = (_display.height() - ((lines - 1) * lineHeight + lineBox)) / 2;
+    textDrawWrapped(_display, kAnswerFace, text, kAnswerMarginX, top, 1, boxWidth, maxLines);
+  }
+
   refreshWhole();
 }
 

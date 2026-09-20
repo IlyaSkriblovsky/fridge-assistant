@@ -31,7 +31,8 @@ which means asking.
 | S10 | Display task | The panel off the orchestrator's thread | Done |
 | S11 | Streaming upload | The body going up under the hold | Done |
 | S12 | DNS server | Names looked up past a router that stops answering | Built, not yet run on the device |
-| S13 | Fonts | Cyrillic, Greek and typography on the panel; D1 gone | Built, not yet run on the device |
+| S13 | Fonts | Cyrillic, Greek and typography on the panel; D1 gone | Done |
+| S14 | Word wrap | An answer of several lines, laid out on the panel; half of D2 gone | Done |
 
 ## Why this order
 
@@ -385,7 +386,8 @@ and that is cheap only if nothing else calls the panel directly.
   `NO MEMORY`.
 - **No word wrap** ([D2](deferred.md)). A long answer runs off the right edge
   and that is accepted: the backend returns a fixed phrase, so there is nothing
-  to wrap until there is a model behind it.
+  to wrap until there is a model behind it. *Paid off in
+  [S14](#s14----word-wrap), once there was.*
 
 **Verified by** the user looking at the panel. Worth driving all three screens
 from a temporary `loop()` before the flow exists, since this is the one step
@@ -1858,8 +1860,8 @@ sits at 0x370-0x3FF, immediately before Cyrillic.
 bytes rather than characters, so any non-Latin string measures as empty and
 `drawString()` centres it wrongly; neither is virtual. Measuring and placing
 had to move into the firmware regardless, and once they had, several fonts per
-face cost one comparison per character. The same loop is what [D2](deferred.md)
-needs for word wrap.
+face cost one comparison per character. The same loop is what
+[S14](#s14----word-wrap) went on to break into lines.
 
 **The generator reproduces the bundled headers, nearly.** Regenerating
 0x20-0x7E from the same TTFs at fontconvert's 141 dpi gives a glyph table
@@ -1879,15 +1881,122 @@ property of the face. Checked on the host: with Ё in it, a word's ink reaches
 **Cost.** 44.4 KiB of flash, 1219520 to 1264991 bytes, against 3 MiB of app
 partition. No RAM: the faces are `const` and read from flash in place.
 
-### Still to check on the device
+### Checked on the device
 
-Everything here was verified by compiling `src/text.cpp` and `src/fonts/`
-against a host stub of `Seeed_GFX` and rendering the four screens to an image:
+Everything here was first verified by compiling `src/text.cpp` and `src/fonts/`
+against a host stub of `Seeed_GFX` and rendering the screens to an image:
 placement, script switching mid-string, the `?` fallback, the band, and that
-`textCopy()` cuts between characters. What that cannot show is the glass --
+`textCopy()` cuts between characters. What that could not show was the glass --
 whether 24 pt Cyrillic at 235 dpi is as readable as the Latin was, and whether
 the partial refresh of the word band still lands cleanly now that the band is
 130 px rather than 136.
+
+Both were answered on 2026-09-20, on the run that checked
+[S14](#s14----word-wrap): Cyrillic reads, and the band's partial refresh took
+891 to 893 ms over four consecutive questions with none refused and nothing
+smeared between `LISTENING` and `WORKING`.
+
+---
+
+## S14 -- Word wrap
+
+An answer is laid out as lines now, inside a box with a 40 px margin on all
+four sides, and the block of them is centred in it. An answer with more in it
+than the box has room for is drawn to the last line that fits and that line
+ends in an ellipsis. Half of [D2](deferred.md) is gone; what is left there is
+reaching the rest of a long answer.
+
+### What it turned out to involve
+
+`src/text.h/.cpp`, `src/sticky/screen.*`, the two buffer bounds in
+`src/display.h` and `src/backend.h`, and `tools/preview/`.
+
+**The hard part had been done at [S13](#s13----fonts).** Wrapping needs the
+width of a string one character at a time, and that is exactly what owning the
+layout bought: the loop that picks a font per code point already had the
+advance in its hand. What was left was to decide where to stop.
+
+**Measuring and drawing were made one thing rather than two similar things.**
+`textWidth()` and `textDraw()` had a copy each of the per-character advance;
+now both go through `advanceOf()`, and drawing goes through a `drawRun()` that
+takes a run of bytes rather than a terminated string, because a wrapped line is
+a run of the answer rather than a copy of part of it. A line measured one way
+and drawn another would show up as an ellipsis in the margin.
+
+**Where a line ends**: at the last space that fits, at a newline in the text,
+or -- when a single word is wider than the whole line -- inside the word, after
+the last character that fits. That last case is not only for the 60-character
+German noun: it is what makes the loop terminate at all, since a line that
+cannot end is a line that is laid out forever. The spaces a line breaks at are
+drawn at neither end of it.
+
+**The ellipsis is laid out, not appended.** When the last line the panel has
+room for is not the last line of the answer, that line is laid out a second
+time against a width short by the ellipsis, and the ellipsis is drawn after it.
+Appending to a line that already filled the box would put it past the margin;
+reserving the room on every line would narrow the six that did not need it.
+
+**The block is centred as a block**, so a one-line answer sits exactly where a
+one-line answer sat before this step, and a five-line one grows evenly around
+that point rather than dropping down the panel.
+
+**The buffers grew, and that is the part of this with numbers in it.** Under
+D2 the bound on an answer was a line's worth; now it is a panel's worth, so
+`StickyScreen::kMaxTextChars` went from 128 bytes to 640 and
+`Backend::kMaxAnswerChars` from 256 to 768. Measured on the host in
+`tools/preview`: the box is 720 x 400 and holds seven lines of 24 pt; filling
+all seven takes 375 bytes of a real Russian sentence, or 560 bytes of the
+narrowest Cyrillic letter repeated with no spaces to break on. So 640 is past
+anything the panel can show and what `textCopy()` drops is text the layout
+would have dropped too -- the difference being that running out of lines leaves
+an ellipsis and running out of buffer does not. The one string that beats it is
+a panel of the narrowest three-byte punctuation, 1260 bytes, and a sentence
+made of quotation marks is not an answer.
+
+The backend's bound stays the looser of the two on purpose. Its cut is
+`snprintf()`'s and lands on a byte, so it can halve a character; the screen's
+is `textCopy()` and lands between characters. Keeping the screen's the tighter
+one means the half character never reaches the panel.
+
+The error screen was left alone. Its title comes from the vision's table and
+its detail is an HTTP status code, so the detail got a bound of its own --
+64 bytes -- rather than the answer's, because both are copied onto a task's
+stack in `Display::post()`.
+
+**Cost.** 1120 bytes of flash, 1264995 to 1266115, and 960 bytes of static
+RAM, 55796 to 56756 -- the two buffers that grew, both inside objects that are
+globals in `main.cpp`. The `Slot` the display task takes a copy of is about
+700 bytes instead of 260, on an 8 KB stack that was using 2.0 of it.
+
+### What it measured
+
+The host preview draws the wrapping against the real font data, so the
+breaking, the centring, the ellipsis and the box were checked there first --
+see `tools/preview/README.md` for what that cannot say.
+
+**On the device, 2026-09-20**, four questions in a row, whose answers came to
+2, 2, 2 and 3 lines. The wrapping, the left margin and the block centred in the
+box are right on the glass, and the two numbers the run was for:
+
+- **The answer's partial refresh was 1259 to 1273 ms**, against the 1344 ms the
+  vision quotes for a whole-panel partial. The spread across those four answers
+  is 14 ms and it tracks the ink, so a wrapped answer costs no more to put on
+  the glass than the one-line answer did -- [E8](experiments.md)'s finding that
+  the cost is waveform rather than transfer, arrived at from the other side.
+- **The display task had 5836 to 5868 of its 8192 bytes of stack never used**,
+  where [S10](#s10----display-task) measured 1.8 to 2.0 KB in use before the
+  slot grew. So the extra 450 bytes of slot show up about where they should and
+  the margin is still most of the stack.
+
+**What has not been on the glass is the case with the ellipsis in it.** The
+model is asked for a sentence or two and gives them: the longest of those four
+answers was 151 bytes and three lines, and nothing the assistant says in normal
+use comes near the 375 that fills the panel. So the overflow path -- which is
+both what [D2](deferred.md) is now about and the most ink a partial refresh
+here will ever have to drive -- has run only in the host preview. Provoking it
+on the device needs a backend that answers with something long, which is a URL
+in `src/secrets.h` and a reflash.
+
 
 ---
 
@@ -1906,6 +2015,10 @@ by accident.
 - **Answers run off the right edge.** [D2](deferred.md) stands: the backend
   returns a fixed phrase, so there is nothing to wrap until a model is behind it,
   and the UI/UX pass comes after the prototype works end to end. (S5)
+
+  *Reopened and closed by [S14](#s14----word-wrap), 2026-09-20.* There is a model
+  behind it now, and it answers in sentences. Half of D2 went with it; what is
+  left is the answer too long for a whole panel.
 - **How long the upload takes does not matter yet.** Nothing waits on the
   answer, so the number has nowhere to land until [D4](deferred.md) is being
   weighed for real. (S7)

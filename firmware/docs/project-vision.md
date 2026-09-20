@@ -409,6 +409,14 @@ The faces are GNU FreeFont, the design Seeed_GFX2 already bundles, regenerated
 with those scripts in them by `tools/gfxfont.py`. Layout is the firmware's own,
 in `src/text.h`, which is where both reasons for that are written down.
 
+An answer is a sentence or two rather than a phrase, so it is drawn as lines:
+broken at spaces to fit a box with a margin on all four sides, left-aligned
+because a ragged right edge reads as text where a centred one reads as a
+poster, and centred in the box as a block so that a short answer still sits in
+the middle of the panel. Seven lines of 24 pt is what the box holds. An answer
+longer than that ends in an ellipsis, which says the panel has more to show and
+no way yet to show it -- [D2](deferred.md).
+
 `SmoothFont` was the obvious path and is the wrong one. It loads VLW fonts,
 which carry eight bits of alpha per pixel for anti-aliasing, and the panel is
 one bit: `Panel_EPaper::writePixel` makes every colour but pure black white, so

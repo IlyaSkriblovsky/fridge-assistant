@@ -69,19 +69,23 @@ class Backend {
   };
 
   // The answer is kept in place rather than on the heap, so that nothing
-  // downstream depends on the parser's lifetime. StickyScreen truncates at its
-  // own kMaxTextChars and D2 means anything past the first line is off the
-  // right edge anyway, so this bound is only ever reached by a backend that is
-  // answering with something other than an answer -- it is generous enough that
-  // the log shows more than the panel does.
-  static constexpr size_t kMaxAnswerChars = 256;
+  // downstream depends on the parser's lifetime.
+  //
+  // It has to stay larger than StickyScreen::kMaxTextChars, which is what the
+  // panel can hold: the cut here is snprintf's and lands on a byte, so a
+  // multi-byte character can be halved by it, while the screen's own is
+  // textCopy() and lands between characters. Keeping this the looser of the
+  // two means the screen never sees the half character -- and a backend that
+  // answers with more than a panel of text is answering with something other
+  // than an answer.
+  static constexpr size_t kMaxAnswerChars = 768;
 
   // The base URL plus config::kAudioPath, comfortably.
   static constexpr size_t kMaxUrlChars = 96;
 
   // A reply longer than this is not an answer. Without a ceiling a backend that
   // went wrong could have the device read and parse a megabyte, for a string
-  // the panel cuts at 128 characters. The reply is read into a buffer of this
+  // the panel cuts at kMaxTextChars. The reply is read into a buffer of this
   // size that lives in the object, so there is no allocation to fail.
   static constexpr size_t kMaxReplyBytes = 4096;
 
