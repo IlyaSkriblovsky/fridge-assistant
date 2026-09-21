@@ -30,6 +30,8 @@ for the same reason -- an analysis nobody can repeat is not a measurement.
 | E6 | What is the 3.2 s DHCP exchange made of, and what removes it? | Whether the address is cached in RTC memory or fixed, and how long a question waits for the network | Taken 2026-09-17 | 2.1 s waiting for the OFFER, 1.000 s of ARP check. A cached lease gets the device onto the network in 0.18 s instead of 3.3 s |
 | E7 | What does the upload cost, and where do the extra seconds in it come from? | The working screen at [S8](implementation.md#s8----the-flow) -- settled, a partial refresh -- and [D4](deferred.md) | Taken 2026-09-17 | 128 KB goes up in 660 ms. One ACK in 110 is lost on the way back, and with 5744 bytes in flight there is no later ACK to cover it, so the window stops for a whole retransmission timeout: 1.0-2.5 s, on one upload in four |
 | E8 | What is the 2.4 s of a full refresh made of, and how much of it is paid after the image is drawn? | [D6](deferred.md)'s partial refresh and [D4](deferred.md)'s display task, both of which argue against 2.4 s as if it were one number | Taken 2026-09-17 | The waveform is 1514 ms of a 2115 ms full refresh. 338 ms of every refresh runs with the final image already on the glass; 100 ms of that has been taken off in `src/sticky/epaper.h`, leaving a question 3787 ms of panel instead of 4087 |
+| E9 | What energy does a dashboard cycle use, including the post-answer wait? | Awake wait vs sleep and reconnect; [D11](deferred.md) | Deferred until dashboard works | -- |
+| E10 | Does compressing real dashboard frames improve transfer and energy costs? | Whether compression is needed and which codec; [D10](deferred.md) | Deferred until design is chosen | -- |
 
 ---
 
@@ -1136,3 +1138,23 @@ at all, and never separated from the panel until now.
   the only lever an early `T_visible` would offer is aborting a waveform, which
   costs DC balance and ghosting. The 338 ms after the waveform is the part with
   levers on it, and it has now been measured without anyone looking at a screen.
+
+## E9 -- Dashboard energy (deferred)
+
+Agreed 2026-09-21; not taken and not required before S15. Measure energy from
+battery over a full periodic wake: boot, sensors, association, download, panel
+refresh and return to sleep. Include failed-network attempts as a separate case.
+Compare the ten-second post-answer wait with WiFi retained against sleeping
+for that interval and reconnecting, with otherwise identical dashboard work.
+Use the actual transport; if HTTPS is introduced, include its handshake.
+Record integrated energy, not just latency or a single current reading, before
+changing D11. E5 still owns the board's baseline deep-sleep current.
+
+## E10 -- Dashboard compression (deferred)
+
+Agreed 2026-09-21; no codec selected and no results. After choosing the layout,
+save representative monochrome frames, including sparse and dense content.
+Compare the 48000-byte raw baseline with candidate encodings, then measure
+download plus decode time, peak memory, firmware size and energy on the device.
+Verify exact pixel round trips. Host compression ratios alone do not show an
+energy benefit. Use the findings to decide whether D10 needs changing at all.
