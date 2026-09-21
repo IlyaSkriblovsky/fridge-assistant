@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 recordings/
 .DS_Store
+
+.pytest_cache/
