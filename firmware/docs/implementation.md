@@ -2128,7 +2128,8 @@ leaves equal pairs unchanged, preserving existing dark text; the user confirmed
 the corrected behavior on the device below. This is RAM initialization, not a full
 optical refresh. The ordinary within-question partial path is unchanged.
 
-Added `python3 tools/test_epaper_shadow.py`: a fake controller starts both planes
+Added a host regression (now `test/test_epaper/`, run via PlatformIO):
+a fake controller starts both planes
 with different garbage, then checks both toggle directions, multi-row windows
 at the RAM boundaries and the indicator position, exact old/new polarity,
 equality everywhere outside the window, no activation during priming, and the
@@ -2232,3 +2233,36 @@ git diff --check passes. Inspected the linked experiment disassembly: setup()
 calls the isDown wrapper, the wrapper calls the real method, and poll() still
 calls the real method directly. The device is not currently connected, so
 the corrected timer sequence has not yet been rerun on hardware.
+
+
+## Host unit tests — 2026-09-21
+
+Added a PlatformIO native/Unity environment compiling production text.cpp,
+fonts and recording.cpp. Fourteen tests cover UTF-8 recovery and copy
+boundaries, script support and fallback, wrapping and ellipsis, streaming WAV
+headers, sample publication, capacity, duration, buffer reuse/reallocation,
+allocation failure and cleanup. Graphics reuse the existing preview stub;
+Recording substitutes only the ESP allocator with host malloc/free.
+
+CI runs the native suite and the existing e-paper shadow RAM regression in a
+separate test job. The build job still builds all embedded environments,
+excluding native. Local commands and scope are in test/README.
+
+Validation: all 14 native tests and the shadow RAM regression pass on the
+host; git diff --check passes. Production firmware code is unchanged. No
+hardware tests, flashing, timing validation or complex peripheral mocks were
+added, per the requested scope. This does not establish hardware acceptance.
+
+
+### E-paper regression in the native suite
+
+Moved the Python-generated C++ e-paper regression to test/test_epaper/ and
+Unity. Its fake controller/base-driver headers now live in test/support; the
+allocator is shared with the Recording tests. The six original combinations
+(on/off at the icon and both RAM boundaries) are individually reported test
+cases. Both full RAM planes are checked after the subsequent partial as well
+as the first one. Production driver behavior is unchanged.
+
+Removed the Python runner and its separate CI command. All host checks now run
+with `pio test -e native`; `-f test_epaper` selects the display suite alone.
+Validation: all 20 native tests pass; git diff --check passes. No device needed.

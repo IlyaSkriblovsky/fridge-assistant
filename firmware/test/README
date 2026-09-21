@@ -1,11 +1,32 @@
+Host unit tests
+===============
 
-This directory is intended for PlatformIO Test Runner and project tests.
+From firmware/:
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+    ~/.platformio/penv/bin/pio test -e native
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+Requires a host C++ compiler and PlatformIO. The first run downloads the native
+platform and Unity. No board, Arduino SDK, credentials or serial port is needed.
+The same command runs in the firmware GitHub Actions workflow; embedded
+firmware and experiment builds remain a separate job. To run only the e-paper
+suite, add `-f test_epaper`.
+
+The native environment compiles production text.cpp, generated fonts and
+recording.cpp. test_text uses the existing tools/preview/Seeed_GFX.h framebuffer
+stub. test_recording replaces only esp_heap_caps.h with malloc/free and a switch
+for allocation failure. test_epaper compiles the real sticky/epaper.h driver
+against a small fake controller bus in test/support, sharing the same allocator.
+Those include paths belong only to the native build.
+
+Coverage:
+- UTF-8 decoding/recovery, copy boundaries, glyph support and fallback;
+- wrapping, explicit newlines, narrow boxes, truncation and drawing placement;
+- streaming WAV header bytes, publishing samples, capacity, duration, reuse,
+  reallocation, allocation failure and cleanup;
+- e-paper shadow priming, both RAM planes, polarity, row stride and successive
+  partial updates, in both directions at the icon and the two RAM boundaries.
+
+These tests do not validate the physical display, PSRAM, task scheduling,
+concurrent memory visibility, GPIO, microphone or network. No hardware tests
+or device flashing are part of this suite. Add tests for readily isolated logic;
+do not duplicate production algorithms in test substitutes.

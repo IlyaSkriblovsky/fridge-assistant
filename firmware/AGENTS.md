@@ -69,10 +69,12 @@ A PlatformIO monitor left running in the user's editor holds the port and makes
 uploads fail with "port is busy"; ask the user to close it rather than killing
 their process.
 
-CI (`../.github/workflows/firmware.yml`) builds every `[env:...]` in
+CI (`../.github/workflows/firmware.yml`) builds every embedded `[env:...]` in
 `platformio.ini`, a new rig included, with `src/secrets.example.h` copied in as
 `src/secrets.h`. So every environment has to build without real credentials.
-A green CI only means it builds: nothing runs on hardware there.
+CI also runs all host tests with `pio test -e native`; see `test/README`.
+The native environment
+is excluded from the embedded build job. Nothing runs on hardware in CI.
 
 ## Things that will bite
 
@@ -91,7 +93,7 @@ A green CI only means it builds: nothing runs on hardware there.
   power loss, reconstructing only the icon's old pixels leaves random RAM
   outside it. Seed both full controller planes identically before applying the
   window transition; keep the shadow-prime initialization in `sticky/epaper.h`.
-  `python3 tools/test_epaper_shadow.py` checks the RAM invariant on the host.
+  `pio test -e native -f test_epaper` checks the RAM invariant on the host.
 - **Don't edit `.pio/libdeps/`.** It is wiped by package updates. Library fixes
   belong in `src/` as subclasses, which is what `src/sticky/epaper.h` does.
 - **Never draw text with `drawString()` or measure it with `textWidth()`.**
