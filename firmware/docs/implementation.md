@@ -2215,3 +2215,20 @@ pre-clear, notebook, then idle/sleep at 3959 ms, with no capture or WiFi path.
 The notebook refresh retained valid battery and climate indicators. The user
 subsequently confirmed that everything works correctly on the device; hardware
 acceptance is complete.
+
+
+### E1 firmware timer-wake compatibility
+
+The startup idle check initially bypassed microphone/ready timestamps during
+exp_e1_firmware's unattended timer phase, leaving every timed row excluded
+from its summary. Added an experiment-only linker wrapper for the startup
+StickyButton::isDown() call: cold/timer wakes enter capture, while real button
+wakes retain their physical state. Button polling inside button.cpp is not
+wrapped, so an unattended capture still ends as a discarded tap. No production
+logic or experiment-specific conditional was added to main.cpp.
+
+Validation: reterminal_e1005 and exp_e1_firmware both build successfully;
+git diff --check passes. Inspected the linked experiment disassembly: setup()
+calls the isDown wrapper, the wrapper calls the real method, and poll() still
+calls the real method directly. The device is not currently connected, so
+the corrected timer sequence has not yet been rerun on hardware.
