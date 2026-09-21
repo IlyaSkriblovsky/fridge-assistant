@@ -26,6 +26,8 @@ the hardware traps.
 | `src/fonts/` | The four faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
+| `src/silent_mode.h/.cpp` | NVS sound preference, loaded before buzzer/display work |
+| `src/silent_icon.h` | Reserved top-margin indicator geometry, shared with the preview |
 | `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
 | `src/secrets.h` | WiFi credentials, an optional DNS server, the backend's base URL and token. Gitignored. Template: `src/secrets.example.h` |
 | `src/experiments/` | Measurement rigs, one per experiment, each its own PlatformIO env |
@@ -85,6 +87,11 @@ A green CI only means it builds: nothing runs on hardware there.
   partial refresh. Removing either brings back an inverted or smearing display.
   The third, `sleep()`, drops a `delay(100)` nothing waits on; removing it only
   puts 100 ms back on every screen, measured in [E8](docs/experiments.md).
+- **An SSD1677 RAM window does not limit the optical refresh.** After panel
+  power loss, reconstructing only the icon's old pixels leaves random RAM
+  outside it. Seed both full controller planes identically before applying the
+  window transition; keep the shadow-prime initialization in `sticky/epaper.h`.
+  `python3 tools/test_epaper_shadow.py` checks the RAM invariant on the host.
 - **Don't edit `.pio/libdeps/`.** It is wiped by package updates. Library fixes
   belong in `src/` as subclasses, which is what `src/sticky/epaper.h` does.
 - **Never draw text with `drawString()` or measure it with `textWidth()`.**

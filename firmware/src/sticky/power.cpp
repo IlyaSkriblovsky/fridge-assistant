@@ -5,8 +5,10 @@
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include "config.h"
 
 namespace {
+bool upWake = false;
 
 // Peripheral enables parked low for the duration of the sleep, following
 // Seeed's own firmware. SD_EN is deliberately absent: sources disagree on
@@ -41,6 +43,21 @@ void stickyPower::holdLatch() {
   }
 }
 
+void stickyPower::enableUpWake() {
+  upWake = true;
+  rtc_gpio_deinit(static_cast<gpio_num_t>(kPinUpButton));
+  pinMode(kPinUpButton, INPUT_PULLUP);
+}
+
+void stickyPower::waitForWakeButtonsReleased() {
+  uint32_t since = millis();
+  while (millis() - since < config::kButtonDebounceMs) {
+    if (digitalRead(kPinAiButton) == LOW ||
+        (upWake && digitalRead(kPinUpButton) == LOW)) since = millis();
+    delay(5);
+  }
+}
+
 void stickyPower::prepareDeepSleep(uint64_t timerWakeUs) {
   for (gpio_num_t pin : kParkLow) {
     gpio_set_direction(pin, GPIO_MODE_OUTPUT);
@@ -55,7 +72,13 @@ void stickyPower::prepareDeepSleep(uint64_t timerWakeUs) {
   rtc_gpio_pullup_en(button);
   rtc_gpio_pulldown_dis(button);
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
-  esp_sleep_enable_ext1_wakeup_io(BIT64(kPinAiButton), ESP_EXT1_WAKEUP_ANY_LOW);
+  uint64_t mask = BIT64(kPinAiButton);
+  if (upWake) {
+    rtc_gpio_pullup_en(static_cast<gpio_num_t>(kPinUpButton));
+    rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(kPinUpButton));
+    mask |= BIT64(kPinUpButton);
+  }
+  esp_sleep_enable_ext1_wakeup_io(mask, ESP_EXT1_WAKEUP_ANY_LOW);
 
   if (timerWakeUs > 0) {
     esp_sleep_enable_timer_wakeup(timerWakeUs);

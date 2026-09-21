@@ -1,6 +1,7 @@
 #include "sticky/buzzer.h"
 
 #include <Arduino.h>
+#include "silent_mode.h"
 
 namespace {
 
@@ -43,7 +44,7 @@ void park() {
 }  // namespace
 
 void stickyBuzzer::play(const Note* notes, size_t count) {
-  if (notes == nullptr || count == 0) return;
+  if (silentMode::enabled() || notes == nullptr || count == 0) return;
 
   // Attached once for the whole pattern; re-attaching between notes would put a
   // pad glitch into every gap. The attach frequency is irrelevant -- the first

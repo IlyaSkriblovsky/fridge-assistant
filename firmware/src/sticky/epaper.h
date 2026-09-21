@@ -3,6 +3,7 @@
 #include <Seeed_GFX.h>
 #include <esp_heap_caps.h>
 
+#include <initializer_list>
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,6 +47,11 @@
 //    0x26 ahead of the next partial update. The shadow is kept in controller
 //    storage order -- already mirrored and row-reversed exactly as the panel
 //    handed the bytes over -- so it stays correct whatever the window is.
+//    After power loss, a reconstructed window alone is insufficient: 0x44/45
+//    constrain RAM writes, not the display scan. Shadow priming therefore also
+//    arms identical full-plane RAM initialization before the next partial. Only
+//    the requested window then gets differing old/new data. See the silent-mode
+//    hardware feedback in docs/implementation.md and tools/test_epaper_shadow.py.
 //
 // 3. The hundred milliseconds after the controller is already asleep.
 //    Driver_SSD1677::sleep() writes 0x10/0x01 and then delay(100), and
@@ -98,7 +104,38 @@ public:
         pushInvertedRows(0x26, data, len, len, 1);
     }
 
+    // Feed a reconstructed window through the panel's normal transforms,
+    // recording its bytes without sending an image or triggering a waveform.
+    // Register setup/sleep still run; endShadowPrime() restores normal updates.
+    bool beginShadowPrime() {
+        if (!ensureShadow()) return false;
+        _primeShadow = true;
+        return true;
+    }
+    void endShadowPrime() {
+        _primeShadow = false;
+        _seedController = true;
+    }
+
+    void updatePartial() override {
+        if (!_primeShadow) Driver_SSD1677::updatePartial();
+    }
+
     void pushNewColors(const uint8_t* data, size_t len) override {
+        if (_primeShadow) {
+            recordDisplayed(data, len);
+            return;
+        }
+        if (_partial && _seedController) {
+            // The address window limits RAM writes, not the optical scan.
+            // Panel power was lost in deep sleep: RAM outside the reconstructed
+            // window is undefined. Give BOTH planes the same baseline before
+            // installing the changed window. Equal pairs outside it request no
+            // transition in the panel's differential waveform, even though the
+            // baseline there is not a copy of the image retained on the glass.
+            seedControllerPlanes();
+            _seedController = false;
+        }
         if (_partial) pushShadowAsPrevious(len);
         pushInvertedRows(0x24, data, len, len, 1);
         recordDisplayed(data, len);
@@ -113,6 +150,18 @@ public:
     }
 
 private:
+    void seedControllerPlanes() {
+        // Call the base method so the bookkeeping still describes the small
+        // window. Reset the RAM counters separately for each full-plane write,
+        // then restore the window/counters before the normal old/new upload.
+        const size_t bytes = static_cast<size_t>(_nativeStride) * _nativeRows;
+        for (uint8_t command : {uint8_t(0x26), uint8_t(0x24)}) {
+            Driver_SSD1677::setAddrWindow(0, 0, _nativeStride * 8 - 1, _nativeRows - 1);
+            pushInvertedRows(command, _shadow, bytes, bytes, 1);
+        }
+        Driver_SSD1677::setAddrWindow(_winX, _winY, _winX + _winW - 1, _winY + _winH - 1);
+    }
+
     void setFullWindow() {
         _winX = 0;
         _winY = 0;
@@ -192,6 +241,8 @@ private:
 
     uint8_t* _shadow = nullptr;
     bool _partial = false;
+    bool _primeShadow = false;
+    bool _seedController = false;
     uint16_t _winX = 0, _winY = 0, _winW = 0, _winH = 0;
 };
 

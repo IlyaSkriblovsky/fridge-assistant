@@ -64,6 +64,8 @@ void Display::clear() {
 
 void Display::listening() { post(Screen::Listening, nullptr, nullptr); }
 
+void Display::silentIndicator() { post(Screen::Silent, nullptr, nullptr); }
+
 void Display::working() { post(Screen::Working, nullptr, nullptr); }
 
 void Display::answer(const char* text) { post(Screen::Answer, text, nullptr); }
@@ -147,7 +149,7 @@ void Display::draw(const Slot& slot) {
   // Working updates only the middle strip and retains Listening's indicator.
   // Read on this task, after boot, without delaying capture or the answer chirp.
   if (slot.screen == Screen::Listening || slot.screen == Screen::Answer ||
-      slot.screen == Screen::Error) {
+      slot.screen == Screen::Error || slot.screen == Screen::Silent) {
     record.batteryPercent = stickyBattery::readPercent();
     _screen.setBatteryPercent(record.batteryPercent);
   }
@@ -174,6 +176,9 @@ void Display::draw(const Slot& slot) {
     case Screen::Error:
       _screen.error(slot.text, slot.detail);
       refused = !_screen.lastWasPartial() && _screen.lastError()[0] != '\0';
+      break;
+    case Screen::Silent:
+      refused = !_screen.silentIndicator();
       break;
     case Screen::Count:
       break;

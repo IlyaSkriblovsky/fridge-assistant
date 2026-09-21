@@ -2054,3 +2054,95 @@ on the device. Reduced its percentage label from FreeSans 18 pt to 12 pt on
 request, keeping the icon geometry. Added a generated 12 pt face and regenerated
 the existing faces together. The updated firmware was built and flashed; the
 user confirmed that the smaller label looks better and approved the final layout.
+
+## Silent mode — 2026-09-21
+
+For evening development, Up (GPIO5, next to AI) wakes the device and toggles a
+persistent silent flag. NVS/Preferences stores it across deep sleep and complete
+power loss; write only on a change. Default is sound enabled. Load before any
+buzzer call; mute every pattern, including errors. Toggling itself never chirps.
+The Up-only wake path starts neither microphone nor WiFi. Up is ignored during
+an ordinary question; simultaneous AI/Up wake gives Up priority. Before sleep,
+require both wake buttons to be stably released, without autorepeat.
+
+Reserve a white rectangle in the top margin centred at x=200 (25% of 800).
+Draw a crossed-out speaker only when silent, on every normal screen. Up updates
+only that rectangle and preserves the last answer. Reconstruct its previous
+pixels from the last successfully displayed flag, then send old/new planes for
+a partial refresh. No full-screen snapshot is needed. Track display validity
+in RTC memory; cold boot, failed or interrupted refresh makes it unknown.
+Unknown state requires a full reconciliation (a cleared screen with indicators
+on the toggle path); normal cold startup already clears before Listening.
+Wait for refresh completion and stable release before deep sleep.
+
+Hardware acceptance: both toggle directions, holding/bouncing Up, consecutive
+toggles without an AI cycle, unchanged answer outside the indicator, no sounds
+including errors, AI cycle while muted, Up ignored during a question, persistence
+through power loss, and recovery after an interrupted refresh. Icon placement
+and partial-refresh quality require the user's visual check. Without a ready
+chirp, the user accepts a short pause before speaking. No hardware timing is
+assumed. The feature's long-term role can be reconsidered after development.
+
+Implementation follows the plan. `silent_mode` owns the NVS preference; the
+buzzer checks it centrally. The normal startup reads it before microphone and
+error paths. A failed preference open mutes conservatively; a failed write
+leaves the current value unchanged and is logged. Up wake is enabled only by
+the main firmware so the measurement rigs keep their existing wake sources.
+
+The screen retains validity and the last displayed flag in RTC memory. A
+shadow-priming pass runs the library's own coordinate and mirror transformations
+but suppresses image transfer and the refresh waveform; the real partial then
+sends both planes. It does not mark the rest of the screen as reconstructed.
+The icon's shared drawing code is included in the host preview.
+
+Validation so far: main firmware builds; host preview inspected beside the
+battery and seven-line answer. A temporary host harness against the actual
+`Driver_SSD1677_Sticky` header confirmed that priming sends no image and triggers
+no waveform, and that the old/new inverted planes and next shadow match across
+a multi-row window. This does not prove physical partial-refresh quality.
+Hardware acceptance was pending at this stage; see the confirmation below.
+
+All six PlatformIO environments built successfully: reterminal_e1005, exp_e1,
+exp_e1_firmware, exp_e6, exp_e7 and exp_e8. The main firmware was then rebuilt
+and uploaded to `/dev/cu.usbmodem5C843360331`; esptool verified the flash hash
+and reset the board. A subsequent 12-second Serial1 read returned no bytes, so
+it provides no runtime confirmation. User-operated Up/AI tests and visual
+acceptance were still pending at this stage.
+
+### First hardware feedback and controller-RAM fix
+
+The user confirmed Up toggles the mode/indicator and suppresses the buzzer.
+However, the first implementation corrupted the rest of the screen with noise
+while updating the icon cleanly (photo dated 2026-09-21 13:45:03). The earlier
+host harness verified only the bytes inside the window; it did not model the
+uninitialized RAM elsewhere after EPD_EN was cut during deep sleep.
+
+SSD1677 RAM X/Y windows (0x44/0x45) limit writes, not the display scan; see the
+[controller datasheet, sections 8.3–8.4](https://cursedhardware.github.io/epd-driver-ic/SSD1677.pdf).
+After shadow priming, the first real partial now seeds both entire controller
+planes from the same reconstructed shadow, without a display activation.
+Outside the icon both planes contain identical white bits; inside, the normal
+old/new upload installs the intended transition. This removes random RAM
+transitions without storing the last answer. The panel's differential waveform
+leaves equal pairs unchanged, preserving existing dark text; the user confirmed
+the corrected behavior on the device below. This is RAM initialization, not a full
+optical refresh. The ordinary within-question partial path is unchanged.
+
+Added `python3 tools/test_epaper_shadow.py`: a fake controller starts both planes
+with different garbage, then checks both toggle directions, multi-row windows
+at the RAM boundaries and the indicator position, exact old/new polarity,
+equality everywhere outside the window, no activation during priming, and the
+next partial's shadow. The host regression passes. Physical acceptance of this
+fix is recorded below.
+
+The controller-RAM fix built successfully in all six environments and was
+uploaded to the connected E1005 with flash hash verification. Test by obtaining
+a fresh AI answer (full Listening refresh removes prior corruption), then
+repeatedly toggling Up in both directions. Confirm that dark answer text and
+the battery indicator stay unchanged, not merely that the noise disappears.
+The user subsequently confirmed that everything works on the device after this
+fix (2026-09-21). Silent-mode switching, buzzer suppression and preservation of
+the surrounding screen during indicator updates are accepted. This completes
+the feature's normal-use hardware verification. Power-loss persistence and
+interrupted-refresh recovery are implemented but were not separately reported
+as tested.

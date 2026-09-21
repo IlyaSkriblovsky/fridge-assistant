@@ -13,7 +13,8 @@ It is a personal device, built for one user, powered by battery.
 
 ## Interaction flow
 
-1. **Asleep.** Deep sleep, woken by the AI button (GPIO4, ext1, any-low).
+1. **Asleep.** Deep sleep, woken by AI (GPIO4) or Up (GPIO5), ext1 any-low.
+   Up takes the silent-mode path described below.
 2. **Press.** Wake and hold the power latch.
 3. **Record.** Power the microphone, wait out its settle window, then start
    capturing 16 kHz mono PCM into a linear buffer in PSRAM -- and only then
@@ -623,3 +624,24 @@ finished:
   reacts to a long hold in hardware.
 - **[implementation.md](implementation.md)** -- the order the firmware is being
   built in, and what each step turned out to involve.
+
+## Silent mode
+
+Up (GPIO5) toggles silent mode when it wakes the device. It suppresses every
+buzzer pattern, including errors, and is retained in NVS across power loss.
+Toggling never sounds, starts no recording or network request, updates a
+crossed-out speaker near x=200 in the top margin, and returns to sleep after
+stable button release. The indicator is absent when sound is enabled. Up is
+ignored during a question; if both buttons wake the device, Up takes priority.
+
+The indicator owns a separate white rectangle, so its old pixels can be
+reconstructed for a partial refresh after deep sleep without knowing the answer
+still on the glass. The RAM address window only limits writes: after panel
+power loss, both full controller planes must first be initialized identically,
+then the indicator window receives its old/new transition. This prevents random
+transitions outside the window without storing the answer. Cold or interrupted
+updates need full reconciliation.
+The usual full Listening refresh still clears accumulated ghosting. Silent
+mode intentionally removes the prompt to begin speaking; the user allows a
+short pause after pressing AI. Implementation and hardware acceptance are in
+[implementation.md](implementation.md#silent-mode--2026-09-21).

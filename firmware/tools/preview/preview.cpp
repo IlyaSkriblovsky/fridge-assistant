@@ -1,3 +1,4 @@
+#include "silent_icon.h"
 // Draws the screens and a glyph chart on the host. See README.md.
 //
 // The placement below is src/sticky/screen.cpp's, repeated rather than
@@ -117,6 +118,7 @@ void screens(Seeed_GFX& sheet) {
     Seeed_GFX panel(800, 480);
     panel.fillScreen(TFT_WHITE);
     drawBattery(panel, screen == 0 ? 100 : screen == 1 ? 100 : screen == 2 ? 50 : screen == 3 ? 1 : screen == 4 ? 0 : -1);
+    silentIcon::draw(panel, screen % 2 == 0);
     panel.setTextColor(TFT_BLACK);
     panel.setTextSize(1);
 
@@ -146,7 +148,8 @@ void screens(Seeed_GFX& sheet) {
         panel.fillRect(0, barY, 800, kErrorBarHeight, TFT_BLACK);
         panel.setTextColor(TFT_WHITE);
         drawCentred(panel, kWordFace, "NO SERVER", 400, barY + kErrorBarHeight / 2, 1);
-        panel.setTextColor(TFT_BLACK);
+        silentIcon::draw(panel, screen % 2 == 0);
+    panel.setTextColor(TFT_BLACK);
         const char* detail = "HTTP 503";
         textDraw(panel, kDetailFace, detail,
                  (800 - textWidth(kDetailFace, detail, 1)) / 2,

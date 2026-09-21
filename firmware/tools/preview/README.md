@@ -34,3 +34,6 @@ whether a partial refresh of the word band lands cleanly, ghosting. **A step
 is still done when it has run on the device.**
 
 Nothing in here is built by PlatformIO or by CI; it is not under `src/`.
+
+Alternating screens show the silent-mode indicator from `src/silent_icon.h`,
+so its actual drawing code is checked beside the battery and answer text.

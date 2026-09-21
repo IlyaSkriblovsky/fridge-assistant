@@ -51,6 +51,7 @@
 #include "capture.h"
 #include "display.h"
 #include "recording.h"
+#include "silent_mode.h"
 #include "wifi_link.h"
 
 namespace {
@@ -63,11 +64,6 @@ constexpr int kPinLogTx = 43;
 // how late this thread can be to a release, and what a chunk of the body
 // carries: whatever the capture task committed in one pass, a 16 ms read or two.
 constexpr uint32_t kPollMs = 10;
-
-// A press held through the log would wake the board again the moment it goes to
-// sleep, since ext1 wakes on the level rather than on an edge. Only the 30 s
-// recording cap can reach the exit with the button still down.
-constexpr uint32_t kReleaseWaitMs = 30000;
 
 // How long finish() gives the capture task to notice an abort before it stops
 // waiting. Bounded rather than indefinite for one case: a start() that created
@@ -273,11 +269,7 @@ void logTiming(Outcome outcome, bool panelIdle) {
 }
 
 void waitForRelease() {
-  if (!button.isDown()) return;
-
-  const int64_t deadlineUs = esp_timer_get_time() + kReleaseWaitMs * 1000LL;
-  Serial1.println("  waiting for the button to come back up");
-  while (button.isDown() && esp_timer_get_time() < deadlineUs) delay(5);
+  stickyPower::waitForWakeButtonsReleased();
 }
 
 // The one exit. Called straight after whichever screen was posted, so
@@ -582,11 +574,36 @@ void setup() {
 
   // First thing on boot -- everything below depends on the board staying alive.
   stickyPower::holdLatch();
+  stickyPower::enableUpWake();
   button.begin(g_entryUs);  // takes GPIO4 back from the RTC pad and pulls it up
 
   // No settling delay after it: nothing waits on one, and it would come
   // straight off the wake-to-chirp time.
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
+
+  const bool preferenceLoaded = silentMode::load();
+  if (!preferenceLoaded) Serial1.println("  sound preference unreadable; muted");
+  const bool upWake = stickyPower::wokeFromDeepSleep() &&
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
+      (esp_sleep_get_ext1_wakeup_status() & (1ULL << stickyPower::kPinUpButton));
+  if (upWake) {
+    if (!preferenceLoaded || !silentMode::toggle()) {
+      Serial1.println("  silent mode could not be saved; unchanged");
+    }
+    Serial1.printf("  silent mode: %s\n", silentMode::enabled() ? "on" : "off");
+    if (startDisplay()) {
+      display.silentIndicator();
+      display.waitIdle(UINT32_MAX);
+      logScreen("silent indicator", Display::Screen::Silent);
+      const auto& result = display.record(Display::Screen::Silent);
+      if (result.error[0]) Serial1.printf("  indicator: %s\n", result.error);
+    } else {
+      Serial1.printf("  panel: %s\n", display.lastError());
+    }
+    waitForRelease();
+    Serial1.flush();
+    stickyPower::deepSleep();
+  }
 
   Serial1.println();
   Serial1.printf("question -- wake %s, reset %s\n", stickyPower::wakeupCauseName(),

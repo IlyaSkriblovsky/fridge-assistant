@@ -123,6 +123,9 @@ class StickyScreen {
   // everything either way -- so the caller logs it and carries on.
   bool working();
 
+  // Standalone Up wake; reconstruct only the indicator rectangle.
+  bool silentIndicator();
+
   // Working -> answer. Wrapped into the answer box and centred in it as a
   // block, left-aligned: a ragged right edge reads as text, and a centred one
   // reads as a poster. Partial, over the whole panel.
@@ -148,6 +151,8 @@ class StickyScreen {
   // rather than assumed, so no screen can inherit the last one's colour.
   void startFrame();
   void drawBattery();
+  void drawSilent(bool enabled);
+  void rememberIndicator();
 
   // Draws `text` with its box centred on the point, which is the placement
   // MC_DATUM used to give. Done here rather than through a datum because
