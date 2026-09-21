@@ -13,6 +13,11 @@ It is a personal device, built for one user, powered by battery.
 
 ## Interaction flow
 
+On startup without AI held, show a neutral notebook and return to sleep without
+starting the microphone or WiFi. An AI wake already released at setup takes
+the same path. A discarded short press also leaves the notebook on screen;
+a successful question keeps its server answer. All header indicators remain.
+
 1. **Asleep.** Deep sleep, woken by AI (GPIO4) or Up (GPIO5), ext1 any-low.
    Up takes the silent-mode path described below.
 2. **Press.** Wake and hold the power latch.
@@ -358,7 +363,8 @@ The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous
 answer disappears as soon as a new question starts.
 
-**That is likely to change, and to an idle screen.** The intent is that some
+**A post-answer idle screen remains deferred.** The notebook currently appears
+only on startup without a press and after a discarded tap. An earlier idea was that some
 seconds after the answer the device draws a screen of its own and only then
 sleeps, so what lives on the glass between questions is that rather than the
 last answer. It belongs to the UI/UX pass and is not decided here. Two things
@@ -503,7 +509,7 @@ chirps, logs to Serial1 and sleeps.
 Two cases are not errors:
 
 - **Press shorter than `kButtonMinHoldMs`.** An accidental tap. Nothing is sent
-  and nothing is shown -- the device goes straight back to sleep.
+  and the neutral notebook replaces LISTENING before the device sleeps.
 - **Recording reached the 30 s cap.** Capture stops and whatever was recorded is
   sent as a normal question.
 

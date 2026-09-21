@@ -62,7 +62,7 @@ class Display {
   static constexpr uint32_t kStackBytes = 8192;
 
   // Every screen, and the pre-clear -- which is the record's index as well.
-  enum class Screen : uint8_t { Clear, Listening, Working, Answer, Error, Silent, Count };
+  enum class Screen : uint8_t { Clear, Idle, Listening, Working, Answer, Error, Silent, Count };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
@@ -102,6 +102,7 @@ class Display {
   // clear() is the cold-start pre-clear and is never superseded: it runs ahead
   // of whatever is posted next. See StickyScreen::clear().
   void clear();
+  void idle();
   void listening();
   void working();
   void silentIndicator();

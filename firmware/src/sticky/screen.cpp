@@ -4,6 +4,7 @@
 #include <esp_attr.h>
 #include "silent_mode.h"
 #include "silent_icon.h"
+#include "notebook_icon.h"
 #include "sticky/power.h"
 
 #include "fonts/fonts.h"
@@ -207,6 +208,13 @@ void StickyScreen::refreshWhole() {
 void StickyScreen::wordBand(int32_t& y, int32_t& height) {
   height = textBoxHeight(kWordFace, kWordSize) + 2 * kWordBandMargin;
   y = (_display.height() - height) / 2;
+}
+
+void StickyScreen::idle() {
+  if (!_ready) return;
+  startFrame();
+  notebookIcon::draw(_display);
+  refreshWhole();
 }
 
 void StickyScreen::listening() {

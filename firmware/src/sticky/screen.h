@@ -9,7 +9,7 @@
 
 #include "text.h"
 
-// The four screens the device draws, and the only place the panel is touched.
+// The screens the device draws, and the only place the panel is touched.
 //
 // Its one caller is Display, in src/display.h, which owns the only instance and
 // draws it on a task of its own. Everything below runs on that task and blocks
@@ -112,6 +112,9 @@ class StickyScreen {
   // Asleep -> Listening. One word, as large as the panel takes, because it is
   // read from wherever the user is talking rather than up close.
   void listening();
+
+  // Neutral notebook for startup without a press and discarded taps.
+  void idle();
 
   // Listening -> working. The vision's step 6: the button is up, the question
   // is on its way, and the panel would otherwise still read LISTENING until the

@@ -2193,3 +2193,42 @@ main firmware to `/dev/cu.usbmodem5C843360331` with flash hash verification.
 The user confirmed that the revised typography looks correct on the device.
 Display behavior and typography are accepted; sensor accuracy comparison
 against a reference remains pending longer-term observations.
+
+
+## Neutral notebook screen — 2026-09-21
+
+Startup without AI held and AI wakes released before setup now show a notebook
+without starting capture, WiFi or the ready chirp. A tap discarded after capture
+posts the same screen before finish() drains the display queue. Successful
+questions retain the server answer. The normal battery, climate and silent-mode
+header remains. Idle uses the existing whole-panel refresh path: full if no
+frame has run this boot, partial after Listening or the cold-start pre-clear.
+The notebook geometry is shared with the host preview in notebook_icon.h.
+
+Host preview inspected: the notebook fits centrally and clears the header.
+The user confirmed that the updated behavior works correctly on the device.
+
+All six PlatformIO environments built successfully; git diff --check passed.
+Uploaded reterminal_e1005 to /dev/cu.usbmodem5C843360331 with flash hash
+verification. Serial cold-start check (POWERON, no button held) reports
+pre-clear, notebook, then idle/sleep at 3959 ms, with no capture or WiFi path.
+The notebook refresh retained valid battery and climate indicators. The user
+subsequently confirmed that everything works correctly on the device; hardware
+acceptance is complete.
+
+
+### E1 firmware timer-wake compatibility
+
+The startup idle check initially bypassed microphone/ready timestamps during
+exp_e1_firmware's unattended timer phase, leaving every timed row excluded
+from its summary. Added an experiment-only linker wrapper for the startup
+StickyButton::isDown() call: cold/timer wakes enter capture, while real button
+wakes retain their physical state. Button polling inside button.cpp is not
+wrapped, so an unattended capture still ends as a discarded tap. No production
+logic or experiment-specific conditional was added to main.cpp.
+
+Validation: reterminal_e1005 and exp_e1_firmware both build successfully;
+git diff --check passes. Inspected the linked experiment disassembly: setup()
+calls the isDown wrapper, the wrapper calls the real method, and poll() still
+calls the real method directly. The device is not currently connected, so
+the corrected timer sequence has not yet been rerun on hardware.

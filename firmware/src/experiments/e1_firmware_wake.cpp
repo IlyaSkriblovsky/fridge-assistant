@@ -3,7 +3,7 @@
 //
 //     ~/.platformio/penv/bin/pio run -e exp_e1_firmware -t upload --upload-port <port>
 //
-// **This rig does not replace main.cpp. It is main.cpp**, with five of its calls
+// **This rig does not replace main.cpp. It is main.cpp**, with six of its calls
 // wrapped at link time. E1's own rig swaps the firmware's setup() for one of its
 // own, which is the right instrument for the microphone's settle curve and the
 // wrong one for the boot: the boot is the image, and the one part of the image a
@@ -17,6 +17,7 @@
 //   setup()                   the RTC counter and the alarm that woke the board,
 //                             before the firmware's first line
 //   stickyPower::holdLatch()  a timestamp as it returns
+//   StickyButton::isDown()   enter capture on cold/timer wakes without a press
 //   StickyMic::begin()        one on either side
 //   stickyBuzzer::ready()     one as it starts -- the user is told to talk here
 //   stickyPower::deepSleep()  the row goes out, and in the timer phase the sleep
@@ -32,9 +33,10 @@
 //
 // Two phases, as in E1's rig. First kTimerCycles timer wakes, the only kind with
 // a known deadline and so the only kind with a boot number. A timer wake is the
-// firmware with nobody holding the button, which it already knows how to
-// handle: the press is a tap and the question is discarded, with the association
-// and the Listening screen on the way exactly as for any press. So every row is
+// firmware with nobody holding the button. The isDown() wrapper bypasses only
+// the startup idle check on cold/timer wakes. poll() calls isDown() within
+// button.cpp, so the linker leaves it untouched: capture sees the real released
+// button and discards the tap, without opening a backend request. So every row is
 // a whole run of the firmware from the wake to the sleep, at the price of a full
 // refresh per cycle. Then the AI button, where every row is a real question and
 // the boot is a dash.
@@ -53,6 +55,7 @@
 #include <soc/rtc_cntl_reg.h>
 #include <soc/soc.h>
 
+#include "sticky/button.h"
 #include "sticky/mic.h"
 #include "sticky/power.h"
 
@@ -64,6 +67,8 @@ void __real__Z5setupv();
 void __wrap__Z5setupv();
 void __real__ZN11stickyPower9holdLatchEv();
 void __wrap__ZN11stickyPower9holdLatchEv();
+bool __real__ZNK12StickyButton6isDownEv(const StickyButton* self);
+bool __wrap__ZNK12StickyButton6isDownEv(const StickyButton* self);
 bool __real__ZN9StickyMic5beginEmm(StickyMic* self, uint32_t sampleRate, uint32_t settleMs);
 bool __wrap__ZN9StickyMic5beginEmm(StickyMic* self, uint32_t sampleRate, uint32_t settleMs);
 void __real__ZN12stickyBuzzer5readyEv();
@@ -350,6 +355,13 @@ void __wrap__Z5setupv() {
 void __wrap__ZN11stickyPower9holdLatchEv() {
   __real__ZN11stickyPower9holdLatchEv();
   if (g_latchUs == 0) g_latchUs = esp_timer_get_time();
+}
+
+bool __wrap__ZNK12StickyButton6isDownEv(const StickyButton* self) {
+  // Only main.cpp's startup check crosses the object-file boundary. Leave
+  // real button wakes unchanged, including taps released before setup.
+  const bool down = __real__ZNK12StickyButton6isDownEv(self);
+  return down || g_newSession || g_row.wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 }
 
 bool __wrap__ZN9StickyMic5beginEmm(StickyMic* self, uint32_t sampleRate, uint32_t settleMs) {
