@@ -33,6 +33,7 @@ which means asking.
 | S12 | DNS server | Names looked up past a router that stops answering | Built, not yet run on the device |
 | S13 | Fonts | Cyrillic, Greek and typography on the panel; D1 gone | Done |
 | S14 | Word wrap | An answer of several lines, laid out on the panel; half of D2 gone | Done |
+| S15 | Idle dashboard | Backend frame, telemetry, post-answer wait and scheduled refresh | Planned, not implemented |
 
 ## Why this order
 
@@ -2266,3 +2267,52 @@ as the first one. Production driver behavior is unchanged.
 Removed the Python runner and its separate CI command. All host checks now run
 with `pio test -e native`; `-f test_epaper` selects the display suite alone.
 Validation: all 20 native tests pass; git diff --check passes. No device needed.
+
+
+## S15 -- Idle dashboard (planned)
+
+**Agreed 2026-09-21; no implementation or hardware acceptance yet.**
+The shared scenario is in
+[idle-screen.md](../../server/docs/use-cases/idle-screen.md); the wire format
+and scheduling semantics are in
+[device-contract.md](../../server/docs/device-contract.md#дашборд-план).
+The device decisions are in [project-vision.md](project-vision.md#idle-dashboard).
+
+### Build order
+
+1. Add the authenticated dashboard endpoint on the backend with a diagnostic
+   uncompressed frame and `Next-Update-After`. Establish bit order, polarity,
+   orientation and telemetry using the shared contract before choosing widgets.
+2. Add bounded frame reception and validation, a sensor snapshot from the
+   existing I2C owner, and a full-frame operation on the display task. Keep the
+   existing voice upload and text response intact.
+3. Dispatch cold, timer, AI and Up wakes; preserve the deadline through sleep
+   and Up-only wakes. After a voice result finishes drawing, wait ten seconds
+   with WiFi retained, fetch the dashboard and sleep after its refresh.
+4. Handle AI during the wait and background fetch without dropping capture or
+   cutting an active panel refresh. Coordinate network cancellation and reuse;
+   do not add a blocking wait on the capture path.
+5. Preserve the current screen on failure, add the reserved status indicator
+   and keep the silent icon working offline. Bound all background attempts
+   and return to the hourly retry schedule after failures.
+6. Choose the dashboard layout and data sources, implement background source
+   refresh and post-voice cache updates, then validate the complete device flow.
+
+### Acceptance
+
+- Server tests cover authorization, telemetry validation, exact frame format
+  and headers, stale/unavailable sources and refreshed data after a voice action.
+  Use fake sources, without real services or secrets.
+- Firmware checks cover short, oversized and unsupported frames, read stalls,
+  invalid/missing/overflowing intervals, and the deadline calculation including
+  drawing time and intervening Up wakes.
+- On the device: cold startup, AI wake, repeated timer wakes on battery, ten
+  seconds measured from display completion, AI during waiting/downloading,
+  WiFi/server failures, and preservation of surrounding pixels during local
+  icon updates. Background refreshes are silent and never start the microphone.
+- Verify full-frame orientation and polarity, clean full refreshes, the silent
+  icon and stale indicator visually. A successful build does not complete S15.
+
+Compression and energy comparisons are deferred to E10 and E9 respectively in
+[experiments.md](experiments.md); D10/D11 track the initial choices. Autonomous
+reminders and server-controlled answer dwell time are outside this step.

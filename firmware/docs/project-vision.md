@@ -11,6 +11,10 @@ power, until the next question.
 
 It is a personal device, built for one user, powered by battery.
 
+The flow below is the current implementation. The agreed next step is a
+server-rendered idle dashboard, described in [Idle dashboard](#idle-dashboard).
+It will replace the last answer between questions; it is not implemented yet.
+
 ## Interaction flow
 
 On startup without AI held, show a neutral notebook and return to sleep without
@@ -57,6 +61,49 @@ is not settled that it is the right one -- [D9](deferred.md).
 
 Measurements the design still waits on are tracked in
 [experiments.md](experiments.md).
+
+## Idle dashboard
+
+**Agreed 2026-09-21; planned, not implemented.** The shared scenario is in
+[idle-screen.md](../../server/docs/use-cases/idle-screen.md), and the planned
+wire format is in [device-contract.md](../../server/docs/device-contract.md#дашборд-план).
+
+The backend owns data sources, fonts and layout and returns a complete 800x480
+monochrome image. The device supplies battery, temperature and humidity,
+validates the frame, displays it and sleeps. Dashboard changes need only a
+backend deployment. Voice answers keep their current local text rendering.
+
+- Cold startup and timer wake fetch a dashboard without recording or chirping.
+- AI starts capture immediately, with no dashboard fetch ahead of it. It also
+  takes priority during a background fetch or the post-answer wait. The panel's
+  current waveform is allowed to finish on the display task.
+- After the final voice screen finishes drawing, stay awake for **10 seconds**
+  with WiFi retained, then fetch and display the dashboard. Use the display
+  task's completion timestamp, not receipt of the voice response. The wait must
+  remain responsive to AI; a discarded tap is not a completed voice cycle.
+- Up keeps its existing offline silent-mode behavior, including the current
+  simultaneous AI/Up wake rule. It must preserve the dashboard's pending
+  deadline across its own return to sleep.
+- Start with hourly updates. `Next-Update-After` sets the next request interval
+  in seconds from complete receipt of a valid frame. Subtract work already
+  done before arming deep sleep, and retain button wake alongside the timer.
+- Receive and validate the entire frame before displaying it. Draw the
+  dashboard with a full refresh and wait for completion before sleeping.
+- Bound connection and download time. Failure preserves the previous screen
+  and returns to sleep for an hourly retry, without a background error chirp.
+  A small local indicator can mark a failed update on an existing dashboard;
+  reserve its region together with the silent indicator in the future layout.
+
+External data is refreshed in the backend in the background; the final frame
+incorporates the sensor snapshot supplied with the request. Keep sensor I2C
+access under one owner rather than reading from networking and display tasks
+concurrently. Partial indicator updates after sleep must retain the driver's
+full-plane shadow-prime initialization and known previous indicator pixels.
+
+The initial transport and awake-wait choices are tracked in
+[D10 and D11](deferred.md). Measurements come after the dashboard design;
+no energy advantage of remaining awake has been established. Offline reminder
+storage and alarms are a separate future feature, not part of this plan.
 
 ## Decisions
 
@@ -304,8 +351,8 @@ whole pipeline.
 
 ### Screen
 
-Four transitions exist: asleep -> Listening, Listening -> working, working ->
-answer, working -> error.
+The current voice flow has four screen transitions: asleep -> Listening,
+Listening -> working, working -> answer, working -> error.
 
 **One of them is a full refresh and it is the first one.** A partial update is
 differential -- the controller picks each pixel's waveform from the pair (what
@@ -359,33 +406,25 @@ orientation. `StickyScreen::begin()` calls `setRotation(2)` to turn the image
 180 degrees from Seeed_GFX2's board default, preserving the board profile's
 horizontal mirror correction and the 800x480 layout.
 
-The answer stays on screen until the next question -- that is the point of
-e-paper. The Listening screen replaces it on button press, so the previous
-answer disappears as soon as a new question starts.
+Currently the answer stays on screen until the next question. The Listening
+screen replaces it on button press, so the previous answer disappears as soon
+as a new question starts.
 
-**A post-answer idle screen remains deferred.** The notebook currently appears
-only on startup without a press and after a discarded tap. An earlier idea was that some
-seconds after the answer the device draws a screen of its own and only then
-sleeps, so what lives on the glass between questions is that rather than the
-last answer. It belongs to the UI/UX pass and is not decided here. Two things
-about the panel already hang on it, which is why it is written down:
+The neutral notebook currently appears only on startup without a press and
+after a discarded tap.
 
-- Its content is not expected to be reconstructible after a wake, which is what
-  keeps the Listening screen a full refresh. The only way round would be to
-  rebuild what is on the glass and seed the shadow in `src/sticky/epaper.h` from
-  it without touching the panel, and whatever the idle screen shows will have
-  been built from things the device had while it was awake; nor does a
-  48000-byte frame fit in the 8192 bytes of RTC memory the WiFi lease already
-  lives in. It is the reason that refresh got a thread rather than a cheaper
-  waveform.
-- Drawn by a full refresh, it settles what the panel holds overnight: the image
-  that has to survive without power is then always one a full waveform drove,
-  and how well a partial one keeps stops being worth measuring.
-- It costs awake time: a second full refresh a question and the seconds before
-  it, on a device awake four to ten seconds a question. Whether that is
-  affordable is [E5](experiments.md)'s question. The mechanics are already
-  there -- the display task takes the post, and the exit already waits for the
-  panel to finish.
+**The replacement is now agreed: [Idle dashboard](#idle-dashboard).** After
+the reading interval the backend's image replaces the answer with a full
+refresh. This also adds timer-only wakes. The current voice-screen sequence
+above describes the existing implementation, not the future whole wake cycle.
+
+The dashboard is not reconstructed after sleep: its 48000-byte frame cannot
+fit in the RTC memory already shared with other retained state. Listening
+therefore remains a full refresh when the next voice question starts. Local
+indicator-only updates can reconstruct their reserved regions using the
+existing shadow-prime path. The added wake time and refreshes will be measured
+in [E9](experiments.md#e9----dashboard-energy-deferred); they are not a blocker
+for the first version.
 
 Battery level is always visible in the upper-left corner: a filled battery icon
 and a percentage. Listening reads it after boot on the display task; Working
@@ -618,13 +657,11 @@ Also worth knowing:
 
 ## What is still moving
 
-Nothing in this document is open any more. The last question in it was **what
-the device does between the button coming up and the answer arriving**, in the
-interaction flow's step 6, and [S8](implementation.md#s8----the-flow) answered
-it: a chirp and a partial refresh of the word. What has not been decided cannot
-be decided here -- the backend still answers a fixed phrase, so the thinking
-time that will dominate that wait in the end is still unmeasured, and the wider
-UI is deliberately unconsidered until the proof of concept works.
+The voice flow above is implemented. The next agreed change is the
+[idle dashboard](#idle-dashboard); its contents and visual design are still
+to be chosen. Its architecture is settled, while implementation and device
+acceptance remain ahead. Compression and energy measurements are explicitly
+deferred, as are offline timers and reminders.
 
 What remains is tracked elsewhere, deliberately kept out of this document so it
 does not age every time a shortcut is taken, a number comes in or a step is
