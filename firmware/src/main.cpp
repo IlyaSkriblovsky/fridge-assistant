@@ -213,6 +213,10 @@ void logScreen(const char* name, Display::Screen which) {
       which == Display::Screen::Error) {
     if (shown.batteryPercent >= 0) Serial1.printf(", battery %d%%", shown.batteryPercent);
     else Serial1.print(", battery unavailable");
+    if (shown.climate.valid)
+      Serial1.printf(", temperature %.1f C, humidity %.1f%%",
+                     shown.climate.temperatureC, shown.climate.humidityPercent);
+    else Serial1.print(", climate unavailable");
   }
   if (shown.error[0] != '\0') Serial1.printf(" -- the partial was refused: %s", shown.error);
   Serial1.println();

@@ -37,3 +37,6 @@ Nothing in here is built by PlatformIO or by CI; it is not under `src/`.
 
 Alternating screens show the silent-mode indicator from `src/silent_icon.h`,
 so its actual drawing code is checked beside the battery and answer text.
+
+The upper-right climate labels include normal, negative-temperature/100% RH,
+and unavailable samples, with the same font and placement as the firmware.

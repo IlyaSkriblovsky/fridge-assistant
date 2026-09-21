@@ -19,7 +19,7 @@ namespace {
 const TextFace& kWordFace = fontFreeSansBold24;
 const TextFace& kAnswerFace = fontFreeSans24;
 const TextFace& kDetailFace = fontFreeSans18;
-const TextFace& kBatteryFace = fontFreeSans12;
+const TextFace& kBatteryFace = fontFreeSansBold12;
 constexpr uint8_t kWordSize = 2;
 constexpr int32_t kAnswerMarginX = 40;
 constexpr int32_t kAnswerMarginY = 40;
@@ -121,6 +121,12 @@ void screens(Seeed_GFX& sheet) {
     silentIcon::draw(panel, screen % 2 == 0);
     panel.setTextColor(TFT_BLACK);
     panel.setTextSize(1);
+    const char* climate = screen == 5 ? "--°  --%" :
+                          screen == 4 ? "-40.0°  100.0%" : "23.4°  48.2%";
+    textDraw(panel, kBatteryFace, climate,
+             800 - 16 - textWidth(kBatteryFace, climate, 1),
+             12 + (24 - textBoxHeight(kBatteryFace, 1)) / 2, 1);
+
 
     switch (screen) {
       case 0:

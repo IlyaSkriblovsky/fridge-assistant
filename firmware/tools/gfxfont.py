@@ -89,6 +89,7 @@ FACES = [
     ("FreeSans.ttf", 24, "fontFreeSans24", "free_sans_24"),
     ("FreeSans.ttf", 18, "fontFreeSans18", "free_sans_18"),
     ("FreeSans.ttf", 12, "fontFreeSans12", "free_sans_12"),
+    ("FreeSansBold.ttf", 12, "fontFreeSansBold12", "free_sans_bold_12"),
 ]
 
 # drawCharGfx reads GFXglyph::bitmapOffset with pgm_read_word even though the

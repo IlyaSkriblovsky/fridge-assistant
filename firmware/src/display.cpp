@@ -152,6 +152,8 @@ void Display::draw(const Slot& slot) {
       slot.screen == Screen::Error || slot.screen == Screen::Silent) {
     record.batteryPercent = stickyBattery::readPercent();
     _screen.setBatteryPercent(record.batteryPercent);
+    record.climate = stickyClimate::read();
+    _screen.setClimate(record.climate);
   }
 
   switch (slot.screen) {

@@ -1,15 +1,9 @@
 #include "sticky/battery.h"
 
-#include <Wire.h>
+#include "sticky/sensor_bus.h"
 
 int stickyBattery::readPercent() {
-  // Sensor I2C: SDA 1, SCL 0. No other firmware task uses this bus.
-  static bool ready = false;
-  if (!ready) {
-    Wire.setTimeOut(20);
-    ready = Wire.begin(1, 0, 100000);
-    if (!ready) return -1;
-  }
+  if (!stickySensorBus::begin()) return -1;
 
   // TI BQ27220 TRM, StateOfCharge(): little-endian word at 0x2C.
   // https://www.ti.com/lit/ug/sluubd4a/sluubd4a.pdf (section 2.21)

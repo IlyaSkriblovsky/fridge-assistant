@@ -72,6 +72,7 @@ class Display {
     int64_t endUs = 0;        // when its refresh returned
     bool superseded = false;  // replaced while it waited, and never drawn
     bool partial = false;     // StickyScreen::lastWasPartial() after it
+    stickyClimate::Reading climate;
     int batteryPercent = -1;  // gauge reading, or unavailable/not sampled
     const char* error = "";   // why the controller refused a partial, if it did
   };

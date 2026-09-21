@@ -2146,3 +2146,50 @@ the surrounding screen during indicator updates are accepted. This completes
 the feature's normal-use hardware verification. Power-loss persistence and
 interrupted-refresh recovery are implemented but were not separately reported
 as tested.
+
+
+## Temperature and humidity indicator — 2026-09-21
+
+Added SHT40 temperature and relative humidity in the upper-right margin,
+right-aligned 16 px from the edge, using the battery label's 12 pt face and
+vertical placement. Both values have one decimal place. Listening, Answer and
+Error sample before drawing; Working retains the previous header, as does an
+Up-only silent-icon partial update. The cold-start silent screen also samples.
+Deep sleep keeps the last visible readings without periodic wakeups.
+
+The battery gauge and SHT40 share a display-task-only I2C initializer (SDA 1,
+SCL 0, 100 kHz, 20 ms timeout). SHT40 uses address 0x44 and command 0xFD,
+waits 10 ms, validates both CRC-8 words, then converts per the Sensirion
+SHT4x datasheet. No heater or calibration offset is applied. RH is clamped to
+0–100%; failures show `--°C  --%`. Serial1 reports values beside battery state.
+
+Host preview rendered normal, negative-temperature/100% RH and unavailable
+labels; visual inspection confirmed they fit above even the seven-line answer
+without overlapping the battery or silent icon. Sensor accuracy and physical
+screen acceptance still require the device and comparison with a reference.
+
+All six PlatformIO environments built successfully (reterminal_e1005, exp_e1,
+exp_e1_firmware, exp_e6, exp_e7, exp_e8); `git diff --check` passed.
+
+Uploaded the main firmware to `/dev/cu.usbmodem5C843360331`; esptool
+verified the flash hash and reset the board. Visual confirmation and actual
+sensor readings remain pending user operation of the AI button.
+
+
+### Hardware feedback and bolder indicators
+
+The user confirmed that temperature and humidity are visible and working on
+the device. Accuracy comparison against another sensor is deferred until they
+have collected observations over time.
+
+At the user's request, removed the C after the degree sign and switched both
+climate and battery labels to FreeSans Bold at the same 12 pt size. Added a
+proper bold face to `tools/gfxfont.py` and regenerated all faces together;
+existing generated faces were byte-for-byte unchanged. Host preview confirms
+normal, boundary and unavailable values fit in the existing top margin.
+
+All six PlatformIO environments built successfully. Uploaded the updated
+main firmware to `/dev/cu.usbmodem5C843360331` with flash hash verification.
+The user confirmed that the revised typography looks correct on the device.
+Display behavior and typography are accepted; sensor accuracy comparison
+against a reference remains pending longer-term observations.

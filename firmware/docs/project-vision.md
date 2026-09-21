@@ -390,6 +390,13 @@ wakeups. The BQ27220 uses sensor I2C (SDA 1, SCL 0), address `0x55`, register
 failing the question. The percentage can be removed once discharge behaviour
 is understood. Gauge accuracy and low-battery behaviour remain [D3](deferred.md).
 
+Temperature and relative humidity from the SHT40 appear in the upper-right
+corner as `23.4°  48.2%`, in the same bold 12 pt face as the battery percentage.
+They follow the battery's screen refresh schedule; sleep retains the last
+reading, and an Up-only icon update retains the surrounding indicators.
+The sensor uses the same I2C bus, address `0x44`, high-precision measurement
+with the heater off. Failed reads or CRC checks show `--°  --%`.
+
 The wider UI is deliberately unconsidered until the proof of concept works.
 
 ### Text rendering
