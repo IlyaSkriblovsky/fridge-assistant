@@ -347,14 +347,11 @@ no screen at all with only a chirp, which would have left the panel saying
 not an alternative to the word but the part of the answer that arrives
 immediately.
 
-**Landscape, with the three buttons along the bottom edge on the right.** That
-is where the AI button falls under the right thumb, which is the hand the device
-is held in. It is also the panel's default orientation in Seeed_GFX2 --
-`Board_reTerminal_Sticky` sets a horizontal mirror and no rotation -- so nothing
-calls `setRotation()` and the code says nothing about orientation at all. The
-other way up reads exactly as well and was tried; it puts the buttons along the
-top and off to the left, which is a two-handed device. Checked on the panel both
-ways round.
+**Landscape, with the three buttons along the top edge on the left.** After
+using the device, this proved more comfortable than the original buttons-down
+orientation. `StickyScreen::begin()` calls `setRotation(2)` to turn the image
+180 degrees from Seeed_GFX2's board default, preserving the board profile's
+horizontal mirror correction and the 800x480 layout.
 
 The answer stays on screen until the next question -- that is the point of
 e-paper. The Listening screen replaces it on button press, so the previous

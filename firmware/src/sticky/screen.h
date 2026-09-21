@@ -20,9 +20,8 @@
 //
 // Four things about the drawing are decisions rather than accidents:
 //
-//  * **No setRotation().** Seeed_GFX2's Board_reTerminal_Sticky already puts
-//    the panel the way the vision's screen section settles on -- buttons along
-//    the bottom edge, on the right, under the right thumb.
+//  * **Landscape, buttons along the top edge.** setRotation(2) turns the
+//    board profile's default image through 180 degrees, as preferred in use.
 //  * **One full refresh per question, and it is the first one** -- the
 //    vision's screen section. listening() is full and everything after it is
 //    partial, which is not a preference but the only arrangement that works. A

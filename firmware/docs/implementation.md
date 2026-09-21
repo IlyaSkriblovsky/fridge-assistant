@@ -371,10 +371,12 @@ A small interface on purpose -- D4 moves the display into its own task later,
 and that is cheap only if nothing else calls the panel directly.
 
 - Full refresh on all three transitions ([D6](deferred.md)).
-- **No `setRotation()`.** The library's default is already the orientation the
-  vision's screen section settles on -- buttons along the bottom, on the right,
-  under the right thumb. Both ways round were put on the panel to choose it, so
-  a rotation appearing here later is a regression rather than a fix.
+- Originally used the library's default orientation, with buttons along the
+  bottom edge. Superseded on 2026-09-21 after use: `StickyScreen::begin()` now
+  sets rotation 2 (180 degrees), putting the buttons along the top edge.
+  Build and USB upload succeeded on 2026-09-21; flash contents were verified
+  and the device reset. The user confirmed on the device that the new
+  buttons-up orientation works correctly.
 - Only `LOAD_GLCD` and `LOAD_GFXFF` are compiled into Seeed_GFX2, so the answer
   is a FreeFont through `setFreeFont()`. Font 1 at 8x8 is unreadable on a 4"
   panel without scaling.

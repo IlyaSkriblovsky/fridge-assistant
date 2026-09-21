@@ -63,6 +63,9 @@ bool StickyScreen::begin() {
     return false;
   }
 
+  // Landscape with the buttons along the top edge.
+  _display.setRotation(2);
+
   _ready = true;
   return true;
 }
