@@ -213,6 +213,11 @@ void logScreen(const char* name, Display::Screen which) {
   if (queuedMs != 0) {
     Serial1.printf(", %lu ms queued behind the panel", static_cast<unsigned long>(queuedMs));
   }
+  if (which == Display::Screen::Listening || which == Display::Screen::Answer ||
+      which == Display::Screen::Error) {
+    if (shown.batteryPercent >= 0) Serial1.printf(", battery %d%%", shown.batteryPercent);
+    else Serial1.print(", battery unavailable");
+  }
   if (shown.error[0] != '\0') Serial1.printf(" -- the partial was refused: %s", shown.error);
   Serial1.println();
 }

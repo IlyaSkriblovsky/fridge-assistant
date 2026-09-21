@@ -2034,3 +2034,23 @@ by accident.
 - **A stream that dies leaves the prototype backend a truncated file**, and that
   is accepted: the real backend will forward recordings to an external API
   rather than keep them. (S11)
+
+
+## Battery indicator — 2026-09-21
+
+Added a battery outline with proportional fill and a percentage in the upper-left
+margin on Listening, answer and error. Working retains it during its middle-strip
+refresh, and e-paper retains the last reading in sleep. The existing answer box
+is unchanged. BQ27220 reads run only on the display task, with a 20 ms I2C timeout;
+missing/invalid readings show `?`. Serial screen records include the reading.
+No gauge configuration is written. Firmware built and flashed to the connected
+E1005; Serial1 confirmed `battery 100%` on Listening after reset. The host preview
+was inspected at 100%, 50%, 1%, 0% and unavailable, including a seven-line answer.
+Gauge accuracy over a discharge cycle remains to be measured.
+
+
+The user confirmed that the battery indicator is visible and clearly readable
+on the device. Reduced its percentage label from FreeSans 18 pt to 12 pt on
+request, keeping the icon geometry. Added a generated 12 pt face and regenerated
+the existing faces together. The updated firmware was built and flashed; the
+user confirmed that the smaller label looks better and approved the final layout.

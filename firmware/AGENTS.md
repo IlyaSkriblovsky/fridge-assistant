@@ -23,7 +23,7 @@ the hardware traps.
 | `src/capture.h/.cpp` | The capture task: I2S reads and the button poll, off the orchestrator's thread |
 | `src/display.h/.cpp` | The display task: owns the screen, draws what the orchestrator posts, off its thread |
 | `src/text.h/.cpp` | Laying UTF-8 out in a face made of several GFXfonts, because the library cannot |
-| `src/fonts/` | The three faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
+| `src/fonts/` | The four faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
@@ -100,7 +100,7 @@ A green CI only means it builds: nothing runs on hardware there.
   Each range in `src/fonts/` has its own array and the largest is about 8 KB,
   but a face added at 48 pt would not be. `tools/gfxfont.py` refuses to emit
   one that would.
-- **Regenerate all three faces together, never one.** A newer FreeType
+- **Regenerate all faces together, never one.** A newer FreeType
   rasterises a handful of edge pixels differently from the one Adafruit used,
   so mixing a generated face with a bundled GFXFF header puts two rasterisers
   in one string. `tools/gfxfont.py` emits the whole set for that reason.

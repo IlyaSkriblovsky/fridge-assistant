@@ -27,7 +27,7 @@ come out of FreeType the same way fontconvert takes them, at its 141 dpi, so
 regenerating 0x20-0x7E reproduces the bundled headers' glyph tables exactly.
 The bitmaps differ in about 50 bytes of 7464 -- single edge pixels, from a
 newer FreeType rasterising a curve one pixel differently. That is why all
-three faces are generated here rather than only the new scripts: one
+faces are generated here rather than only the new scripts: one
 rasteriser for the whole string, so a stem cannot change width halfway through
 a word.
 
@@ -88,6 +88,7 @@ FACES = [
     ("FreeSansBold.ttf", 24, "fontFreeSansBold24", "free_sans_bold_24"),
     ("FreeSans.ttf", 24, "fontFreeSans24", "free_sans_24"),
     ("FreeSans.ttf", 18, "fontFreeSans18", "free_sans_18"),
+    ("FreeSans.ttf", 12, "fontFreeSans12", "free_sans_12"),
 ]
 
 # drawCharGfx reads GFXglyph::bitmapOffset with pgm_read_word even though the

@@ -18,12 +18,30 @@ namespace {
 const TextFace& kWordFace = fontFreeSansBold24;
 const TextFace& kAnswerFace = fontFreeSans24;
 const TextFace& kDetailFace = fontFreeSans18;
+const TextFace& kBatteryFace = fontFreeSans12;
 constexpr uint8_t kWordSize = 2;
 constexpr int32_t kAnswerMarginX = 40;
 constexpr int32_t kAnswerMarginY = 40;
 constexpr int32_t kWordBandMargin = 12;
 constexpr int32_t kErrorBarHeight = 130;
 constexpr int32_t kErrorDetailGap = 46;
+
+void drawBattery(Seeed_GFX& gfx, int percent) {
+  // Fits in the existing top margin, leaving all seven answer lines intact.
+  constexpr int x = 16, y = 12, width = 42, height = 24;
+  gfx.fillRect(x, y, width, height, TFT_BLACK);
+  gfx.fillRect(x + 2, y + 2, width - 4, height - 4, TFT_WHITE);
+  gfx.fillRect(x + width, y + 7, 4, 10, TFT_BLACK);
+  const bool valid = percent >= 0 && percent <= 100;
+  if (valid && percent > 0) {
+    const int fill = ((width - 8) * percent + 99) / 100;
+    gfx.fillRect(x + 4, y + 4, fill, height - 8, TFT_BLACK);
+  }
+  char label[8] = "?";
+  if (valid) snprintf(label, sizeof(label), "%d%%", percent);
+  textDraw(gfx, kBatteryFace, label, x + width + 14,
+           y + (height - textBoxHeight(kBatteryFace, 1)) / 2, 1);
+}
 
 void drawCentred(Seeed_GFX& gfx, const TextFace& face, const char* text,
                  int32_t centreX, int32_t middleY, uint8_t size) {
@@ -98,6 +116,7 @@ void screens(Seeed_GFX& sheet) {
   for (int screen = 0; screen < kScreenCount; ++screen) {
     Seeed_GFX panel(800, 480);
     panel.fillScreen(TFT_WHITE);
+    drawBattery(panel, screen == 0 ? 100 : screen == 1 ? 100 : screen == 2 ? 50 : screen == 3 ? 1 : screen == 4 ? 0 : -1);
     panel.setTextColor(TFT_BLACK);
     panel.setTextSize(1);
 

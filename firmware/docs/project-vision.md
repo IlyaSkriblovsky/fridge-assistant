@@ -380,17 +380,14 @@ about the panel already hang on it, which is why it is written down:
   there -- the display task takes the post, and the exit already waits for the
   panel to finish.
 
-Battery level belongs on the **answer and error screens**, not on the Listening
-screen -- read from the BQ27220 fuel gauge on the sensor I2C bus (address
-`0x55`, register `0x2C`, two bytes little-endian, percent). No screen shows it
-yet: nothing on this unit has talked to that gauge, so it waits for
-[E5](experiments.md), which has to establish the same conversation -- [D3](deferred.md).
-
-That placement started as a workaround -- the sensor bus runs over GPIO0, a
-strapping pin, so it cannot be touched at the very top of boot -- but it is the
-better place anyway: the wake path stays short where latency is felt, and the
-figure shown is the one measured after WiFi and the upload have already drawn
-their current.
+Battery level is always visible in the upper-left corner: a filled battery icon
+and a percentage. Listening reads it after boot on the display task; Working
+keeps that indicator while updating only the middle strip. Answer and error
+read it again. The image remains visible during deep sleep without periodic
+wakeups. The BQ27220 uses sensor I2C (SDA 1, SCL 0), address `0x55`, register
+`0x2C`, two bytes little-endian. Reads are bounded and failures show `?` without
+failing the question. The percentage can be removed once discharge behaviour
+is understood. Gauge accuracy and low-battery behaviour remain [D3](deferred.md).
 
 The wider UI is deliberately unconsidered until the proof of concept works.
 

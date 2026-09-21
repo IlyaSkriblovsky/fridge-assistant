@@ -11,3 +11,4 @@
 extern const TextFace fontFreeSansBold24;
 extern const TextFace fontFreeSans24;
 extern const TextFace fontFreeSans18;
+extern const TextFace fontFreeSans12;

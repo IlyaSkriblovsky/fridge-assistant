@@ -3,6 +3,7 @@
 #include <esp_timer.h>
 
 #include "text.h"
+#include "sticky/battery.h"
 
 namespace {
 
@@ -142,6 +143,14 @@ void Display::draw(const Slot& slot) {
   // Only the fields post() never writes, so nothing here needs the lock.
   Record& record = _records[static_cast<uint8_t>(slot.screen)];
   bool refused = false;
+
+  // Working updates only the middle strip and retains Listening's indicator.
+  // Read on this task, after boot, without delaying capture or the answer chirp.
+  if (slot.screen == Screen::Listening || slot.screen == Screen::Answer ||
+      slot.screen == Screen::Error) {
+    record.batteryPercent = stickyBattery::readPercent();
+    _screen.setBatteryPercent(record.batteryPercent);
+  }
 
   switch (slot.screen) {
     case Screen::Clear:

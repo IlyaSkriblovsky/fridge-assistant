@@ -12,7 +12,7 @@ in one place rather than archaeology through commit messages.
 | # | For now | End state | What triggers the change |
 | --- | --- | --- | --- |
 | D2 | An answer longer than a panel ends in an ellipsis | The rest of it reachable -- pagination, or a smaller face | The UI/UX pass |
-| D3 | Battery ignored entirely | Level on the answer and error screens, then some low-battery behaviour | [E5](experiments.md), which has to talk to the gauge anyway |
+| D3 | Gauge percentage not yet validated against this pack | Validate discharge readings and decide low-battery behaviour | [E5](experiments.md) |
 | D5 | Plain HTTP, the device's token included | HTTPS | [E2](experiments.md) |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
@@ -47,20 +47,13 @@ Whatever it turns into, the layout already knows when it has run out of room:
 `textDrawWrapped()` returns the lines it drew and `textWrapLines()` says how
 many there were.
 
-## D3 -- No battery reading
+## D3 -- Battery accuracy and low-battery behaviour
 
-The screens show no battery level, and the gauge is never read. That is one step
-further back than it looks: nothing on this unit has ever talked to the BQ27220,
-so the first version would have had to bring up an I2C bus on a strapping pin,
-confirm the device answers at `0x55`, and decide what a reading from a gauge
-that has never learned this pack is worth -- all inside the one path where a
-failure costs the user their answer.
-
-[E5](experiments.md) needs exactly that conversation for its own reasons, and it
-can have it where a wrong answer costs nothing. So the gauge gets proven there
-first, and the answer screen picks it up afterwards.
-
-Acting on a low reading stays a separate question after that, and an open one.
+The indicator now reads BQ27220 state of charge on Listening, answer and error;
+Working and deep sleep retain it. Bus errors and out-of-range values show `?`.
+The gauge configuration is left untouched. Its estimate still needs checking
+against this battery over a discharge cycle in [E5](experiments.md); displaying
+a percentage does not establish its accuracy. Acting on low charge remains open.
 
 ## D7 -- Nothing for a press too short
 
