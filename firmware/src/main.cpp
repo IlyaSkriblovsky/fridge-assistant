@@ -90,6 +90,7 @@ enum class Outcome : uint8_t {
   TimedOut,
   NoWifi,
   Broken,  // the microphone, the buffer or the panel
+  Idle,    // startup without a press
   Tap,     // too short to be a question
 };
 
@@ -146,6 +147,7 @@ const char* outcomeName(Outcome outcome) {
     case Outcome::TimedOut: return "TIMED OUT";
     case Outcome::NoWifi: return "NO WIFI";
     case Outcome::Broken: return "broken";
+    case Outcome::Idle: return "idle";
     case Outcome::Tap: return "tap, discarded";
   }
   return "?";
@@ -209,7 +211,7 @@ void logScreen(const char* name, Display::Screen which) {
   if (queuedMs != 0) {
     Serial1.printf(", %lu ms queued behind the panel", static_cast<unsigned long>(queuedMs));
   }
-  if (which == Display::Screen::Listening || which == Display::Screen::Answer ||
+  if (which == Display::Screen::Idle || which == Display::Screen::Listening || which == Display::Screen::Answer ||
       which == Display::Screen::Error) {
     if (shown.batteryPercent >= 0) Serial1.printf(", battery %d%%", shown.batteryPercent);
     else Serial1.print(", battery unavailable");
@@ -299,6 +301,7 @@ void waitForRelease() {
 
   if (panelIdle) {
     logScreen("pre-clear", Display::Screen::Clear);
+    logScreen("notebook", Display::Screen::Idle);
     logScreen("LISTENING", Display::Screen::Listening);
     logScreen("WORKING", Display::Screen::Working);
     logScreen("answer screen", Display::Screen::Answer);
@@ -613,6 +616,19 @@ void setup() {
   Serial1.printf("question -- wake %s, reset %s\n", stickyPower::wakeupCauseName(),
                  stickyPower::resetReasonName());
 
+  // No held button means there is no question, including cold power-on and
+  // an AI tap released before setup. Do not start capture or networking.
+  if (!button.isDown()) {
+    if (!startDisplay()) {
+      Serial1.printf("  panel: %s\n", display.lastError());
+      stickyBuzzer::error();
+      finish(Outcome::Broken);
+    }
+    if (!stickyPower::wokeFromDeepSleep()) display.clear();
+    display.idle();
+    finish(Outcome::Idle);
+  }
+
   WifiLink::Lease lease;
   if (WifiLink::cachedLease(lease)) {
     char ip[16];
@@ -695,6 +711,7 @@ void setup() {
   if (button.isTap()) {
     logRecording();
     Serial1.println("  too short to be a question -- nothing sent");
+    display.idle();
     finish(Outcome::Tap);
   }
 

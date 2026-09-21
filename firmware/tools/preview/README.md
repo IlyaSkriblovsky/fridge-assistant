@@ -10,8 +10,8 @@ c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
 ./preview
 ```
 
-Two PGMs come out: `screens.pgm`, which is every screen one under the other --
-the two words, three answers of different lengths, and an error -- and
+Three PGMs come out: `idle.pgm` is the neutral notebook screen; `screens.pgm`, which is every screen one under the other --
+the two words, three answers of different lengths, an error, and the notebook -- and
 `glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
 are the band `working()` refreshes and the box an answer is wrapped into;
 nothing drawn should cross one. The upper-left battery indicator is shown at
