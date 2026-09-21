@@ -3,7 +3,7 @@ name: firmware
 # Builds every PlatformIO environment: the firmware and each experiment rig. A
 # rig that no longer builds cannot be re-run when its experiment has to be, and
 # exp_e1_firmware wraps main.cpp's functions by mangled name, so a rename there
-# fails its link. Nothing is flashed or run: there are no tests yet.
+# fails its link. Host tests run separately; nothing is flashed.
 
 on:
   push:
@@ -22,6 +22,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install PlatformIO
+        run: pipx install platformio==6.2.0
+      - name: Run host unit tests
+        run: pio test -e native
+
   build:
     runs-on: ubuntu-latest
     defaults:
@@ -40,12 +52,12 @@ jobs:
         run: cp src/secrets.example.h src/secrets.h
 
       # default_envs names only the firmware; this overrides it with every
-      # [env:...] in platformio.ini, one per line, so a new rig is built too.
-      - name: List every environment
+      # embedded environment, so a new rig is built too. Native runs above.
+      - name: List embedded environments
         run: |
           {
             echo 'PLATFORMIO_DEFAULT_ENVS<<EOF'
-            grep -oP '^\[env:\K[^]]+' platformio.ini
+            grep -oP '^\[env:\K[^]]+' platformio.ini | grep -v '^native$'
             echo EOF
           } >> "$GITHUB_ENV"
 
