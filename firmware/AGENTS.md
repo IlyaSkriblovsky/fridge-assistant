@@ -128,7 +128,7 @@ is excluded from the embedded build job. Nothing runs on hardware in CI.
 - **The request opens on `Capture::pastMinimumHold()`, not on the clock.** A
   release is confirmed a debounce window after it happens, so the clock says
   "past the minimum hold" about taps that are already over, and a tap must
-  reach nothing.
+  never upload audio. It may fetch the idle dashboard afterwards.
 - **Only the capture task commits to `Recording`.** The upload reads the buffer
   while it grows; the published count is the one thing the two share, and it is
   what makes that safe without a lock.

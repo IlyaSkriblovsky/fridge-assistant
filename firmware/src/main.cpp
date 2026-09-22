@@ -103,7 +103,6 @@ RTC_DATA_ATTR uint64_t dashboardDeadlineTicks = 0;
 enum class IdlePhase { Sleep, AfterVoice, Fetch };
 IdlePhase idlePhase = IdlePhase::Fetch;
 Outcome lastOutcome = Outcome::Idle;
-bool resumeDashboard = false;
 bool recordingLogged = false;
 bool coldScreen = true;
 bool aiArmed = true;
@@ -216,7 +215,7 @@ void logScreen(const char* name, Display::Screen which) {
   if (queuedMs != 0) {
     Serial1.printf(", %lu ms queued behind the panel", static_cast<unsigned long>(queuedMs));
   }
-  if (which == Display::Screen::Idle || which == Display::Screen::Listening || which == Display::Screen::Answer ||
+  if (which == Display::Screen::Listening || which == Display::Screen::Answer ||
       which == Display::Screen::Error) {
     if (shown.batteryPercent >= 0) Serial1.printf(", battery %d%%", shown.batteryPercent);
     else Serial1.print(", battery unavailable");
@@ -292,7 +291,7 @@ void finish(Outcome outcome) {
   logRecording();
   lastOutcome = outcome;
   idlePhase = outcome == Outcome::Tap || outcome == Outcome::Idle
-      ? (resumeDashboard ? IdlePhase::Fetch : IdlePhase::Sleep)
+      ? IdlePhase::Fetch
       : IdlePhase::AfterVoice;
   // A capped/failed question may leave AI held. Only a fresh press starts one.
   aiArmed = !button.isDown();
@@ -638,8 +637,7 @@ void runVoice(int64_t pressUs) {
   // for it either: the loop above waited for the minimum hold.
   if (button.isTap()) {
     logRecording();
-    Serial1.println("  too short to be a question -- nothing sent");
-    display.idle();
+    Serial1.println("  too short to be a question -- no audio sent; fetching dashboard");
     return finish(Outcome::Tap);
   }
 
@@ -743,7 +741,6 @@ bool idleButton() {
     releasedUs = 0;
     if (aiArmed) {
       dashboard.cancel();
-      resumeDashboard = idlePhase != IdlePhase::Sleep;
       return true;
     }
   }
@@ -834,7 +831,8 @@ void runIdle() {
           if (!dashboard.ok()) dashboardFailed();
           else {
             scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
-            Serial1.printf("  dashboard: 48000 bytes, next update in %lu s\n",
+            Serial1.printf("  dashboard: 48000 bytes, HTTP request %lu ms, next update in %lu s\n",
+                           static_cast<unsigned long>(dashboard.requestMs()),
                            static_cast<unsigned long>(dashboard.nextSeconds()));
             if (coldScreen) { display.clear(); coldScreen = false; }
             display.dashboard(dashboard.pixels());
@@ -901,8 +899,8 @@ void setup() {
   Serial1.printf("wake %s, reset %s\n", stickyPower::wakeupCauseName(), stickyPower::resetReasonName());
   // Keep this physical check in setup: exp_e1_firmware wraps it for its rig.
   if (button.isDown()) runVoice(g_entryUs);
-  else idlePhase = coldScreen || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER
-      ? IdlePhase::Fetch : IdlePhase::Sleep;
+  // Also fetch after a tap released before setup could start recording.
+  else idlePhase = IdlePhase::Fetch;
 }
 
 void loop() {

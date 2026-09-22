@@ -6,7 +6,6 @@
 #include "silent_icon.h"
 #include "stale_icon.h"
 #include "dashboard_protocol.h"
-#include "notebook_icon.h"
 #include "sticky/power.h"
 
 #include "fonts/fonts.h"
@@ -214,13 +213,6 @@ void StickyScreen::refreshWhole() {
 void StickyScreen::wordBand(int32_t& y, int32_t& height) {
   height = textBoxHeight(kWordFace, kWordSize) + 2 * kWordBandMargin;
   y = (_display.height() - height) / 2;
-}
-
-void StickyScreen::idle() {
-  if (!_ready) return;
-  startFrame();
-  notebookIcon::draw(_display);
-  refreshWhole();
 }
 
 void StickyScreen::dashboard(const uint8_t* pixels) {
