@@ -18,6 +18,9 @@ class Dashboard {
   const uint8_t* pixels() const { return _pixels; }
   uint64_t receivedRtcTicks() const { return _receivedRtcTicks; }
   uint32_t nextSeconds() const { return _frame.nextSeconds; }
+  // Successful request's duration, measured on the worker before HTTP open
+  // through receipt of the body. Read after done(); excludes WiFi and display.
+  uint32_t requestMs() const { return _requestMs; }
   void poll();
   void close();  // only after done(); keeps the pixel buffer alive for Display
 
@@ -32,5 +35,6 @@ class Dashboard {
   std::atomic<int> _socket{-1};
   bool _ok = false;
   int64_t _startedUs = 0;
+  uint32_t _requestMs = 0;
   uint64_t _receivedRtcTicks = 0;
 };

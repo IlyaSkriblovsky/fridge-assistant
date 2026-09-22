@@ -113,8 +113,6 @@ class StickyScreen {
   // read from wherever the user is talking rather than up close.
   void listening();
 
-  // Neutral notebook for startup without a press and discarded taps.
-  void idle();
   void dashboard(const uint8_t* pixels);
   bool staleIndicator();
 

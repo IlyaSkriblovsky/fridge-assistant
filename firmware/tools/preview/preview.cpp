@@ -1,5 +1,4 @@
 #include "silent_icon.h"
-#include "notebook_icon.h"
 // Draws the screens and a glyph chart on the host. See README.md.
 //
 // The placement below is src/sticky/screen.cpp's, repeated rather than
@@ -85,7 +84,7 @@ const char* const kAnswers[] = {
 constexpr int kAnswerCount = sizeof(kAnswers) / sizeof(kAnswers[0]);
 
 // LISTENING, WORKING, one panel per answer, and an error.
-constexpr int kScreenCount = 4 + kAnswerCount;
+constexpr int kScreenCount = 3 + kAnswerCount;
 
 void save(const Seeed_GFX& gfx, const char* path) {
   FILE* file = fopen(path, "wb");
@@ -130,10 +129,6 @@ void screens(Seeed_GFX& sheet) {
 
 
     switch (screen) {
-      case 6:
-        notebookIcon::draw(panel);
-        save(panel, "idle.pgm");
-        break;
       case 0:
       case 1:
         panel.fillRect(0, bandY, 800, 1, TFT_BLACK);

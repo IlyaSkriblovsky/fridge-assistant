@@ -10,12 +10,15 @@ c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
 ./preview
 ```
 
-Three PGMs come out: `idle.pgm` is the neutral notebook screen; `screens.pgm`, which is every screen one under the other --
-the two words, three answers of different lengths, an error, and the notebook -- and
+Two PGMs come out: `screens.pgm`, which is every local screen one under the other --
+the two words, three answers of different lengths and an error -- and
 `glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
 are the band `working()` refreshes and the box an answer is wrapped into;
 nothing drawn should cross one. The upper-left battery indicator is shown at
 100%, 50%, 1%, 0% and unavailable to check its fit in the top margin.
+
+The idle dashboard is rendered by the backend; preview it through
+`GET /sticky/dashboard?format=png`. There is no local idle/notebook screen.
 
 `preview` also prints the width of each string, the ink bounds of the word
 band, how many lines each answer wanted against how many it got, how much text

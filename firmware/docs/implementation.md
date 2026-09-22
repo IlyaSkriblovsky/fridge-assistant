@@ -2360,3 +2360,32 @@ establish cancellation latency, actual RTC timing, physical polarity or button
 behavior. No serial device was connected during implementation, so flashing,
 battery timer wakes, voice interruption and visual acceptance are still due.
 S15 is not marked hardware-complete.
+
+
+### Dashboard follow-up — taps and request timing, 2026-09-22
+
+The user tested the initial dashboard on the device and reported that it works
+well, but a discarded AI tap still drew the old local notebook. Removed that
+screen from Display, StickyScreen, its shared icon and the host preview.
+All returns to idle now fetch the server dashboard:
+
+- Cold startup and timer wake already used the fetch path.
+- An AI press released before setup now fetches instead of preserving the glass.
+- A discarded tap after capture starts now fetches directly, with no audio
+  upload and no ten-second answer dwell, including taps during an idle cycle.
+- A completed voice answer/error retains the ten-second dwell, then fetches.
+- Up-only wake still updates the silent indicator offline and preserves the
+  dashboard deadline; it never used the notebook path.
+
+The success log now reads `dashboard: 48000 bytes, HTTP request <ms> ms, next
+update in <seconds> s`. Both timestamps come from the network worker: just
+before HTTP open and immediately after receiving the response body. DNS/TCP,
+server processing and transfer are included; WiFi startup, worker scheduling,
+main-loop polling and e-paper rendering are excluded. The timing is published
+with the completed response and reset for each new request.
+
+Validation: all six embedded environments build, all 24 native tests pass,
+and the host preview builds and produces its two remaining image sheets.
+A source search confirms no notebook drawing or local idle-screen API remains;
+`git diff --check` passes. The earlier successful hardware report does not
+cover these refinements; no USB serial device was connected to flash them.

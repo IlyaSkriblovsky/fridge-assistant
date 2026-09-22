@@ -59,15 +59,16 @@ a percentage does not establish its accuracy. Acting on low charge remains open.
 
 ## D7 -- Nothing for a press too short
 
-A press shorter than `config::kButtonMinHoldMs` is discarded silently: no
-screen, no sound, nothing sent.
+A press shorter than `config::kButtonMinHoldMs` sends no audio and has no
+dedicated rejection screen or chirp. It fetches the idle dashboard before
+sleeping, like other returns to idle.
 
 "No sound" cannot be quite true, because the ready chirp comes first by design.
 The chirp sounds 104 ms after the wake, with capture already running --
 [E1](experiments.md), re-run on the firmware at
 [S9](implementation.md#s9----re-run-e1) -- while the minimum hold is 300 ms. So a tap between the
 two has already been answered with "the microphone is live", which was true when
-it sounded. Nothing further happens.
+it sounded. There is no further voice feedback; the dashboard fetch is silent.
 
 Both alternatives are worse than the inconsistency: waiting out the minimum hold
 before chirping puts 300 ms of dead time at the front of every question, and a

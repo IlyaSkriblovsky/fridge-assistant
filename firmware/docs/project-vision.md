@@ -11,15 +11,16 @@ dashboard after ten seconds. The dashboard remains readable without power.
 
 It is a personal device, built for one user, powered by battery.
 
-The idle dashboard transport is implemented; hardware acceptance is pending.
+The idle dashboard transport is implemented and the user reports a successful
+device check. The latest tap-routing and timing refinements await a device recheck.
 Content and layout beyond the diagnostic frame are a separate step.
 
 ## Interaction flow
 
 Cold startup and timer wakes fetch a dashboard without recording or chirping.
-An AI wake already released at setup preserves the glass. A discarded short
-press leaves a local notebook; if it interrupted a dashboard cycle, that cycle
-resumes without an answer dwell. Voice screens retain their local indicators.
+An AI wake already released at setup and a discarded short press also fetch
+the dashboard, without an answer dwell or audio upload. There is no local
+notebook screen. Voice screens retain their local indicators.
 
 1. **Asleep.** Deep sleep, woken by AI (GPIO4), Up (GPIO5), ext1 any-low, or the dashboard timer.
    Up takes the silent-mode path described below.
@@ -64,7 +65,7 @@ Measurements the design still waits on are tracked in
 
 ## Idle dashboard
 
-**Implemented 2026-09-22; hardware acceptance pending.** The shared scenario is in
+**Implemented 2026-09-22; user reports successful operation on the device.** The shared scenario is in
 [idle-screen.md](../../server/docs/use-cases/idle-screen.md), and the
 wire format is in [device-contract.md](../../server/docs/device-contract.md#дашборд).
 
@@ -87,6 +88,9 @@ backend deployment. Voice answers keep their current local text rendering.
 - Start with hourly updates. `Next-Update-After` sets the next request interval
   in seconds from complete receipt of a valid frame. Subtract work already
   done before arming deep sleep, and retain button wake alongside the timer.
+- Log the HTTP request duration on the network worker, from opening the
+  request to receiving the complete response. This includes DNS/TCP, server
+  processing and transfer, and excludes WiFi startup and panel rendering.
 - Receive and validate the entire frame before displaying it. Draw the
   dashboard with a full refresh and wait for completion before sleeping.
 - Bound connection and download time. Failure preserves the previous screen
@@ -413,17 +417,11 @@ orientation. `StickyScreen::begin()` calls `setRotation(2)` to turn the image
 180 degrees from Seeed_GFX2's board default, preserving the board profile's
 horizontal mirror correction and the 800x480 layout.
 
-Currently the answer stays on screen until the next question. The Listening
-screen replaces it on button press, so the previous answer disappears as soon
-as a new question starts.
-
-The neutral notebook currently appears only on startup without a press and
-after a discarded tap.
-
-**The replacement is now agreed: [Idle dashboard](#idle-dashboard).** After
-the reading interval the backend's image replaces the answer with a full
-refresh. This also adds timer-only wakes. The current voice-screen sequence
-above describes the existing implementation, not the future whole wake cycle.
+The answer stays on screen for ten seconds after its refresh, then the
+[Idle dashboard](#idle-dashboard) replaces it with a full refresh. Listening
+replaces the current screen when a new question starts. Cold startup, timer
+wakes and discarded taps all fetch a fresh dashboard; no path draws a local
+notebook. Up-only wakes retain their offline indicator update.
 
 The dashboard is not reconstructed after sleep: its 48000-byte frame cannot
 fit in the RTC memory already shared with other retained state. Listening
@@ -554,8 +552,10 @@ chirps, logs to Serial1 and sleeps.
 
 Two cases are not errors:
 
-- **Press shorter than `kButtonMinHoldMs`.** An accidental tap. Nothing is sent
-  and the neutral notebook replaces LISTENING before the device sleeps.
+- **Press shorter than `kButtonMinHoldMs`.** An accidental tap. No audio is sent;
+  the device fetches and shows the dashboard before sleeping. A tap released
+  before setup also fetches the dashboard. Neither path has the ten-second
+  answer dwell.
 - **Recording reached the 30 s cap.** Capture stops and whatever was recorded is
   sent as a normal question.
 

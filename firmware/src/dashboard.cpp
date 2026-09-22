@@ -11,6 +11,7 @@ bool Dashboard::start(int battery, stickyClimate::Reading climate) {
   if (!done()) return false;
   close();
   _ok = false;
+  _requestMs = 0;
   _cancelled = false;
   if (!_pixels) _pixels = static_cast<uint8_t*>(heap_caps_malloc(
       dashboardProtocol::kFrameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -82,6 +83,8 @@ void Dashboard::run(void* context) {
   auto& self = *static_cast<Dashboard*>(context);
   auto client = self._client;
   bool valid = false;
+  // Start on the worker so task scheduling and WiFi startup are not counted.
+  const int64_t requestUs = esp_timer_get_time();
   if (!self._cancelled.load() && esp_http_client_open(client, 0) == ESP_OK) {
     self._socket = esp_http_client_get_socket(client);
     const int64_t length = self._cancelled.load() ? -1 : esp_http_client_fetch_headers(client);
@@ -96,9 +99,11 @@ void Dashboard::run(void* context) {
         if (n == -ESP_ERR_HTTP_EAGAIN) continue;
         if (n <= 0 || !self._frame.append(chunk, n)) break;
       }
-      valid = esp_timer_get_time() - self._startedUs < config::kDashboardRequestMs * 1000LL &&
+      const int64_t receivedUs = esp_timer_get_time();
+      valid = receivedUs - self._startedUs < config::kDashboardRequestMs * 1000LL &&
               self._frame.valid(esp_http_client_get_status_code(client), length,
                                esp_http_client_is_complete_data_received(client));
+      if (valid) self._requestMs = static_cast<uint32_t>((receivedUs - requestUs) / 1000);
     }
   }
   self._receivedRtcTicks = rtc_time_get();
