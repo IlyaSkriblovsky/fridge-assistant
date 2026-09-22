@@ -1,0 +1,28 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Build reterminal_e1005" type="PythonConfigurationType" factoryName="Python" folderName="Firmware">
+    <module name="fridge-assistant" />
+    <option name="ENV_FILES" value="" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="$USER_HOME$/.platformio/penv/bin/python" />
+    <option name="SDK_NAME" value="~/.platformio/penv" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/firmware" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="false" />
+    <option name="ADD_SOURCE_ROOTS" value="false" />
+    <option name="DEBUG_JUST_MY_CODE" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="RUN_TOOL" value="" />
+    <option name="SCRIPT_NAME" value="platformio" />
+    <option name="PARAMETERS" value="run -e reterminal_e1005" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="true" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>
