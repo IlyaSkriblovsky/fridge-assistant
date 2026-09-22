@@ -10,6 +10,12 @@ namespace config {
 // POST target for the recording: secrets::kBackendBaseUrl + this path,
 // Content-Type audio/wav.
 constexpr const char* kAudioPath = "/audio";
+constexpr const char* kDashboardPath = "/sticky/dashboard";
+constexpr uint32_t kDashboardDefaultSeconds = 3600;
+constexpr uint32_t kDashboardMinSeconds = 60;
+constexpr uint32_t kDashboardMaxSeconds = 86400;
+constexpr uint32_t kDashboardRequestMs = 15000;
+constexpr uint32_t kAnswerDwellMs = 10000;
 
 // How long a cached access point gets before the firmware stops believing it.
 // The BSSID and channel of the last successful connect are kept in RTC memory

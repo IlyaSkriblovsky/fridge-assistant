@@ -115,6 +115,8 @@ class StickyScreen {
 
   // Neutral notebook for startup without a press and discarded taps.
   void idle();
+  void dashboard(const uint8_t* pixels);
+  bool staleIndicator();
 
   // Listening -> working. The vision's step 6: the button is up, the question
   // is on its way, and the panel would otherwise still read LISTENING until the

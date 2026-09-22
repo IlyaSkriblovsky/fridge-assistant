@@ -78,6 +78,18 @@ jobs:
           docker logs server
           test "$reply" = "{}"
           test "$refused" = 401
+          curl -fsS -H "Authorization: Bearer ci" \
+            http://localhost:8000/sticky/dashboard -o /tmp/dashboard.mono1
+          curl -fsS -H "Authorization: Bearer ci" \
+            'http://localhost:8000/sticky/dashboard?format=png' -o /tmp/dashboard.png
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          assert len(Path('/tmp/dashboard.mono1').read_bytes()) == 48000
+          png = Path('/tmp/dashboard.png').read_bytes()
+          assert png[:8] == b'\x89PNG\r\n\x1a\n'
+          assert struct.unpack('>IIBB', png[16:26]) == (800, 480, 1, 0)
+          PY
 
       - name: Tags
         id: meta

@@ -6,23 +6,22 @@ buzzer, three buttons and a battery.
 
 The device sleeps. You hold the AI button, speak, and let go. It sends the audio
 to a backend we control, which runs it through an AI model and answers with
-text. The answer is drawn on the e-paper and stays there, readable without
-power, until the next question.
+text. The answer is drawn on the e-paper, then replaced by a server-rendered idle
+dashboard after ten seconds. The dashboard remains readable without power.
 
 It is a personal device, built for one user, powered by battery.
 
-The flow below is the current implementation. The agreed next step is a
-server-rendered idle dashboard, described in [Idle dashboard](#idle-dashboard).
-It will replace the last answer between questions; it is not implemented yet.
+The idle dashboard transport is implemented; hardware acceptance is pending.
+Content and layout beyond the diagnostic frame are a separate step.
 
 ## Interaction flow
 
-On startup without AI held, show a neutral notebook and return to sleep without
-starting the microphone or WiFi. An AI wake already released at setup takes
-the same path. A discarded short press also leaves the notebook on screen;
-a successful question keeps its server answer. All header indicators remain.
+Cold startup and timer wakes fetch a dashboard without recording or chirping.
+An AI wake already released at setup preserves the glass. A discarded short
+press leaves a local notebook; if it interrupted a dashboard cycle, that cycle
+resumes without an answer dwell. Voice screens retain their local indicators.
 
-1. **Asleep.** Deep sleep, woken by AI (GPIO4) or Up (GPIO5), ext1 any-low.
+1. **Asleep.** Deep sleep, woken by AI (GPIO4), Up (GPIO5), ext1 any-low, or the dashboard timer.
    Up takes the silent-mode path described below.
 2. **Press.** Wake and hold the power latch.
 3. **Record.** Power the microphone, wait out its settle window, then start
@@ -53,8 +52,9 @@ a successful question keeps its server answer. All header indicators remain.
 7. **Upload.** Send what is left of the recording -- the last few chunks,
    which is milliseconds -- and end the body.
 8. **Answer.** The backend replies with text. Render it on the e-paper.
-9. **Sleep.** Back to deep sleep with the latch held. The answer stays on the
-   screen until the next question.
+9. **Dashboard and sleep.** Wait ten seconds from the final display refresh,
+   keeping WiFi and responding to AI, fetch the dashboard, wait for its full
+   refresh and sleep with the latch held. A failed fetch preserves the screen.
 
 Press and hold is the simplest interaction that has a beginning and an end. It
 is not settled that it is the right one -- [D9](deferred.md).
@@ -64,9 +64,9 @@ Measurements the design still waits on are tracked in
 
 ## Idle dashboard
 
-**Agreed 2026-09-21; planned, not implemented.** The shared scenario is in
-[idle-screen.md](../../server/docs/use-cases/idle-screen.md), and the planned
-wire format is in [device-contract.md](../../server/docs/device-contract.md#дашборд-план).
+**Implemented 2026-09-22; hardware acceptance pending.** The shared scenario is in
+[idle-screen.md](../../server/docs/use-cases/idle-screen.md), and the
+wire format is in [device-contract.md](../../server/docs/device-contract.md#дашборд).
 
 The backend owns data sources, fonts and layout and returns a complete 800x480
 monochrome image. The device supplies battery, temperature and humidity,
@@ -94,8 +94,8 @@ backend deployment. Voice answers keep their current local text rendering.
   A small local indicator can mark a failed update on an existing dashboard;
   reserve its region together with the silent indicator in the future layout.
 
-External data is refreshed in the backend in the background; the final frame
-incorporates the sensor snapshot supplied with the request. Keep sensor I2C
+The diagnostic backend frame incorporates the supplied sensor snapshot. External
+data and background refresh belong to the later content step. Keep sensor I2C
 access under one owner rather than reading from networking and display tasks
 concurrently. Partial indicator updates after sleep must retain the driver's
 full-plane shadow-prime initialization and known previous indicator pixels.
@@ -294,7 +294,7 @@ directly -- `esp_http_client` for chunked uploads, `esp_sleep` for deep sleep,
 FreeRTOS for tasks. PlatformIO also accepts `framework = arduino, espidf` if
 menuconfig-level tuning is ever needed.
 
-### Concurrency: three tasks
+### Concurrency: voice tasks and the dashboard worker
 
 Capture and networking cannot share a thread. The I2S DMA holds 6 x 240 frames,
 which is 90 ms at 16 kHz, while a blocking WiFi connect takes seconds. Audio
@@ -320,6 +320,13 @@ the one place it waits for the panel is before deep sleep, which would otherwise
 cut a refresh in half. Almost all of a refresh is the library polling BUSY with
 `vTaskDelay()`, so the task is blocked for nearly its whole life and wants no
 priority to speak of.
+
+A separate dashboard worker performs a bounded GET into a 48000-byte PSRAM
+buffer. It receives a sensor snapshot from Display and never touches I2C.
+The orchestrator polls buttons during downloading, dwell and panel refreshes.
+Cancellation shuts down an established socket without waiting for worker exit;
+its client and buffer stay alive until it reports completion. Display borrows
+the immutable pixels until idle; a new download cannot reuse them before then.
 
 The third task came before the streaming upload rather than with it.
 [S8](implementation.md#s8----the-flow) measured the panel as most of what the
