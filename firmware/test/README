@@ -24,7 +24,9 @@ Coverage:
 - streaming WAV header bytes, publishing samples, capacity, duration, reuse,
   reallocation, allocation failure and cleanup;
 - e-paper shadow priming, both RAM planes, polarity, row stride and successive
-  partial updates, in both directions at the icon and the two RAM boundaries.
+  partial updates, in both directions at the icon and the two RAM boundaries;
+- dashboard frame bounds and metadata, unsupported formats/encoding, partial
+  receipt, interval overflow/clamping and deadline subtraction across work/sleep.
 
 These tests do not validate the physical display, PSRAM, task scheduling,
 concurrent memory visibility, GPIO, microphone or network. No hardware tests

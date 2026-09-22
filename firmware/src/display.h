@@ -62,7 +62,8 @@ class Display {
   static constexpr uint32_t kStackBytes = 8192;
 
   // Every screen, and the pre-clear -- which is the record's index as well.
-  enum class Screen : uint8_t { Clear, Idle, Listening, Working, Answer, Error, Silent, Count };
+  enum class Screen : uint8_t { Clear, Idle, Listening, Working, Answer, Error, Silent,
+                                Sensors, Dashboard, Stale, Count };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
@@ -78,6 +79,10 @@ class Display {
   };
 
   ~Display();
+  void sensors();
+  // The caller keeps pixels alive and unchanged until waitIdle() succeeds.
+  void dashboard(const uint8_t* pixels);
+  void staleIndicator();
 
   // Brings the panel up and starts the task. StickyScreen::begin() runs here,
   // on the caller's thread, before the task exists, which keeps the vision's
@@ -136,11 +141,12 @@ class Display {
     Screen screen = Screen::Count;  // Count: nothing waiting
     char text[StickyScreen::kMaxTextChars] = {0};
     char detail[StickyScreen::kMaxDetailChars] = {0};
+    const uint8_t* pixels = nullptr;
   };
 
   static void trampoline(void* self);
   void run();
-  void post(Screen screen, const char* text, const char* detail);
+  void post(Screen screen, const char* text, const char* detail, const uint8_t* pixels = nullptr);
   void draw(const Slot& slot);
 
   StickyScreen _screen;

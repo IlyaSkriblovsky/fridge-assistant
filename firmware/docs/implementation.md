@@ -33,7 +33,7 @@ which means asking.
 | S12 | DNS server | Names looked up past a router that stops answering | Built, not yet run on the device |
 | S13 | Fonts | Cyrillic, Greek and typography on the panel; D1 gone | Done |
 | S14 | Word wrap | An answer of several lines, laid out on the panel; half of D2 gone | Done |
-| S15 | Idle dashboard | Backend frame, telemetry, post-answer wait and scheduled refresh | Planned, not implemented |
+| S15 | Idle dashboard | Backend frame, telemetry, post-answer wait and scheduled refresh | Implemented; hardware acceptance pending |
 
 ## Why this order
 
@@ -2269,13 +2269,13 @@ with `pio test -e native`; `-f test_epaper` selects the display suite alone.
 Validation: all 20 native tests pass; git diff --check passes. No device needed.
 
 
-## S15 -- Idle dashboard (planned)
+## S15 -- Idle dashboard
 
-**Agreed 2026-09-21; no implementation or hardware acceptance yet.**
+**Implemented 2026-09-22; hardware acceptance pending.**
 The shared scenario is in
 [idle-screen.md](../../server/docs/use-cases/idle-screen.md); the wire format
 and scheduling semantics are in
-[device-contract.md](../../server/docs/device-contract.md#дашборд-план).
+[device-contract.md](../../server/docs/device-contract.md#дашборд).
 The device decisions are in [project-vision.md](project-vision.md#idle-dashboard).
 
 ### Build order
@@ -2316,3 +2316,47 @@ The device decisions are in [project-vision.md](project-vision.md#idle-dashboard
 Compression and energy comparisons are deferred to E10 and E9 respectively in
 [experiments.md](experiments.md); D10/D11 track the initial choices. Autonomous
 reminders and server-controlled answer dwell time are outside this step.
+
+### Implementation notes — 2026-09-22
+
+The server now exposes GET /sticky/dashboard, with a fixed mono1-v1 frame or
+an equivalent 1-bit PNG preview. It renders a diagnostic layout with telemetry;
+real content, sources and cache invalidation remain outside this step.
+
+Dashboard owns the HTTP worker and PSRAM frame. It validates status, format,
+MIME type, identity encoding, fixed length and complete receipt before Display
+can see the pixels. AI cancels it without joining on the capture path. Socket
+shutdown interrupts headers/body reads; a connect still in progress exits on
+its own timeout. The 15-second request budget includes headers and download;
+WiFi has its own 15-second budget. Redirects and chunked frames are rejected.
+
+The orchestrator now returns from each voice cycle into loop(), avoiding
+recursive cycles. It waits from Display's final refresh timestamp, retaining
+WiFi, then fetches and shows the dashboard. Cold/timer wakes take that path
+without capture or chirps. Up wakes remain offline and preserve the schedule;
+Up during the awake idle phase also toggles sound. Sensor reads are posted to
+Display, preserving the existing sole I2C owner.
+
+The deadline lives in RTC memory as raw slow-clock ticks; drawing, awake work
+and intervening Up sleeps all spend that interval. Raw ticks avoid rescaling
+absolute uptime after boot recalibration. Valid intervals clamp to 60–86400 s;
+missing/invalid/overflowing values and failed requests use one hour. An overdue
+deadline arms a 60-second timer instead of a wake loop.
+
+Dashboard is always a full refresh. Reserved white rectangles belong to the
+silent and failure indicators. Failed fetches retain the glass and mark only
+an existing known dashboard; a cold boot may show NO DASHBOARD. Both indicator
+partials use the driver's full-plane shadow priming. Unknown indicator state
+now preserves the glass instead of clearing it.
+
+Validation: 94 server tests and 24 native firmware tests pass. All six embedded
+environments build, including the final production and E1 firmware variants.
+The Docker image also passes an offline route smoke test for raw/PNG, both
+authentication methods and the existing audio fault endpoint. Server tests
+compare every PNG/raw pixel and exercise auth,
+telemetry and headers; native tests cover frame bounds, metadata, intervals,
+remaining time and the existing driver RAM invariants. These checks do not
+establish cancellation latency, actual RTC timing, physical polarity or button
+behavior. No serial device was connected during implementation, so flashing,
+battery timer wakes, voice interruption and visual acceptance are still due.
+S15 is not marked hardware-complete.

@@ -9,6 +9,8 @@ reply goes back as the text for the device's screen.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import hmac
 import io
@@ -19,15 +21,17 @@ import urllib.request
 import wave
 from collections.abc import AsyncIterator
 from datetime import datetime
+from typing import Annotated, Literal
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
 from google import genai
 from google.genai import errors
 from starlette.requests import ClientDisconnect
 
 import assistant
+import dashboard
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -176,17 +180,50 @@ async def authorize(request: Request) -> None:
     if scheme.lower() == "bearer" and hmac.compare_digest(given, expected):
         return
 
+    # A browser can open the PNG directly using its built-in password dialog.
+    # This is the same device secret, never a token in a URL or a public route.
+    preview = request.url.path == "/sticky/dashboard" and request.query_params.get("format") == "png"
+    if preview and scheme.lower() == "basic":
+        try:
+            username, _, password = base64.b64decode(given, validate=True).partition(b":")
+            if username == b"sticky" and hmac.compare_digest(password, expected):
+                return
+        except (ValueError, binascii.Error):
+            pass
+
     with contextlib.suppress(ClientDisconnect):
         await drain(request)
     client = request.client.host if request.client else "-"
     reason = "wrong token" if header else "no token"
     print(f"[auth] {request.method} {request.url.path} from {client}: {reason}")
-    raise HTTPException(401, headers={"WWW-Authenticate": "Bearer"})
+    challenge = 'Basic realm="Sticky dashboard"' if preview else "Bearer"
+    raise HTTPException(401, headers={"WWW-Authenticate": challenge})
 
 
 app = FastAPI(
     title="Assistant Server", lifespan=lifespan, dependencies=[Depends(authorize)]
 )
+
+
+@app.get("/sticky/dashboard")
+def sticky_dashboard(
+    format: Literal["mono1", "png"] = "mono1",
+    battery_pct: Annotated[int | None, Query(ge=0, le=100)] = None,
+    temperature_c: Annotated[float | None, Query(allow_inf_nan=False)] = None,
+    humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
+) -> Response:
+    """Render off the event loop; both formats encode the exact same frame."""
+    frame = dashboard.render(battery_pct, temperature_c, humidity_pct)
+    preview = format == "png"
+    return Response(
+        dashboard.png(frame) if preview else dashboard.mono1(frame),
+        media_type="image/png" if preview else "application/octet-stream",
+        headers={
+            "Dashboard-Format": "png" if preview else "mono1-v1",
+            "Next-Update-After": str(dashboard.NEXT_UPDATE_SECONDS),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.post("/audio")

@@ -51,7 +51,7 @@ uv run --env-file .env python main.py
 
 ## Токен прибора
 
-Каждый запрос, к `/audio` и к [намеренным сбоям](#намеренные-сбои), должен нести
+Каждый запрос, к `/audio`, дашборду и [намеренным сбоям](#намеренные-сбои), должен нести
 заголовок `Authorization: Bearer <DEVICE_TOKEN>`. Это делает зависимость
 `authorize()`, общая для всех эндпоинтов. Токен статичный, один на прибор и
 сервер, почему так — в [vision.md](vision.md#один-пользователь-один-прибор-один-токен).
@@ -155,6 +155,41 @@ curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
 Записи, сделанные прототипом, лежат в `recordings/`. Каждый такой запрос
 по-настоящему меняет список в Keep.
 
+## `GET /sticky/dashboard`
+
+Сервер рисует готовый монохромный кадр 800×480 в `dashboard.py` через Pillow.
+Пока это проверочный экран: ориентация, границы, чёрная и белая области и
+присланные прибором показания. Внешних источников и кэша дашборда пока нет.
+Рендер выполняется в thread pool FastAPI, не блокируя async `/audio`.
+
+- По умолчанию и с `format=mono1`: `application/octet-stream`,
+  `Dashboard-Format: mono1-v1`, ровно 48 000 байт, 1 — чёрный, MSB слева.
+- С `format=png`: тот же кадр как однобитный `image/png` для браузера.
+- Необязательные параметры: `battery_pct` (целое 0–100), `temperature_c`
+  (конечное число), `humidity_pct` (0–100). Пропущенные показания рисуются
+  как неизвестные; некорректные значения и неизвестный формат дают `422`.
+- Оба формата возвращают `Next-Update-After: 3600` и `Cache-Control: no-store`.
+
+```sh
+curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
+  'http://localhost:8000/sticky/dashboard?battery_pct=76&temperature_c=23.4&humidity_pct=48.2' \
+  -o dashboard.mono1
+curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
+  'http://localhost:8000/sticky/dashboard?format=png' -o dashboard.png
+```
+
+Для просмотра непосредственно в браузере откройте
+`http://localhost:8000/sticky/dashboard?format=png` (или URL своего сервера).
+В стандартном диалоге входа логин — `sticky`, пароль — `DEVICE_TOKEN`.
+Это дополнительный способ передать тот же секрет только для PNG;
+авторизация остаётся в общей зависимости приложения. Токен в query string
+не поддерживается. Прибор использует Bearer и пока не декодирует PNG.
+
+Подробности упаковки, зарезервированные области локальных индикаторов и
+срок следующего запроса — в [контракте](device-contract.md#дашборд).
+Реальное содержание и оценка сжатия — следующий этап, см.
+[idle-screen.md](use-cases/idle-screen.md).
+
 ## Намеренные сбои
 
 Прошивка различает четыре плохих исхода запроса: `NO SERVER`, `SERVER ERROR`,
@@ -202,7 +237,8 @@ curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
 
 После успешных тестов CI собирает образ, запускает его с фиктивными настройками и
 проверяет, что `POST /audio/fault/empty` с токеном отвечает `{}`, а без
-токена — `401`. Этот эндпоинт не ходит ни в Gemini, ни в Keep. Образ из `main` после этого уходит в GHCR:
+токена — `401`. Также проверяются бинарный кадр и однобитный PNG дашборда.
+Эти запросы не ходят ни в Gemini, ни в Keep. Образ из `main` после этого уходит в GHCR:
 
 | Образ | Что |
 | --- | --- |
@@ -285,7 +321,8 @@ proxy_request_buffering off;
 
 | Где | Что |
 | --- | --- |
-| `main.py` | FastAPI-приложение: `POST /audio`, намеренные сбои, запуск |
+| `main.py` | FastAPI: `POST /audio`, `GET /sticky/dashboard`, намеренные сбои, запуск |
+| `dashboard.py` | Pillow: проверочный макет, упаковка mono1-v1 и PNG |
 | `main.py`: `authorize()`, `drain()` | Токен прибора, общая зависимость всех эндпоинтов; тело, дочитанное перед отказом или сбоем |
 | `main.py`: `settle_wav_lengths()`, `describe_wav()` | Длины в заголовке потокового WAV, строка с его параметрами для лога |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |

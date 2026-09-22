@@ -63,6 +63,9 @@ void Display::clear() {
 }
 
 void Display::idle() { post(Screen::Idle, nullptr, nullptr); }
+void Display::sensors() { post(Screen::Sensors, nullptr, nullptr); }
+void Display::dashboard(const uint8_t* pixels) { post(Screen::Dashboard, nullptr, nullptr, pixels); }
+void Display::staleIndicator() { post(Screen::Stale, nullptr, nullptr); }
 
 void Display::listening() { post(Screen::Listening, nullptr, nullptr); }
 
@@ -74,7 +77,7 @@ void Display::answer(const char* text) { post(Screen::Answer, text, nullptr); }
 
 void Display::error(const char* title, const char* detail) { post(Screen::Error, title, detail); }
 
-void Display::post(Screen screen, const char* text, const char* detail) {
+void Display::post(Screen screen, const char* text, const char* detail, const uint8_t* pixels) {
   if (_task == nullptr) return;
 
   // Copied through textCopy() rather than raw, so that the slot's bound --
@@ -82,6 +85,7 @@ void Display::post(Screen screen, const char* text, const char* detail) {
   // Cyrillic answer cut at a byte count would end in half a letter.
   Slot next;
   next.screen = screen;
+  next.pixels = pixels;
   textCopy(next.text, sizeof(next.text), text);
   textCopy(next.detail, sizeof(next.detail), detail);
 
@@ -151,7 +155,7 @@ void Display::draw(const Slot& slot) {
   // Working updates only the middle strip and retains Listening's indicator.
   // Read on this task, after boot, without delaying capture or the answer chirp.
   if (slot.screen == Screen::Idle || slot.screen == Screen::Listening || slot.screen == Screen::Answer ||
-      slot.screen == Screen::Error || slot.screen == Screen::Silent) {
+      slot.screen == Screen::Error || slot.screen == Screen::Silent || slot.screen == Screen::Sensors) {
     record.batteryPercent = stickyBattery::readPercent();
     _screen.setBatteryPercent(record.batteryPercent);
     record.climate = stickyClimate::read();
@@ -161,6 +165,14 @@ void Display::draw(const Slot& slot) {
   switch (slot.screen) {
     case Screen::Clear:
       _screen.clear();
+      break;
+    case Screen::Sensors:
+      break;
+    case Screen::Dashboard:
+      _screen.dashboard(slot.pixels);
+      break;
+    case Screen::Stale:
+      refused = !_screen.staleIndicator();
       break;
     case Screen::Idle:
       _screen.idle();

@@ -25,6 +25,7 @@ the hardware traps.
 | `src/text.h/.cpp` | Laying UTF-8 out in a face made of several GFXfonts, because the library cannot |
 | `src/fonts/` | The four faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
+| `src/dashboard.h/.cpp`, `src/dashboard_protocol.h` | Background frame download, validation and interval rules |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/silent_mode.h/.cpp` | NVS sound preference, loaded before buzzer/display work |
 | `src/silent_icon.h` | Reserved top-margin indicator geometry, shared with the preview |

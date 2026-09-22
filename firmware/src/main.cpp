@@ -1,7 +1,7 @@
 // The orchestrator: wake, latch, microphone, capture task, ready chirp, WiFi and
 // the Listening screen, the request opened and the recording streamed into it
 // while the button is held, release, the tail of the body, taken chirp, answer
-// or error chirp, draw, deep sleep.
+// or error chirp, draw, answer dwell, dashboard, deep sleep.
 //
 // **The order at the front is load-bearing and measured.** Capture starts
 // before the chirp, because the chirp means "the microphone is live" and a
@@ -30,14 +30,19 @@
 // eleven characters and blocks once the UART's FIFO is full; the lines that
 // describe the wait are written once it is over.
 //
-// **Every exit is deep sleep with the latch held**, the error paths and the
-// discarded tap included, and there is exactly one of them: finish().
+// finish() returns a voice cycle to the idle controller. Only runIdle() (or
+// an offline Up wake) enters deep sleep, after the display finishes.
 //
 // The stale-lease rule, openRenewingStaleLease(), lives here because it spans
 // Backend and WifiLink and neither half can see it alone.
 
 #include <Arduino.h>
 #include <esp_timer.h>
+#include <esp_private/esp_clk.h>
+#include <esp_attr.h>
+#include <soc/rtc.h>
+#include "config.h"
+#include "dashboard.h"
 #include <stdio.h>
 
 #include "secrets.h"
@@ -72,14 +77,6 @@ constexpr uint32_t kPollMs = 10;
 // 16 ms, so an abort that is going to land has landed long before this.
 constexpr uint32_t kCaptureJoinMs = 500;
 
-// How long finish() gives the panel to go idle before it sleeps anyway.
-// Bounded for the capture join's reason: the library waits up to 30 s on a BUSY
-// pin that never drops, and a question must not end by hanging with the rail
-// latched. The longest queue a question can leave is a cold start's -- the
-// pre-clear, LISTENING and the answer, about 2.3 + 2.3 + 1.3 s (S8, S9) -- so
-// this is that with room to spare, and a panel still busy past it is wedged.
-constexpr uint32_t kDisplayDrainMs = 10000;
-
 // What the question came to. The first five are Backend's results, the rest are
 // the ways one ends before there is anything to send.
 enum class Outcome : uint8_t {
@@ -101,6 +98,15 @@ Capture capture;
 WifiLink wifi;
 Display display;
 Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
+Dashboard dashboard;
+RTC_DATA_ATTR uint64_t dashboardDeadlineTicks = 0;
+enum class IdlePhase { Sleep, AfterVoice, Fetch };
+IdlePhase idlePhase = IdlePhase::Fetch;
+Outcome lastOutcome = Outcome::Idle;
+bool resumeDashboard = false;
+bool recordingLogged = false;
+bool coldScreen = true;
+bool aiArmed = true;
 
 // The moments the question is measured against, and two of them are not the
 // moment this thread reaches them:
@@ -166,9 +172,8 @@ void ipText(char* out, size_t size, uint32_t address) {
 // while a question is waiting on this thread: after the last chirp, or on a
 // path that has already failed.
 void logRecording() {
-  static bool logged = false;
-  if (logged || capture.stopReason() == Capture::StopReason::None) return;
-  logged = true;
+  if (recordingLogged || capture.stopReason() == Capture::StopReason::None) return;
+  recordingLogged = true;
 
   Serial1.printf("  recording: %s after %lu ms held -- %lu ms of audio, %lu bytes to send\n",
                  capture.stopReasonName(), static_cast<unsigned long>(button.heldMs()),
@@ -278,55 +283,19 @@ void waitForRelease() {
   stickyPower::waitForWakeButtonsReleased();
 }
 
-// The one exit. Called straight after whichever screen was posted, so
-// everything above it has already happened -- except, usually, the panel.
-[[noreturn]] void finish(Outcome outcome) {
-  // The capture task owns the microphone until it is joined, so the abort comes
-  // before mic.end() and not after it. Both are no-ops when the task never
-  // started or has already reported.
+// End a voice cycle without sleeping: loop() owns the dwell and dashboard.
+void finish(Outcome outcome) {
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
   backend.close();
-  wifi.end();
-
   logRecording();
-
-  // Nothing sleeps with the panel mid-refresh: deep sleep parks EPD_EN and the
-  // rail goes with it. This is past the last chirp, so it is awake time rather
-  // than wait, and it is printed apart from the wait for that reason.
-  const int64_t drainStartUs = esp_timer_get_time();
-  const bool panelIdle = display.waitIdle(kDisplayDrainMs);
-  const uint32_t drainMs = millisBetween(drainStartUs, esp_timer_get_time());
-
-  if (panelIdle) {
-    logScreen("pre-clear", Display::Screen::Clear);
-    logScreen("notebook", Display::Screen::Idle);
-    logScreen("LISTENING", Display::Screen::Listening);
-    logScreen("WORKING", Display::Screen::Working);
-    logScreen("answer screen", Display::Screen::Answer);
-    logScreen("error screen", Display::Screen::Error);
-  } else {
-    Serial1.printf("  the panel had not finished after %lu ms -- sleeping anyway\n",
-                   static_cast<unsigned long>(drainMs));
-  }
-  logTiming(outcome, panelIdle);
-
-  if (display.running()) {
-    Serial1.printf("  panel: up in %lu ms on this thread, %lu ms waited for before sleeping;"
-                   " %lu of %lu bytes of the display task's stack never used\n",
-                   static_cast<unsigned long>(g_panelUpMs), static_cast<unsigned long>(drainMs),
-                   static_cast<unsigned long>(display.stackUnusedBytes()),
-                   static_cast<unsigned long>(Display::kStackBytes));
-  }
-
-  Serial1.printf("  %s, %lu ms awake\n", outcomeName(outcome),
-                 static_cast<unsigned long>((esp_timer_get_time() - g_entryUs) / 1000));
-
-  waitForRelease();
-  Serial1.flush();
-
-  stickyPower::deepSleep();
+  lastOutcome = outcome;
+  idlePhase = outcome == Outcome::Tap || outcome == Outcome::Idle
+      ? (resumeDashboard ? IdlePhase::Fetch : IdlePhase::Sleep)
+      : IdlePhase::AfterVoice;
+  // A capped/failed question may leave AI held. Only a fresh press starts one.
+  aiArmed = !button.isDown();
 }
 
 // Display::start(), timed. Every path to a screen goes through it, and only the
@@ -344,7 +313,7 @@ bool startDisplay() {
 // chirp rather than after it for the reason every screen is: the post costs
 // nothing, and the chirp is 450 ms the panel would otherwise spend waiting for
 // this thread to finish making a sound.
-[[noreturn]] void fail(Outcome outcome, const char* title, const char* detail) {
+void fail(Outcome outcome, const char* title, const char* detail) {
   Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
 
   if (startDisplay()) {
@@ -403,7 +372,7 @@ bool openRenewingStaleLease() {
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.renewMs()),
                    wifi.lastError());
-    fail(Outcome::NoWifi, "NO WIFI", nullptr);
+    return false;
   }
 
   // A server usually hands back the address it handed out before, and when it
@@ -488,7 +457,9 @@ void logStream(Backend::Result result) {
 // Also reached from under the hold, when the request fails while the user is
 // still talking -- which is why the recording is stopped first. It is a
 // no-op on one that has already stopped.
-[[noreturn]] void conclude(Backend::Result result) {
+void conclude(Backend::Result result) {
+  if (result == Backend::Result::NoServer && !wifi.online())
+    return fail(Outcome::NoWifi, "NO WIFI", nullptr);
   capture.abort();
 
   Outcome outcome = Outcome::Broken;
@@ -569,66 +540,22 @@ void logStream(Backend::Result result) {
 // One pass of the upload under the hold: the request opened the first time
 // through, then whatever the capture task has committed since the last pass. A
 // failure here ends the question now, with the user still talking.
-void stream() {
-  if (!backend.streaming() && !openRenewingStaleLease()) conclude(backend.result());
-  if (!sendCommitted()) conclude(backend.result());
+bool stream() {
+  if ((!backend.streaming() && !openRenewingStaleLease()) || !sendCommitted()) {
+    conclude(backend.result());
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
 
-void setup() {
-  g_entryUs = esp_timer_get_time();
-
-  // First thing on boot -- everything below depends on the board staying alive.
-  stickyPower::holdLatch();
-  stickyPower::enableUpWake();
-  button.begin(g_entryUs);  // takes GPIO4 back from the RTC pad and pulls it up
-
-  // No settling delay after it: nothing waits on one, and it would come
-  // straight off the wake-to-chirp time.
-  Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
-
-  const bool preferenceLoaded = silentMode::load();
-  if (!preferenceLoaded) Serial1.println("  sound preference unreadable; muted");
-  const bool upWake = stickyPower::wokeFromDeepSleep() &&
-      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
-      (esp_sleep_get_ext1_wakeup_status() & (1ULL << stickyPower::kPinUpButton));
-  if (upWake) {
-    if (!preferenceLoaded || !silentMode::toggle()) {
-      Serial1.println("  silent mode could not be saved; unchanged");
-    }
-    Serial1.printf("  silent mode: %s\n", silentMode::enabled() ? "on" : "off");
-    if (startDisplay()) {
-      display.silentIndicator();
-      display.waitIdle(UINT32_MAX);
-      logScreen("silent indicator", Display::Screen::Silent);
-      const auto& result = display.record(Display::Screen::Silent);
-      if (result.error[0]) Serial1.printf("  indicator: %s\n", result.error);
-    } else {
-      Serial1.printf("  panel: %s\n", display.lastError());
-    }
-    waitForRelease();
-    Serial1.flush();
-    stickyPower::deepSleep();
-  }
-
-  Serial1.println();
-  Serial1.printf("question -- wake %s, reset %s\n", stickyPower::wakeupCauseName(),
-                 stickyPower::resetReasonName());
-
-  // No held button means there is no question, including cold power-on and
-  // an AI tap released before setup. Do not start capture or networking.
-  if (!button.isDown()) {
-    if (!startDisplay()) {
-      Serial1.printf("  panel: %s\n", display.lastError());
-      stickyBuzzer::error();
-      finish(Outcome::Broken);
-    }
-    if (!stickyPower::wokeFromDeepSleep()) display.clear();
-    display.idle();
-    finish(Outcome::Idle);
-  }
-
+void runVoice(int64_t pressUs) {
+  g_entryUs = pressUs;
+  g_releaseUs = g_releaseSeenUs = g_lastChirpUs = 0;
+  g_tailMs = g_takenChirpMs = g_networkWaitMs = g_answerWaitMs = 0;
+  recordingLogged = false;
+  button.begin(g_entryUs);
   WifiLink::Lease lease;
   if (WifiLink::cachedLease(lease)) {
     char ip[16];
@@ -644,10 +571,10 @@ void setup() {
 
   // Capture before the chirp, and nothing that can block between them -- see
   // the top of this file.
-  if (!mic.begin()) fail(Outcome::Broken, "NO MICROPHONE", mic.lastError());
-  if (!audio.begin(mic.sampleRate())) fail(Outcome::Broken, "NO MEMORY", audio.lastError());
+  if (!mic.begin()) return fail(Outcome::Broken, "NO MICROPHONE", mic.lastError());
+  if (!audio.begin(mic.sampleRate())) return fail(Outcome::Broken, "NO MEMORY", audio.lastError());
   if (!capture.start(mic, audio, button)) {
-    fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
+    return fail(Outcome::Broken, "NO MICROPHONE", "the capture task would not start");
   }
   // Timed as the chirp starts, not as it returns: the chirp is 110 ms of
   // blocking, and a timestamp taken after it would report the end of the chirp
@@ -658,22 +585,23 @@ void setup() {
   Serial1.printf("  ready chirp %lu ms into setup(), with the recording already running\n",
                  static_cast<unsigned long>((chirpUs - g_entryUs) / 1000));
 
-  g_beginUs = esp_timer_get_time();
-  if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
-    fail(Outcome::NoWifi, "NO WIFI", wifi.lastError());
+  if (!wifi.online()) {
+    g_beginUs = esp_timer_get_time();
+    if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer))
+      return fail(Outcome::NoWifi, "NO WIFI", wifi.lastError());
   }
 
   // The one failure with nothing to draw a message on: chirp, log and sleep.
   if (!startDisplay()) {
     Serial1.printf("  the panel would not start: %s\n", display.lastError());
     stickyBuzzer::error();
-    finish(Outcome::Broken);
+    return finish(Outcome::Broken);
   }
 
   // A cold start is the only time the controller's previous-image RAM has
   // nothing to do with what is on the glass. Posted ahead of LISTENING and never
   // superseded by it -- see Display.
-  if (!stickyPower::wokeFromDeepSleep()) display.clear();
+  if (coldScreen) { display.clear(); coldScreen = false; }
   display.listening();
 
   // Everything from here until the release is the capture task's; this loop
@@ -690,7 +618,7 @@ void setup() {
     if (wifi.poll() == WifiLink::State::Failed) {
       capture.abort();
     } else if (wifi.online() && capture.pastMinimumHold()) {
-      stream();
+      if (!stream()) return;
     }
     delay(kPollMs);
   }
@@ -702,7 +630,7 @@ void setup() {
 
   if (capture.stopReason() == Capture::StopReason::ReadFailed) {
     logRecording();
-    fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
+    return fail(Outcome::Broken, "NO MICROPHONE", capture.lastError());
   }
 
   // Silent on purpose -- D7. The chirp below is the first sound a question
@@ -712,7 +640,7 @@ void setup() {
     logRecording();
     Serial1.println("  too short to be a question -- nothing sent");
     display.idle();
-    finish(Outcome::Tap);
+    return finish(Outcome::Tap);
   }
 
   // The loop above aborts for one reason only: the association failed, before
@@ -721,7 +649,7 @@ void setup() {
     logRecording();
     Serial1.printf("  no network after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
                    wifi.lastError());
-    fail(Outcome::NoWifi, "NO WIFI", nullptr);
+    return fail(Outcome::NoWifi, "NO WIFI", nullptr);
   }
 
   // The vision's step 6, in two parts: the chirp says the question was taken,
@@ -740,7 +668,7 @@ void setup() {
     const int64_t startUs = esp_timer_get_time();
     const bool ended = endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) conclude(backend.result());
+    if (!ended) return conclude(backend.result());
   }
 
   {
@@ -769,13 +697,13 @@ void setup() {
       logRecording();
       Serial1.printf("  no network after %lu ms: %s\n",
                      static_cast<unsigned long>(wifi.elapsedMs()), wifi.lastError());
-      fail(Outcome::NoWifi, "NO WIFI", nullptr);
+      return fail(Outcome::NoWifi, "NO WIFI", nullptr);
     }
 
     const int64_t startUs = esp_timer_get_time();
     const bool ended = openRenewingStaleLease() && endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) conclude(backend.result());
+    if (!ended) return conclude(backend.result());
   }
 
   const int64_t startUs = esp_timer_get_time();
@@ -785,6 +713,199 @@ void setup() {
   conclude(result);
 }
 
+namespace {
+
+void scheduleDashboard(uint64_t receivedTicks, uint32_t seconds) {
+  dashboardDeadlineTicks = receivedTicks + rtc_time_us_to_slowclk(
+      seconds * 1000000ULL, esp_clk_slowclk_cal_get());
+}
+
+uint64_t nextSleepUs() {
+  const uint64_t now = rtc_time_get();
+  if (!dashboardDeadlineTicks) scheduleDashboard(now, config::kDashboardDefaultSeconds);
+  // Store raw ticks: recalibration at boot must not rescale an absolute uptime
+  // and move the deadline. Only the remaining duration uses current calibration.
+  const uint64_t left = dashboardDeadlineTicks > now
+      ? rtc_time_slowclk_to_us(dashboardDeadlineTicks - now, esp_clk_slowclk_cal_get()) : 0;
+  return dashboardProtocol::sleepUs(left, 0);
+}
+
+// Poll on every idle path, including panel and sensor waits. Never join a
+// cancelled network worker before starting capture.
+bool idleButton() {
+  dashboard.poll();
+  static int64_t releasedUs = 0;
+  if (!button.isDown()) {
+    if (!releasedUs) releasedUs = esp_timer_get_time();
+    if (esp_timer_get_time() - releasedUs >= config::kButtonDebounceMs * 1000LL)
+      aiArmed = true;
+  } else {
+    releasedUs = 0;
+    if (aiArmed) {
+      dashboard.cancel();
+      resumeDashboard = idlePhase != IdlePhase::Sleep;
+      return true;
+    }
+  }
+  static int64_t upSinceUs = 0;
+  static bool upHandled = false;
+  if (digitalRead(stickyPower::kPinUpButton) != LOW) {
+    upSinceUs = 0;
+    upHandled = false;
+  } else if (!upHandled) {
+    if (!upSinceUs) upSinceUs = esp_timer_get_time();
+    if (esp_timer_get_time() - upSinceUs >= config::kButtonDebounceMs * 1000LL &&
+        display.waitIdle(0)) {
+      upHandled = true;
+      if (silentMode::toggle() && startDisplay()) display.silentIndicator();
+    }
+  }
+  return false;
+}
+
+// False means a new voice press; true means the operation is complete.
+bool waitPanel() {
+  for (;;) {
+    if (idleButton()) return false;
+    if (display.waitIdle(0)) return true;
+    delay(kPollMs);
+  }
+}
+
+void dashboardFailed() {
+  Serial1.println("  dashboard unavailable; keeping the previous screen, retry in one hour");
+  scheduleDashboard(rtc_time_get(), config::kDashboardDefaultSeconds);
+  if (startDisplay()) {
+    if (coldScreen) {
+      display.clear();
+      display.error("NO DASHBOARD", nullptr);
+      coldScreen = false;
+    } else display.staleIndicator();
+  }
+  idlePhase = IdlePhase::Sleep;
+}
+
+// Runs until sleep or a new AI press. All long panel/network operations live
+// on their own tasks, so this loop can hand a press straight to runVoice().
+void runIdle() {
+  if (idlePhase == IdlePhase::AfterVoice) {
+    if (!waitPanel()) return;
+    const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
+    const int64_t drawnUs = display.record(which).endUs;
+    logScreen("final voice screen", which);
+    logTiming(lastOutcome, true);
+    // With no working panel there is no completed refresh to wait from.
+    const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
+    while (esp_timer_get_time() < until) {
+      if (idleButton()) return;
+      delay(kPollMs);
+    }
+    idlePhase = IdlePhase::Fetch;
+  }
+  if (idlePhase == IdlePhase::Fetch) {
+    if (idleButton()) return;
+    if (!startDisplay()) { dashboardFailed(); }
+    else {
+      if (!waitPanel()) return;
+      display.sensors();
+      if (!waitPanel()) return;
+      const auto snapshot = display.record(Display::Screen::Sensors);
+      if (!wifi.online()) g_beginUs = esp_timer_get_time();
+      if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
+        dashboardFailed();
+      } else {
+        while (wifi.poll() == WifiLink::State::Connecting) {
+          if (idleButton()) return;
+          delay(kPollMs);
+        }
+        // A previous request may still be returning from cancellation.
+        while (!dashboard.done()) {
+          if (idleButton()) return;
+          delay(kPollMs);
+        }
+        if (!wifi.online() || !dashboard.start(snapshot.batteryPercent, snapshot.climate)) {
+          dashboardFailed();
+        } else {
+          while (!dashboard.done()) {
+            if (idleButton()) return;
+            delay(kPollMs);
+          }
+          if (idleButton()) return;
+          if (!dashboard.ok()) dashboardFailed();
+          else {
+            scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
+            Serial1.printf("  dashboard: 48000 bytes, next update in %lu s\n",
+                           static_cast<unsigned long>(dashboard.nextSeconds()));
+            if (coldScreen) { display.clear(); coldScreen = false; }
+            display.dashboard(dashboard.pixels());
+            idlePhase = IdlePhase::Sleep;
+          }
+        }
+      }
+    }
+  }
+  if (!waitPanel()) return;
+  while (!dashboard.done()) {
+    if (idleButton()) return;
+    delay(kPollMs);
+  }
+  // Preserve the deadline even if Up (or a held AI after a capped recording)
+  // delays entry to sleep. AI remains responsive while Up is held.
+  while (digitalRead(stickyPower::kPinUpButton) == LOW || button.isDown()) {
+    if (idleButton()) return;
+    delay(kPollMs);
+  }
+  if (idleButton()) return;
+  if (!waitPanel()) return;
+  logScreen("dashboard", Display::Screen::Dashboard);
+  logScreen("dashboard status", Display::Screen::Stale);
+  Serial1.printf("  %s; panel startup %lu ms, display stack unused %lu bytes\n",
+                 outcomeName(lastOutcome), static_cast<unsigned long>(g_panelUpMs),
+                 static_cast<unsigned long>(display.stackUnusedBytes()));
+  Serial1.printf("  sleeping; dashboard timer in %llu ms\n",
+                 static_cast<unsigned long long>(nextSleepUs() / 1000));
+  dashboard.close();
+  wifi.end();
+  Serial1.flush();
+  stickyPower::deepSleep(nextSleepUs());
+}
+
+}  // namespace
+
+void setup() {
+  g_entryUs = esp_timer_get_time();
+  stickyPower::holdLatch();
+  stickyPower::enableUpWake();
+  button.begin(g_entryUs);
+  Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
+  coldScreen = !stickyPower::wokeFromDeepSleep();
+  if (coldScreen) dashboardDeadlineTicks = 0;
+  const bool preferenceLoaded = silentMode::load();
+  if (!preferenceLoaded) Serial1.println("  sound preference unreadable; muted");
+  const bool upWake = stickyPower::wokeFromDeepSleep() &&
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
+      (esp_sleep_get_ext1_wakeup_status() & (1ULL << stickyPower::kPinUpButton));
+  if (upWake) {
+    if (!preferenceLoaded || !silentMode::toggle())
+      Serial1.println("  silent mode could not be saved; unchanged");
+    Serial1.printf("  silent mode: %s\n", silentMode::enabled() ? "on" : "off");
+    if (startDisplay()) {
+      display.silentIndicator();
+      display.waitIdle(UINT32_MAX);
+      logScreen("silent indicator", Display::Screen::Silent);
+    }
+    waitForRelease();
+    Serial1.flush();
+    stickyPower::deepSleep(nextSleepUs());
+  }
+  Serial1.printf("wake %s, reset %s\n", stickyPower::wakeupCauseName(), stickyPower::resetReasonName());
+  // Keep this physical check in setup: exp_e1_firmware wraps it for its rig.
+  if (button.isDown()) runVoice(g_entryUs);
+  else idlePhase = coldScreen || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER
+      ? IdlePhase::Fetch : IdlePhase::Sleep;
+}
+
 void loop() {
-  // Never reached: setup() always ends in deep sleep.
+  runIdle();
+  runVoice(esp_timer_get_time());
 }
