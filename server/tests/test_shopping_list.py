@@ -80,3 +80,23 @@ def test_service_errors(keep, error, stage):
     else:
         keep.sync.side_effect = [error] if stage == "initial_sync" else [None, error]
     assert shopping.add(["Хлеб"]) == {"error": f"Google Keep failed: {error}"}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("  молоко   UHT ", "Молоко UHT"),
+    ("iPhone", "IPhone"),
+    ("2 л молока", "2 Л молока"),
+    ("«сыр»", "«Сыр»"),
+])
+def test_added_items_start_with_uppercase(keep, text, expected):
+    shopping.add([text])
+    assert keep.get.return_value.unchecked[0].text == expected
+
+
+@pytest.mark.parametrize("checked", [False, True])
+def test_existing_items_are_capitalized_without_changing_other_letters(keep, checked):
+    note = keep.get.return_value
+    note.add("молоко UHT", checked=checked)
+    shopping.add(["молоко UHT"])
+    assert len(note.items) == 1
+    assert note.unchecked[0].text == "Молоко UHT"

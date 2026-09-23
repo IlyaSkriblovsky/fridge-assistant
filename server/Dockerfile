@@ -24,7 +24,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim
 
-RUN useradd --system --no-create-home assistant
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --system --no-create-home assistant \
+    && mkdir /data && chown assistant:assistant /data
 
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
@@ -33,7 +37,8 @@ COPY fonts/ ./fonts/
 
 # Unbuffered, because the log is print() and docker has no terminal to flush it.
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DATABASE_PATH=/data/dashboard.sqlite3
 
 USER assistant
 EXPOSE 8000

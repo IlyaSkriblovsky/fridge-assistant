@@ -11,11 +11,15 @@ import pytest
 import pytest_asyncio
 
 import main
+import metrics
 import shopping_list
 
 
 @pytest.fixture(autouse=True)
-def offline(monkeypatch):
+def offline(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "dashboard.sqlite3"))
+    metrics.initialize()
+    monkeypatch.setattr(shopping_list, "refresh", lambda: None)
     for name in main.REQUIRED_ENV:
         monkeypatch.setenv(name, "test")
 

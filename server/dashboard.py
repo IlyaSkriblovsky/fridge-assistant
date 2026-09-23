@@ -1,6 +1,10 @@
-"""Sticky's diagnostic dashboard; layout stays independent of wire encoding."""
+"""Sticky dashboard; layout stays independent of wire encoding."""
 
 import io
+import time
+
+from metrics import Metric
+from russian import plural_form
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 800, 480
 NEXT_UPDATE_SECONDS = 3600
+SHOPPING_STALE_AFTER_SECONDS = 45 * 60
 # These rectangles belong to firmware indicators, including their backgrounds.
 LOCAL_REGIONS = ((176, 8, 223, 39), (240, 8, 271, 39))
 
@@ -39,21 +44,26 @@ def render(
     battery_pct: int | None = None,
     temperature_c: float | None = None,
     humidity_pct: float | None = None,
+    shopping: Metric | None = None,
 ) -> Image.Image:
     """One monochrome frame, in visible-screen coordinates (buttons on top)."""
     frame = Image.new("1", (WIDTH, HEIGHT), 1)
     draw = ImageDraw.Draw(frame)
-    font = ImageFont.load_default(size=24)
-    title = ImageFont.load_default(size=44)
-    draw.rectangle((0, 0, WIDTH - 1, HEIGHT - 1), outline=0)
-    draw.text((32, 66), "STICKY / IDLE", font=title, fill=0)
-    draw.text((32, 128), "Rendered on the server", font=font, fill=0)
+    font_path = str(Path(__file__).with_name("fonts") / "FreeSansBold.ttf")
+    title = ImageFont.truetype(font_path, 36)
+    number = ImageFont.truetype(font_path, 112)
     draw_indicators(draw, battery_pct, temperature_c, humidity_pct)
-    draw.rectangle((32, 364, 127, 427), fill=0)
-    draw.rectangle((144, 364, 239, 427), outline=0, width=2)
-    draw.text((264, 378), "800 x 480 / 1 bit", font=font, fill=0)
-    # Asymmetric marks make rotation and bit polarity easy to check on hardware.
-    draw.line((WIDTH - 65, HEIGHT - 33, WIDTH - 17, HEIGHT - 33), fill=0, width=3)
+    draw.line((32, 60, WIDTH - 32, 60), fill=0, width=2)
+    draw.text((40, 102), "Список покупок", font=title, fill=0)
+    draw.text((40, 160), "—" if shopping is None else str(shopping.value), font=number, fill=0)
+    label = "пунктов" if shopping is None else plural_form(
+        shopping.value, "пункт", "пункта", "пунктов"
+    )
+    draw.text((44, 296), label, font=indicator_font(), fill=0)
+    if shopping is None:
+        draw.text((44, 390), "Данные ещё не получены", font=indicator_font(), fill=0)
+    elif time.time() - shopping.updated_at > SHOPPING_STALE_AFTER_SECONDS:
+        draw.text((44, 390), "Данные давно не обновлялись", font=indicator_font(), fill=0)
     for region in LOCAL_REGIONS:
         draw.rectangle(region, fill=1)
     return frame

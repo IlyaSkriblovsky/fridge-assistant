@@ -35,8 +35,6 @@ async def test_dashboard_returns_server_format_png(client):
     assert image.size == (800, 480)
     assert image.mode == "1"
     assert image.tobytes() == dashboard.render(76, -3.4, 48.2).tobytes()
-    assert image.getpixel((40, 380)) == 0
-    assert image.getpixel((180, 380)) == 255
     for left, top, right, bottom in dashboard.LOCAL_REGIONS:
         assert image.crop((left, top, right + 1, bottom + 1)).getextrema() == (255, 255)
 

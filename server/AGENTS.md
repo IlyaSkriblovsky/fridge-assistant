@@ -20,6 +20,7 @@
 | --- | --- |
 | `main.py` | FastAPI: `POST /audio`, `GET /sticky/dashboard`, намеренные сбои, запуск |
 | `dashboard.py` | Монохромный дашборд Sticky: рендер Pillow и однобитный PNG |
+| `metrics.py`, `jobs.py` | SQLite со снимками показателей и периодические задачи одного процесса |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |
 | `shopping_list.py` | Список покупок в Keep через gkeepapi |
 | `pyproject.toml`, `uv.lock` | Зависимости, ставятся через `uv` |

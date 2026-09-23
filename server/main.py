@@ -32,6 +32,9 @@ from starlette.requests import ClientDisconnect
 
 import assistant
 import dashboard
+import jobs
+import metrics
+import shopping_list
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -133,6 +136,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError(
             f"Set {', '.join(missing)}: run with --env-file .env (see docs/server.md)"
         )
+    metrics.initialize()
     app.state.gemini = genai.Client()  # takes GEMINI_API_KEY from the environment
 
     lan = lan_ip()
@@ -149,8 +153,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         f"  Public IP (needs port forwarding to be reachable): {public or 'unavailable'}"
     )
     print()
-    yield
-    await app.state.gemini.aio.aclose()
+    refresh_task = asyncio.create_task(jobs.periodic(
+        "shopping-list", shopping_list.refresh, shopping_list.REFRESH_SECONDS,
+        daytime_only=True
+    ))
+    try:
+        yield
+    finally:
+        refresh_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await refresh_task
+        await app.state.gemini.aio.aclose()
 
 
 async def drain(request: Request) -> int:
@@ -212,7 +225,7 @@ def sticky_dashboard(
     humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
 ) -> Response:
     """Render a 1bpp PNG off the event loop."""
-    frame = dashboard.render(battery_pct, temperature_c, humidity_pct)
+    frame = dashboard.render(battery_pct, temperature_c, humidity_pct, shopping_list.snapshot())
     return Response(
         dashboard.png(frame),
         media_type="image/png",
