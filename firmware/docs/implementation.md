@@ -2389,3 +2389,27 @@ and the host preview builds and produces its two remaining image sheets.
 A source search confirms no notebook drawing or local idle-screen API remains;
 `git diff --check` passes. The earlier successful hardware report does not
 cover these refinements; no USB serial device was connected to flash them.
+
+
+### E2 — verified HTTPS timing, 2026-09-23
+
+Added an isolated `exp_e2` environment using production Backend, WifiLink and
+Recording, with linker-injected certificate trust and a connection timestamp.
+The rig runs 12 HTTP/HTTPS pairs for a tiny request and 12 for a paced four-second
+stream, one request per wake, against the production fault endpoint. It leaves
+normal firmware behavior unchanged. `tools/e2_summary.py` reproduces summaries
+from the checked-in serial logs.
+
+Both the weak-signal 2026-09-22 run and the good-signal 2026-09-23 rerun completed
+all 48 requests with expected HTTP 500 and full uploads. The first attempted
+rig placed Backend on the loop stack and overflowed it before measurements;
+the measured rig uses static storage, matching the other rigs. Good-signal
+medians: 265 ms HTTP versus 1062 ms verified HTTPS for the tiny request, and
+76 versus 80 ms from the nominal last streamed sample to response headers.
+About 53 KiB additional internal RAM is needed. Full methodology, ranges,
+clock cost, limitations and migration implications are in
+[E2](experiments.md#e2----https-overhead). After reviewing the results on 2026-09-23, the user chose
+to retain HTTP and defer the HTTPS migration under D5. The experiment and standard environments build successfully;
+standard firmware was restored after capture. Its cold-boot UART log confirms
+a successful 48000-byte dashboard download (1391 ms HTTP request), display
+refresh and return to sleep. No display changes need acceptance.

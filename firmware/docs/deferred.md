@@ -13,7 +13,7 @@ in one place rather than archaeology through commit messages.
 | --- | --- | --- | --- |
 | D2 | An answer longer than a panel ends in an ellipsis | The rest of it reachable -- pagination, or a smaller face | The UI/UX pass |
 | D3 | Gauge percentage not yet validated against this pack | Validate discharge readings and decide low-battery behaviour | [E5](experiments.md) |
-| D5 | Plain HTTP, the device's token included | HTTPS | [E2](experiments.md) |
+| D5 | Plain HTTP, the device's token included | HTTPS | Explicit decision to resume migration; deferred after [E2](experiments.md#e2----https-overhead), 2026-09-23 |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
 | D10 | Dashboard sends a 48000-byte frame without compression | Decide whether and how to compress real dashboard frames | Dashboard design is chosen; [E10](experiments.md#e10----dashboard-compression-deferred) |
@@ -56,6 +56,19 @@ Working and deep sleep retain it. Bus errors and out-of-range values show `?`.
 The gauge configuration is left untouched. Its estimate still needs checking
 against this battery over a discharge cycle in [E5](experiments.md); displaying
 a percentage does not establish its accuracy. Acting on low charge remains open.
+
+## D5 -- HTTPS
+
+**Decision, 2026-09-23:** after reviewing E2, the user chose to defer the
+migration and keep HTTP for audio and dashboard requests. E2 is complete;
+its results, raw logs and repeatable rig are retained in
+[experiments.md](experiments.md#e2----https-overhead).
+
+Verified HTTPS added about 0.8 s per fresh connection and 53 KiB of internal
+RAM; the good-signal stream tail was 76 ms HTTP versus 80 ms HTTPS. Resume
+only on an explicit migration decision. That work includes certificate trust
+and clock handling in both clients, then full-firmware validation of short and
+long voice requests, dashboard downloads and memory headroom.
 
 ## D7 -- Nothing for a press too short
 
