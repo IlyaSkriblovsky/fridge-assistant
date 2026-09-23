@@ -37,8 +37,8 @@ the hardware traps.
 | `tools/gfxfont.py` | Regenerates `src/fonts/` from the GNU FreeFont TTFs. Its docstring is the format |
 | `docs/project-vision.md` | The idea, the decisions, the pin map, the traps |
 | `docs/deferred.md` | Shortcuts taken on purpose, and what each stands in for |
-| `docs/experiments.md` | Measurements still owed, and what each one unblocks |
-| `docs/implementation.md` | The build order, step by step, and notes from each step |
+| `docs/experiments.md` | Short experiment index; open only the relevant linked record |
+| `docs/implementation.md` | Current architecture, ownership, invariants and verification gaps |
 | `platformio.ini` | Pinned Seeed_GFX2 and platform revisions, plus ArduinoJson |
 
 `src/sticky/` is the board: a module belongs there when it cannot be read
@@ -90,7 +90,7 @@ is excluded from the embedded build job. Nothing runs on hardware in CI.
   real library bugs -- inverted polarity and a missing previous-image plane on
   partial refresh. Removing either brings back an inverted or smearing display.
   The third, `sleep()`, drops a `delay(100)` nothing waits on; removing it only
-  puts 100 ms back on every screen, measured in [E8](docs/experiments.md).
+  puts 100 ms back on every screen, measured in [E8](docs/experiments/e8-refresh.md).
 - **An SSD1677 RAM window does not limit the optical refresh.** After panel
   power loss, reconstructing only the icon's old pixels leaves random RAM
   outside it. Seed both full controller planes identically before applying the
@@ -135,19 +135,27 @@ is excluded from the embedded build job. Nothing runs on hardware in CI.
   what makes that safe without a lock.
 - **`WiFi.persistent(false)` goes before `WiFi.mode()`.** Arduino's default
   storage is FLASH, so a mode set before that call goes through NVS and costs
-  1.6 s on every wake -- measured in [E6](docs/experiments.md). `WifiLink`
+  1.6 s on every wake -- measured in [E6](docs/experiments/e6-dhcp.md). `WifiLink`
   does it in the right order; anything else touching WiFi has to as well.
 - **Keep `src/secrets.example.h` in step with `src/secrets.h`,** and never put
   real credentials in a tracked file. Settings that are not secret belong in
   `src/config.h`, which is tracked.
 - **Put a shortcut in `docs/deferred.md`, not in the vision.** The vision says
   what the device is; deferrals are the list that gets deleted a line at a time.
-- **Work through `docs/implementation.md` and leave the notes there.** It holds
-  the step order and what each step turned out to involve. A step counts as done
-  when it has run on the device, not when it builds.
-- **Don't guess at a number that belongs in `docs/experiments.md`.** Wake
-  latency, HTTPS overhead and microphone settle time are unmeasured on purpose;
-  record a measurement there rather than inventing a constant.
+- **Keep `docs/implementation.md` a short description of current behavior.**
+  Update the relevant section when code changes; do not append chronological
+  notes, completed build steps, old test counts or superseded designs. Keep
+  pending device checks explicit: a build or successful flash is not hardware
+  acceptance. Git history retains the implementation journal.
+- **Read experiment details on demand.** `docs/experiments.md` is the router;
+  each E-number has its own file in `docs/experiments/`. Do not load all records
+  for an ordinary change. Put methods, conditions, measurements, limitations
+  and rejected trials in the relevant record, with its conclusion first; update
+  the index when status changes. Raw/filtered evidence belongs in
+  `docs/measurements/`, open compromises in `docs/deferred.md`.
+- **Do not guess measurement-dependent constants.** Consult the relevant
+  experiment before changing one, distinguish measured results from assumptions,
+  and record new evidence there without generalizing beyond its conditions.
 
 ## Verifying on hardware
 

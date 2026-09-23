@@ -1,5 +1,5 @@
-// E1 on the finished firmware -- S9. See docs/experiments.md, E1, and
-// docs/implementation.md, S9. Build and flash with:
+// E1 on the finished firmware (historical S9).
+// See docs/experiments/e1-wake-latency.md. Build and flash with:
 //
 //     ~/.platformio/penv/bin/pio run -e exp_e1_firmware -t upload --upload-port <port>
 //

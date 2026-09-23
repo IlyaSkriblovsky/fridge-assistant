@@ -12,35 +12,35 @@ in one place rather than archaeology through commit messages.
 | # | For now | End state | What triggers the change |
 | --- | --- | --- | --- |
 | D2 | An answer longer than a panel ends in an ellipsis | The rest of it reachable -- pagination, or a smaller face | The UI/UX pass |
-| D3 | Gauge percentage not yet validated against this pack | Validate discharge readings and decide low-battery behaviour | [E5](experiments.md) |
-| D5 | Plain HTTP, the device's token included | HTTPS | Explicit decision to resume migration; deferred after [E2](experiments.md#e2----https-overhead), 2026-09-23 |
+| D3 | Gauge percentage not yet validated against this pack | Validate discharge readings and decide low-battery behaviour | [E5](experiments/e5-sleep-current.md) |
+| D5 | Plain HTTP, the device's token included | HTTPS | Explicit decision to resume migration; deferred after [E2](experiments/e2-https-overhead.md#e2----https-overhead), 2026-09-23 |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
-| D11 | Post-answer wait stays awake for 10 seconds with WiFi retained | Compare its energy with sleeping and reconnecting | Dashboard cycle works; [E9](experiments.md#e9----dashboard-energy-deferred) |
+| D11 | Post-answer wait stays awake for 10 seconds with WiFi retained | Compare its energy with sleeping and reconnecting | Dashboard cycle works; [E9](experiments/e9-dashboard-energy.md#e9----dashboard-energy-deferred) |
 
 ---
 
 ## D2 -- An answer longer than the panel
 
-The answer wraps as of [S14](implementation.md#s14----word-wrap) -- that half
-of D2 is paid off. What is left is the answer that does not fit even wrapped:
+The answer [wraps](implementation.md#text-and-fonts); that half of D2 is paid off.
+What is left is the answer that does not fit even wrapped:
 seven lines of 24 pt, which is about 375 bytes of Russian. It is drawn to the
 last line the panel has room for and that line ends in an ellipsis, and the
 rest is not reachable from the device at all.
 
 The ellipsis has only ever been seen in the host preview. The assistant is
 asked for a sentence or two and gives them -- three lines was the longest
-answer of S14's run on the device -- so nothing it says in normal use reaches
-the bottom of the panel. That is worth knowing in both directions: the cut is
+answer in the [2026-09-20 device check](experiments/e8-refresh.md#firmware-display-validation).
+That run did not reach the bottom of the panel. The cut is
 rarer than it sounds, and the first person to meet it will be the first person
 to see it.
 
 That is a real cut and not a theoretical one -- the model is asked for one or
 two sentences and will sometimes give five -- but it is also visible, which is
 the part that matters while there is nothing to page with. Anything better
-needs an interaction the device does not have yet: the three buttons do
-nothing outside a question, and which of them would mean "more" is a UI/UX
-question rather than a display one. A smaller face for a long answer is the
+needs a new interaction: AI already starts questions and Up toggles sound;
+which input would mean "more" is a UI/UX question rather than a display one.
+A smaller face for a long answer is the
 other candidate, and it trades the thing the panel is for -- being readable
 from across the kitchen -- for text nobody asked to be complete.
 
@@ -50,10 +50,11 @@ many there were.
 
 ## D3 -- Battery accuracy and low-battery behaviour
 
-The indicator now reads BQ27220 state of charge on Listening, answer and error;
-Working and deep sleep retain it. Bus errors and out-of-range values show `?`.
+Firmware reads BQ27220 state of charge for dashboard requests; the server
+renders the percentage. Bus errors and out-of-range values are omitted and
+shown as `?` by the dashboard.
 The gauge configuration is left untouched. Its estimate still needs checking
-against this battery over a discharge cycle in [E5](experiments.md); displaying
+against this battery over a discharge cycle in [E5](experiments/e5-sleep-current.md); displaying
 a percentage does not establish its accuracy. Acting on low charge remains open.
 
 ## D5 -- HTTPS
@@ -61,7 +62,7 @@ a percentage does not establish its accuracy. Acting on low charge remains open.
 **Decision, 2026-09-23:** after reviewing E2, the user chose to defer the
 migration and keep HTTP for audio and dashboard requests. E2 is complete;
 its results, raw logs and repeatable rig are retained in
-[experiments.md](experiments.md#e2----https-overhead).
+[E2](experiments/e2-https-overhead.md).
 
 Verified HTTPS added about 0.8 s per fresh connection and 53 KiB of internal
 RAM; the good-signal stream tail was 76 ms HTTP versus 80 ms HTTPS. Resume
@@ -77,8 +78,8 @@ sleeping, like other returns to idle.
 
 "No sound" cannot be quite true, because the ready chirp comes first by design.
 The chirp sounds 104 ms after the wake, with capture already running --
-[E1](experiments.md), re-run on the firmware at
-[S9](implementation.md#s9----re-run-e1) -- while the minimum hold is 300 ms. So a tap between the
+[E1 firmware rerun](experiments/e1-wake-latency.md#re-run-on-the-finished-firmware-2026-09-18) -- while the minimum hold is 300 ms.
+So a tap between the
 two has already been answered with "the microphone is live", which was true when
 it sounded. There is no further voice feedback; the dashboard fetch is silent.
 
@@ -113,4 +114,5 @@ The dashboard flow waits ten seconds after the final voice screen
 finishes drawing, with the CPU awake and WiFi retained. This is the initial
 implementation choice; neither its energy nor that of sleeping and reconnecting
 has been measured. E9 will compare both and measure a periodic dashboard cycle.
-These measurements are explicitly deferred and do not block S15.
+These measurements are explicitly deferred and do not block the implemented
+dashboard transport.

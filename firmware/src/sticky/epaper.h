@@ -50,8 +50,8 @@
 //    After power loss, a reconstructed window alone is insufficient: 0x44/45
 //    constrain RAM writes, not the display scan. Shadow priming therefore also
 //    arms identical full-plane RAM initialization before the next partial. Only
-//    the requested window then gets differing old/new data. See the silent-mode
-//    hardware feedback in docs/implementation.md and test/test_epaper/.
+//    the requested window then gets differing old/new data. See
+//    docs/implementation.md#display-invariants and test/test_epaper/.
 //
 // 3. The hundred milliseconds after the controller is already asleep.
 //    Driver_SSD1677::sleep() writes 0x10/0x01 and then delay(100), and

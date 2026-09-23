@@ -2,7 +2,7 @@
 
 Draws the screens on the host, with the firmware's own `src/text.cpp` and the
 generated `src/fonts/`, and writes them out as images. It is the host half of
-the fonts step the way `e7_pcap.py` is the host half of E7.
+the firmware text renderer.
 
 ```
 c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
@@ -21,9 +21,9 @@ The idle dashboard is rendered by the backend; preview it through
 
 `preview` also prints the width of each string, the ink bounds of the word
 band, how many lines each answer wanted against how many it got, how much text
-a full panel holds, and what `textCopy()` does at each length -- the numbers in
-[S13](../../docs/implementation.md) and
-[S14](../../docs/implementation.md#s14----word-wrap) came from here.
+a full panel holds, and what `textCopy()` does at each length. See [text and fonts](../../docs/implementation.md#text-and-fonts) for the
+current rendering path and [device evidence](../../docs/experiments/e8-refresh.md#firmware-display-validation)
+for what was checked on the glass.
 
 ## What it does not prove
 

@@ -30,7 +30,7 @@ notebook screen. Voice screens retain only the local silent-mode indicator.
    chirp. The chirp means "the microphone is live", so it cannot come earlier
    without inviting the user to talk into a microphone that is not listening
    yet. Everything before it is dead time, which is what
-   [E1](experiments.md) and [E3](experiments.md) exist to shrink.
+   [E1](experiments/e1-wake-latency.md) and [E3](experiments/e3-microphone-settle.md) exist to shrink.
 4. **Connect.** Bring up WiFi concurrently with recording, in a separate task.
    Draw the "Listening" screen whenever the panel gets round to it; it will be
    late and that is accepted. Once the network is up and the press has lasted
@@ -125,10 +125,10 @@ response body is just the answer. What the user waits for after the release is
 the last few chunks and the backend: the answer chirp sounds 115 to 154 ms after
 the release whatever the hold, 60 of them the taken chirp, against the
 prototype backend that answers a fixed phrase
-([S11](implementation.md#s11----streaming-upload)). Until S11 the whole
+([S11](experiments/e7-upload.md#firmware-streaming-validation)). Until S11 the whole
 recording went up after the release, and the upload was the largest term the
 device controlled -- 2.9 s for 400 KB, with a retransmission timeout in one
-upload in four ([E7](experiments.md)).
+upload in four ([E7](experiments/e7-upload.md)).
 
 `esp_http_client` is what sends it, from the IDF underneath Arduino: it opens a
 chunked body with `esp_http_client_open()` and a negative length, and leaves the
@@ -184,8 +184,8 @@ secret: no accounts, no expiry, no exchange.
 
 The token goes over plain HTTP until [D5](deferred.md) is paid off, so anyone
 who can watch the traffic can read it. It keeps out whoever merely finds the
-address, which is the likely visitor, and HTTPS waits for [E2](experiments.md)
-to say what the handshake costs a device that wakes for every question. Anyone
+address, which is the likely visitor, and the user chose to retain HTTP after
+reviewing the measured handshake cost in [E2](experiments/e2-https-overhead.md). Anyone
 holding the device can read it from the flash as well, like everything else in
 `src/secrets.h`.
 
@@ -204,10 +204,9 @@ error reporting can come later.
 Plain HTTP to start -- [D5](deferred.md). HTTPS is wanted, because the backend
 lives on a public host rather than at home and the device's token crosses the
 internet in clear, but on a device that wakes from deep sleep for every question
-the TLS handshake is paid every single time. Whether that cost is
-acceptable is [E2](experiments.md); the alternative is a proxy on the home
-network, which is one more component to maintain and so a worse answer if the
-number turns out to be small.
+the TLS handshake is paid every single time. [E2](experiments/e2-https-overhead.md) measured that cost. The user deferred
+migration on 2026-09-23; [D5](deferred.md#d5----https) records the decision
+and the work required to resume it.
 
 ### Audio buffer: linear, capped at 30 seconds
 
@@ -245,7 +244,7 @@ lost, which is why the buzzer chirp comes first: it tells the user when to
 start. On the finished firmware the chirp sounds 104 ms after the wake event,
 the same to a fifth of a millisecond every time: 61 ms of boot, 41 ms of
 microphone rail and settle discard, and under 2 ms of everything else --
-[E1](experiments.md), re-run at [S9](implementation.md#s9----re-run-e1). Two
+[E1](experiments/e1-wake-latency.md), re-run at [S9](experiments/e1-wake-latency.md#re-run-on-the-finished-firmware-2026-09-18). Two
 delays this project chose, 100 ms in the latch and 50 ms after the log port came
 up, were taken off the wake path on the way there.
 
@@ -257,16 +256,16 @@ It is worth less than this document assumed, and for an instructive reason. On
 the home network the cache is the difference between an 87 ms link and a scan of
 100 ms to 1.3 s, while the address behind it takes 3.15 s of DHCP every time --
 so the connect is 3.2 s either way and the cache saves a tenth of it
-([S6](implementation.md#s6----wifi)). The association was never the expensive
+([S6](experiments/e6-dhcp.md#firmware-network-validation)). The association was never the expensive
 half.
 
 **So the address is cached beside it**, which is the other nine tenths.
-[E6](experiments.md) took the 3.2 s apart -- 2.1 s of the router thinking about
+[E6](experiments/e6-dhcp.md) took the 3.2 s apart -- 2.1 s of the router thinking about
 its first answer, a full second of lwIP's ARP check -- and none of it is ours to
 make faster; what is ours is not asking. The lease the last wake was given is
 kept in RTC memory and installed with `WiFi.config()` before the association, and
 the device is on a usable network 300 ms after the wake instead of 3.5 s
-([S7b](implementation.md#s7b----cached-dhcp-lease)).
+([S7b](experiments/e6-dhcp.md#firmware-network-validation)).
 
 It is not a claim on a fixed address. The device only ever reuses what this
 network gave it, for less than half the life the server put on it, and a lease
@@ -280,7 +279,7 @@ goes on routing everything else, and the backend is reached by name, so a
 question asked during one of those spells ends in NO SERVER on a network that is
 otherwise fine. Empty keeps the network's. It goes in once the address is in
 hand, because DHCP writes its own over anything installed earlier
-([S12](implementation.md#s12----dns-server)).
+([implementation](implementation.md#network-and-streaming)).
 
 ### Framework: stay on Arduino
 
@@ -336,12 +335,12 @@ its client and buffer stay alive until it reports completion. Display borrows
 the immutable pixels until idle; a new download cannot reuse them before then.
 
 The third task came before the streaming upload rather than with it.
-[S8](implementation.md#s8----the-flow) measured the panel as most of what the
+[S8](experiments/e8-refresh.md#firmware-display-validation) measured the panel as most of what the
 user waited through after the release -- the rest of the Listening refresh on a
 short question, the working screen on every one -- and none of it needed the
-orchestrator's thread; [S10](implementation.md#s10----display-task) took it
+orchestrator's thread; [S10](experiments/e8-refresh.md#firmware-display-validation) took it
 off, and the wait became the round trip. The streaming upload that
-[S11](implementation.md#s11----streaming-upload) then took off the round trip
+[S11](experiments/e7-upload.md#firmware-streaming-validation) then took off the round trip
 runs on the orchestrator, which had nothing else to do while the button is
 held. Its writes block that thread, through a stall if there is one, and that
 is allowed: the release is timed by the capture task, and the buffer is linear,
@@ -386,7 +385,7 @@ the glass.
 
 **So working, answer and error are partial**, and on this panel that is 1344 ms
 against 2400 ms for the same area full -- measured at
-[S8](implementation.md#s8----the-flow), where taking the two window sizes apart
+[S8](experiments/e8-refresh.md#firmware-display-validation), where taking the two window sizes apart
 also showed the difference is waveform and not transfer. Every transition comes
 out clean: no smear, no residue, checked by eye over a run of consecutive
 questions. That run was the first time the partial-refresh correction in
@@ -394,7 +393,7 @@ questions. That run was the first time the partial-refresh correction in
 
 **The working transition is what settled the shape of all of this.** Every
 other transition happens while the user is waiting for nothing; this one is
-between the button and the answer. Until [S10](implementation.md#s10----display-task)
+between the button and the answer. Until [S10](experiments/e8-refresh.md#firmware-display-validation)
 it sat on the critical path -- released, draw, upload, wait, draw again -- and
 whatever it cost was added to the wait for every answer. With the panel on a
 task of its own it no longer delays the answer's chirp, but it still delays the
@@ -431,7 +430,7 @@ fit in the RTC memory already shared with other retained state. Listening
 therefore remains a full refresh when the next voice question starts. Local
 indicator-only updates can reconstruct their reserved regions using the
 existing shadow-prime path. The added wake time and refreshes will be measured
-in [E9](experiments.md#e9----dashboard-energy-deferred); they are not a blocker
+in [E9](experiments/e9-dashboard-energy.md#e9----dashboard-energy-deferred); they are not a blocker
 for the first version.
 
 Battery, temperature and humidity appear only on the server-rendered dashboard:
@@ -493,7 +492,7 @@ The rising pair opens a question and the falling pair closes it, so the two
 normal outcomes are opposites, and the single sustained note is neither.
 
 The taken note has to survive being heard about half a second before the
-answer's pair, which is what the round trip usually is ([E7](experiments.md)),
+answer's pair, which is what the round trip usually is ([E7](experiments/e7-upload.md)),
 so it is placed where neither pair can absorb it: one note rather than two,
 between the pair's two pitches so it is neither of them, and far too short to be
 the error's sustained note.
@@ -510,7 +509,7 @@ back until the refresh returns spends that advantage and makes the wait feel
 longer than it is. It costs nothing in accuracy, because a full refresh is
 readable well before it ends -- the text appears inverted partway through -- so
 by the time the user has looked up, the answer is already on the glass. Judged
-at the panel during [S7](implementation.md#s7----upload-and-answer), where the
+at the panel during [S7](experiments/e7-upload.md#firmware-upload-validation), where the
 first real wait existed to sit through.
 
 Since the panel has a task of its own the screen is posted a moment before the
@@ -664,11 +663,11 @@ Also worth knowing:
 
 ## What is still moving
 
-The voice flow above is implemented. The next agreed change is the
-[idle dashboard](#idle-dashboard); its contents and visual design are still
-to be chosen. Its architecture is settled, while implementation and device
-acceptance remain ahead. Compression and energy measurements are explicitly
-deferred, as are offline timers and reminders.
+The voice flow and [idle dashboard](#idle-dashboard) transport are implemented.
+Dashboard contents and visual design remain to be chosen; detailed device
+verification gaps are tracked in [implementation.md](implementation.md#verification-state).
+PNG transport is accepted, while representative compression and energy
+measurements remain deferred, as do offline timers and reminders.
 
 What remains is tracked elsewhere, deliberately kept out of this document so it
 does not age every time a shortcut is taken, a number comes in or a step is
@@ -676,11 +675,10 @@ finished:
 
 - **[deferred.md](deferred.md)** -- simplifications taken on purpose, each with
   the end state it stands in for and what triggers the change.
-- **[experiments.md](experiments.md)** -- measurements the design is waiting on:
-  wake latency, HTTPS overhead, microphone settle time, and whether the AI button
-  reacts to a long hold in hardware.
-- **[implementation.md](implementation.md)** -- the order the firmware is being
-  built in, and what each step turned out to involve.
+- **[experiments.md](experiments.md)** -- a short index of measured, deferred
+  and rejected experiments; open individual records when their evidence is needed.
+- **[implementation.md](implementation.md)** -- current firmware architecture,
+  ownership, invariants and remaining verification, without a build journal.
 
 ## Silent mode
 
@@ -696,9 +694,9 @@ reconstructed for a partial refresh after deep sleep without knowing the answer
 still on the glass. The RAM address window only limits writes: after panel
 power loss, both full controller planes must first be initialized identically,
 then the indicator window receives its old/new transition. This prevents random
-transitions outside the window without storing the answer. Cold or interrupted
-updates need full reconciliation.
+transitions outside the window without storing the answer. When previous indicator state is unknown, preserve the glass
+until a normal screen reconciles it.
 The usual full Listening refresh still clears accumulated ghosting. Silent
 mode intentionally removes the prompt to begin speaking; the user allows a
 short pause after pressing AI. Implementation and hardware acceptance are in
-[implementation.md](implementation.md#silent-mode--2026-09-21).
+[implementation.md](implementation.md#silent-mode-and-indicator-state).

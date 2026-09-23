@@ -27,8 +27,8 @@ constexpr uint32_t kAnswerDwellMs = 10000;
 // shorter than the patience for one that is not. Measured on the home network a
 // cached link comes up in 77-158 ms, so this is twenty times over -- kept wide
 // because nothing has yet measured an association that is slow and still
-// succeeds, and shortening it would be a guess in the other direction. See S6
-// in docs/implementation.md.
+// succeeds, and shortening it would be a guess in the other direction. See the
+// firmware validation in docs/experiments/e6-dhcp.md.
 constexpr uint32_t kWifiCachedApAttemptMs = 3000;
 
 // The whole association budget, the attempt on the cached AP included. Past

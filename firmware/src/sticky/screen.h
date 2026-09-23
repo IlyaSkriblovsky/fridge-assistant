@@ -101,7 +101,7 @@ class StickyScreen {
   // power-on the controller's previous-image RAM has nothing to do with what is
   // physically on the glass, and the first full refresh can ghost because of
   // it. On a wake it is one to two seconds spent flushing a panel the Listening
-  // screen overwrites anyway -- see S8 in docs/implementation.md.
+  // screen overwrites anyway -- see docs/implementation.md#display-invariants.
   void clear();
 
   // Asleep -> Listening. One word, as large as the panel takes, because it is
