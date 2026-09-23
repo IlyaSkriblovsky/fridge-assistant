@@ -34,14 +34,14 @@ def keep(monkeypatch):
 
 def test_refresh_and_voice_publish_actual_unchecked_count(keep):
     note = keep.get.return_value
-    note.add("Milk")
+    milk = note.add("Milk")
     note.add("Bread", checked=True)
     note.add("  ")
     refresh()
     assert shopping_list.snapshot().value == 1
     shopping_list.add(["Bread", "Eggs", "Milk"])
     assert shopping_list.snapshot().value == 3
-    note.unchecked[0].checked = True
+    milk.checked = True
     refresh()
     assert shopping_list.snapshot().value == 2
 
