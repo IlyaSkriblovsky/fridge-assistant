@@ -31,7 +31,7 @@ for the same reason -- an analysis nobody can repeat is not a measurement.
 | E7 | What does the upload cost, and where do the extra seconds in it come from? | The working screen at [S8](implementation.md#s8----the-flow) -- settled, a partial refresh -- and [D4](deferred.md) | Taken 2026-09-17 | 128 KB goes up in 660 ms. One ACK in 110 is lost on the way back, and with 5744 bytes in flight there is no later ACK to cover it, so the window stops for a whole retransmission timeout: 1.0-2.5 s, on one upload in four |
 | E8 | What is the 2.4 s of a full refresh made of, and how much of it is paid after the image is drawn? | [D6](deferred.md)'s partial refresh and [D4](deferred.md)'s display task, both of which argue against 2.4 s as if it were one number | Taken 2026-09-17 | The waveform is 1514 ms of a 2115 ms full refresh. 338 ms of every refresh runs with the final image already on the glass; 100 ms of that has been taken off in `src/sticky/epaper.h`, leaving a question 3787 ms of panel instead of 4087 |
 | E9 | What energy does a dashboard cycle use, including the post-answer wait? | Awake wait vs sleep and reconnect; [D11](deferred.md) | Deferred until dashboard works | -- |
-| E10 | Does compressing real dashboard frames improve transfer and energy costs? | Whether compression is needed and which codec; [D10](deferred.md) | Deferred until design is chosen | -- |
+| E10 | Does compressing real dashboard frames improve transfer and energy costs? | Costs of the accepted PNG transport on representative layouts | Deferred until design is chosen | -- |
 
 ---
 
@@ -1291,9 +1291,18 @@ changing D11. E5 still owns the board's baseline deep-sleep current.
 
 ## E10 -- Dashboard compression (deferred)
 
-Agreed 2026-09-21; no codec selected and no results. After choosing the layout,
-save representative monochrome frames, including sparse and dense content.
+Agreed 2026-09-21. On 2026-09-23 the user selected a firmware-only trial of the
+server's existing 1bpp PNG. After choosing the layout, save representative
+monochrome frames, including sparse and dense content.
 Compare the 48000-byte raw baseline with candidate encodings, then measure
 download plus decode time, peak memory, firmware size and energy on the device.
 Verify exact pixel round trips. Host compression ratios alone do not show an
-energy benefit. Use the findings to decide whether D10 needs changing at all.
+energy benefit. The user accepted PNG on 2026-09-23; mono1 and format selection are removed.
+
+Firmware trial, 2026-09-23: one cold boot against the unchanged live server
+downloaded a 2323-byte PNG (raw baseline 48000 bytes), with 495 ms HTTP request
+time and 14 ms decode time on the ESP32-S3. The device completed a 2725 ms full
+refresh and entered deep sleep. See the filtered
+[UART log](measurements/dashboard-png-2026-09-23.log). This is a functional
+smoke test, not a paired latency or energy benchmark; sensor values and network
+conditions can change between requests. Full E10 measurements remain deferred.

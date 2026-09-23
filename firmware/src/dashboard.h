@@ -21,6 +21,8 @@ class Dashboard {
   // Successful request's duration, measured on the worker before HTTP open
   // through receipt of the body. Read after done(); excludes WiFi and display.
   uint32_t requestMs() const { return _requestMs; }
+  uint32_t decodeMs() const { return _decodeMs; }
+  size_t downloadBytes() const { return _frame.size; }
   void poll();
   void close();  // only after done(); keeps the pixel buffer alive for Display
 
@@ -28,6 +30,7 @@ class Dashboard {
   static esp_err_t event(esp_http_client_event_t* event);
   static void run(void* self);
   uint8_t* _pixels = nullptr;
+  uint8_t* _encoded = nullptr;
   dashboardProtocol::Frame _frame{nullptr};
   esp_http_client_handle_t _client = nullptr;
   std::atomic<bool> _done{true};
@@ -36,5 +39,6 @@ class Dashboard {
   bool _ok = false;
   int64_t _startedUs = 0;
   uint32_t _requestMs = 0;
+  uint32_t _decodeMs = 0;
   uint64_t _receivedRtcTicks = 0;
 };

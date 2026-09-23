@@ -21,7 +21,7 @@ import urllib.request
 import wave
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -182,7 +182,7 @@ async def authorize(request: Request) -> None:
 
     # A browser can open the PNG directly using its built-in password dialog.
     # This is the same device secret, never a token in a URL or a public route.
-    preview = request.url.path == "/sticky/dashboard" and request.query_params.get("format") == "png"
+    preview = request.url.path == "/sticky/dashboard"
     if preview and scheme.lower() == "basic":
         try:
             username, _, password = base64.b64decode(given, validate=True).partition(b":")
@@ -207,19 +207,17 @@ app = FastAPI(
 
 @app.get("/sticky/dashboard")
 def sticky_dashboard(
-    format: Literal["mono1", "png"] = "mono1",
     battery_pct: Annotated[int | None, Query(ge=0, le=100)] = None,
     temperature_c: Annotated[float | None, Query(allow_inf_nan=False)] = None,
     humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
 ) -> Response:
-    """Render off the event loop; both formats encode the exact same frame."""
+    """Render a 1bpp PNG off the event loop."""
     frame = dashboard.render(battery_pct, temperature_c, humidity_pct)
-    preview = format == "png"
     return Response(
-        dashboard.png(frame) if preview else dashboard.mono1(frame),
-        media_type="image/png" if preview else "application/octet-stream",
+        dashboard.png(frame),
+        media_type="image/png",
         headers={
-            "Dashboard-Format": "png" if preview else "mono1-v1",
+            "Dashboard-Format": "png",
             "Next-Update-After": str(dashboard.NEXT_UPDATE_SECONDS),
             "Cache-Control": "no-store",
         },

@@ -2413,3 +2413,68 @@ to retain HTTP and defer the HTTPS migration under D5. The experiment and standa
 standard firmware was restored after capture. Its cold-boot UART log confirms
 a successful 48000-byte dashboard download (1391 ms HTTP request), display
 refresh and return to sleep. No display changes need acceptance.
+
+### Dashboard PNG trial — 2026-09-23
+
+Firmware now explicitly requests `?format=png` from the existing server. This
+change is firmware-only: the server still supports and defaults to mono1-v1.
+PNG acceptance precedes the separately planned server default/removal change.
+
+The accepted image is exactly the server's Pillow mode-1 output: 800x480,
+grayscale bit depth 1, no interlace/transparency, IHDR/IDAT/IEND only. The worker
+checks HTTP metadata and complete Content-Length (1..65536 bytes), PNG chunk
+ordering/CRC, the zlib checksum and exact inflated length. Split IDAT and all
+five row filters work. PNG white bits are inverted into the existing MSB-first,
+1=black 48000-byte display buffer; panel drawing and local indicators are unchanged.
+
+Compressed bytes, inflate state and scanlines use bounded PSRAM allocations.
+Inflation checks cancellation every 1024 output bytes, unfiltering every row;
+download and decode share the existing request deadline. Failure never posts
+partially decoded pixels to Display. Temporary decode workspace is freed on
+every exit; close releases the download buffer after worker completion and
+retains the pixels until Display is finished. The inflater is miniz vendored
+unchanged from the already pinned Seeed_GFX2 Sticky example, with provenance
+and its license retained. It is compiled identically in native tests.
+
+The success log reports compressed bytes, HTTP request milliseconds and decode
+milliseconds separately. The update deadline starts at complete body receipt,
+so decoding and panel work spend the interval too.
+
+Validation: all 28 native tests pass; all seven embedded environments build.
+Fixtures from the actual server encoder compare all 48000 decoded bytes.
+A deterministic random image covers all filters, multiple IDAT chunks and a
+49302-byte PNG, ensuring incompressible content fits. Tests also cover damaged
+CRC/zlib/Adler32, trailing data, truncation, unsupported headers/chunks, wrong
+decoded size, invalid filters, allocation failure and cancellation cleanup.
+Flashed standard firmware to the connected ESP32-S3 and captured a cold-boot
+UART smoke test: PNG 2323 bytes -> 48000 bytes, HTTP request 495 ms, decode
+14 ms, successful 2725 ms full refresh, then deep sleep with the remaining
+dashboard deadline. The display task reports 5900 unused stack bytes.
+The filtered [device log](measurements/dashboard-png-2026-09-23.log) is retained.
+This establishes a successful real-server/device round trip; it does not
+establish energy savings or a controlled latency comparison with mono1.
+Visual acceptance and physical button interruption remain user checks.
+
+### PNG accepted; remove format selection — 2026-09-23
+
+The user accepted the PNG dashboard on the device and reported a much faster
+request. Removed the server's mono1 encoder and the endpoint's `format` query
+parameter. GET /sticky/dashboard always returns the same 1bpp PNG; browser
+Basic authentication now works on this plain URL, while device Bearer auth is
+unchanged. Unknown query parameters are ignored by FastAPI, so the installed
+trial firmware's old `?format=png` URL also receives PNG after deployment.
+
+Firmware now requests the plain endpoint, adding only available sensor values
+with the appropriate query separator. It already rejected mono1 responses.
+Raw expected-pixel test fixtures are named `.bitmap` and generated directly
+from rendered pixels; they no longer depend on a server wire encoder.
+Updated the shared contract, scenario, vision and Docker CI smoke test; D10 is
+resolved. Representative energy measurements remain E10 work.
+
+Validation: 93 server tests and 28 native firmware tests pass; all seven
+embedded environments build. The server tests
+check the exact PNG subset accepted by the firmware, sensor rendering, auth,
+the absence of format selection in OpenAPI and PNG responses for old URLs.
+Deploy the server before installing firmware without `format`: the old live
+server defaults to raw pixels. The accepted trial firmware remains installed
+until that server rollout; no deployment or flashing was performed in this step.

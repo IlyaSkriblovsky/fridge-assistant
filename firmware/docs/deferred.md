@@ -16,7 +16,6 @@ in one place rather than archaeology through commit messages.
 | D5 | Plain HTTP, the device's token included | HTTPS | Explicit decision to resume migration; deferred after [E2](experiments.md#e2----https-overhead), 2026-09-23 |
 | D7 | A press too short to count makes no sound | Some feedback | The UI/UX pass |
 | D9 | Hold to talk, release to send | An interaction that does not require holding | The UI/UX pass |
-| D10 | Dashboard sends a 48000-byte frame without compression | Decide whether and how to compress real dashboard frames | Dashboard design is chosen; [E10](experiments.md#e10----dashboard-compression-deferred) |
 | D11 | Post-answer wait stays awake for 10 seconds with WiFi retained | Compare its energy with sleeping and reconnecting | Dashboard cycle works; [E9](experiments.md#e9----dashboard-energy-deferred) |
 
 ---
@@ -107,15 +106,6 @@ device to try them on.
 Cheap to defer, because all of them change only *when the recording stops*.
 Everything else in the pipeline is the same either way, so the question can wait
 for the UI/UX pass and take [D7](deferred.md) with it.
-
-## D10 -- Dashboard compression
-
-The [dashboard plan](../../server/docs/use-cases/idle-screen.md) starts with
-an uncompressed packed 800x480 one-bit frame: exactly 48000 bytes. This is an
-agreed first implementation, not a claim that compression is unnecessary.
-Choose the design first, then compare representative frames and device costs
-in E10. RLE, gzip, PNG and Group 4 are device-transport candidates. The server can
-already return PNG for browser preview; the firmware still consumes mono1-v1.
 
 ## D11 -- Energy during the post-answer wait
 

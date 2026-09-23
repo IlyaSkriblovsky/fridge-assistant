@@ -26,6 +26,7 @@ the hardware traps.
 | `src/fonts/` | The four faces, generated. Latin, Greek, Cyrillic and the punctuation those bring |
 | `src/wifi_link.h/.cpp` | The association: polled, never waited on, with the AP and the DHCP lease cached across sleeps |
 | `src/dashboard.h/.cpp`, `src/dashboard_protocol.h` | Background frame download, validation and interval rules |
+| `src/dashboard_png.h/.cpp`, `lib/dashboard_miniz/` | Bounded server-format 1bpp PNG decoder and vendored inflater |
 | `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
 | `src/silent_mode.h/.cpp` | NVS sound preference, loaded before buzzer/display work |
 | `src/silent_icon.h` | Reserved top-margin indicator geometry, shared with the preview |

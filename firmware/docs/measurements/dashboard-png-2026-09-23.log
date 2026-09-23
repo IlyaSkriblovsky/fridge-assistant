@@ -1,0 +1,5 @@
+wake none, reset POWERON
+  dashboard: PNG 2323 bytes -> 48000 bytes, HTTP request 495 ms, decode 14 ms, next update in 3600 s
+  dashboard: 2725 ms full, 6561 to 9287 ms into setup(), 2310 ms queued behind the panel
+  idle; panel startup 200 ms, display stack unused 5900 bytes
+  sleeping; dashboard timer in 3594954 ms

@@ -104,8 +104,8 @@ access under one owner rather than reading from networking and display tasks
 concurrently. Partial indicator updates after sleep must retain the driver's
 full-plane shadow-prime initialization and known previous indicator pixels.
 
-The initial transport and awake-wait choices are tracked in
-[D10 and D11](deferred.md). Measurements come after the dashboard design;
+PNG transport was accepted on the device on 2026-09-23. The awake-wait choice
+is tracked in [D11](deferred.md). Measurements come after the dashboard design;
 no energy advantage of remaining awake has been established. Offline reminder
 storage and alarms are a separate future feature, not part of this plan.
 
@@ -325,8 +325,11 @@ cut a refresh in half. Almost all of a refresh is the library polling BUSY with
 `vTaskDelay()`, so the task is blocked for nearly its whole life and wants no
 priority to speak of.
 
-A separate dashboard worker performs a bounded GET into a 48000-byte PSRAM
-buffer. It receives a sensor snapshot from Display and never touches I2C.
+A separate dashboard worker performs a bounded PNG GET and decodes it into a
+48000-byte PSRAM pixel buffer. The dashboard endpoint always returns PNG: 800x480 grayscale, one bit per pixel, without transparency or
+interlace. Download and decode share the request deadline; temporary compressed
+data and inflate workspace also live in PSRAM. The worker receives a sensor
+snapshot from Display and never touches I2C.
 The orchestrator polls buttons during downloading, dwell and panel refreshes.
 Cancellation shuts down an established socket without waiting for worker exit;
 its client and buffer stay alive until it reports completion. Display borrows

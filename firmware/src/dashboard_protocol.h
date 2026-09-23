@@ -8,6 +8,8 @@
 
 namespace dashboardProtocol {
 constexpr size_t kWidth = 800, kHeight = 480, kFrameBytes = kWidth * kHeight / 8;
+// Includes room for an incompressible frame, row filters and PNG wrappers.
+constexpr size_t kMaxPngBytes = 64 * 1024;
 
 inline uint32_t interval(const char* text) {
   if (!text || !*text) return config::kDashboardDefaultSeconds;
@@ -39,10 +41,10 @@ struct Frame {
 
   void header(const char* key, const char* value) {
     if (!strcasecmp(key, "Dashboard-Format")) {
-      if (format || strcmp(value, "mono1-v1")) bad = true;
+      if (format || strcmp(value, "png")) bad = true;
       format = true;
     } else if (!strcasecmp(key, "Content-Type")) {
-      if (type || strcasecmp(value, "application/octet-stream")) bad = true;
+      if (type || strcasecmp(value, "image/png")) bad = true;
       type = true;
     } else if (!strcasecmp(key, "Content-Encoding")) {
       if (strcasecmp(value, "identity")) bad = true;
@@ -51,14 +53,15 @@ struct Frame {
     }
   }
   bool append(const void* bytes, size_t count) {
-    if (bad || count > kFrameBytes - size) { bad = true; return false; }
+    if (bad || !data || count > kMaxPngBytes - size) { bad = true; return false; }
     memcpy(data + size, bytes, count);
     size += count;
     return true;
   }
   bool valid(int status, int64_t declared, bool complete) const {
     return !bad && format && type && status == 200 && complete &&
-           declared == static_cast<int64_t>(kFrameBytes) && size == kFrameBytes;
+           declared > 0 && declared <= static_cast<int64_t>(kMaxPngBytes) &&
+           size == static_cast<size_t>(declared);
   }
 };
 }  // namespace dashboardProtocol

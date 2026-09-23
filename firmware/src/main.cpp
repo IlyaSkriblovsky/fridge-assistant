@@ -831,8 +831,10 @@ void runIdle() {
           if (!dashboard.ok()) dashboardFailed();
           else {
             scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
-            Serial1.printf("  dashboard: 48000 bytes, HTTP request %lu ms, next update in %lu s\n",
+            Serial1.printf("  dashboard: PNG %u bytes -> 48000 bytes, HTTP request %lu ms, decode %lu ms, next update in %lu s\n",
+                           static_cast<unsigned>(dashboard.downloadBytes()),
                            static_cast<unsigned long>(dashboard.requestMs()),
+                           static_cast<unsigned long>(dashboard.decodeMs()),
                            static_cast<unsigned long>(dashboard.nextSeconds()));
             if (coldScreen) { display.clear(); coldScreen = false; }
             display.dashboard(dashboard.pixels());

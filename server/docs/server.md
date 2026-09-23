@@ -162,28 +162,26 @@ curl -X POST --data-binary @question.wav -H "Content-Type: audio/wav" \
 присланные прибором показания. Внешних источников и кэша дашборда пока нет.
 Рендер выполняется в thread pool FastAPI, не блокируя async `/audio`.
 
-- По умолчанию и с `format=mono1`: `application/octet-stream`,
-  `Dashboard-Format: mono1-v1`, ровно 48 000 байт, 1 — чёрный, MSB слева.
-- С `format=png`: тот же кадр как однобитный `image/png` для браузера.
+- Всегда возвращает однобитный `image/png`, `Dashboard-Format: png`.
+  Размер 800×480, grayscale 1 bit, без interlace и прозрачности.
+  Параметра выбора формата нет.
 - Необязательные параметры: `battery_pct` (целое 0–100), `temperature_c`
   (конечное число), `humidity_pct` (0–100). Пропущенные показания рисуются
-  как неизвестные; некорректные значения и неизвестный формат дают `422`.
-- Оба формата возвращают `Next-Update-After: 3600` и `Cache-Control: no-store`.
+  как неизвестные; некорректные значения дают `422`.
+- Ответ содержит `Next-Update-After: 3600` и `Cache-Control: no-store`.
 
 ```sh
 curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
   'http://localhost:8000/sticky/dashboard?battery_pct=76&temperature_c=23.4&humidity_pct=48.2' \
-  -o dashboard.mono1
-curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
-  'http://localhost:8000/sticky/dashboard?format=png' -o dashboard.png
+  -o dashboard.png
 ```
 
 Для просмотра непосредственно в браузере откройте
-`http://localhost:8000/sticky/dashboard?format=png` (или URL своего сервера).
+`http://localhost:8000/sticky/dashboard` (или URL своего сервера).
 В стандартном диалоге входа логин — `sticky`, пароль — `DEVICE_TOKEN`.
-Это дополнительный способ передать тот же секрет только для PNG;
+Это дополнительный способ передать тот же секрет только для дашборда;
 авторизация остаётся в общей зависимости приложения. Токен в query string
-не поддерживается. Прибор использует Bearer и пока не декодирует PNG.
+не поддерживается. Прибор использует Bearer и декодирует PNG перед отрисовкой.
 
 Подробности упаковки, зарезервированные области локальных индикаторов и
 срок следующего запроса — в [контракте](device-contract.md#дашборд).
@@ -322,7 +320,7 @@ proxy_request_buffering off;
 | Где | Что |
 | --- | --- |
 | `main.py` | FastAPI: `POST /audio`, `GET /sticky/dashboard`, намеренные сбои, запуск |
-| `dashboard.py` | Pillow: проверочный макет, упаковка mono1-v1 и PNG |
+| `dashboard.py` | Pillow: проверочный макет и однобитный PNG |
 | `main.py`: `authorize()`, `drain()` | Токен прибора, общая зависимость всех эндпоинтов; тело, дочитанное перед отказом или сбоем |
 | `main.py`: `settle_wav_lengths()`, `describe_wav()` | Длины в заголовке потокового WAV, строка с его параметрами для лога |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |

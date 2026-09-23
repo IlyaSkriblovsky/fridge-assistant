@@ -11,8 +11,9 @@ The same command runs in the firmware GitHub Actions workflow; embedded
 firmware and experiment builds remain a separate job. To run only the e-paper
 suite, add `-f test_epaper`.
 
-The native environment compiles production text.cpp, generated fonts and
-recording.cpp. test_text uses the existing tools/preview/Seeed_GFX.h framebuffer
+The native environment compiles production text.cpp, generated fonts,
+recording.cpp and dashboard_png.cpp with the vendored miniz inflater.
+test_text uses the existing tools/preview/Seeed_GFX.h framebuffer
 stub. test_recording replaces only esp_heap_caps.h with malloc/free and a switch
 for allocation failure. test_epaper compiles the real sticky/epaper.h driver
 against a small fake controller bus in test/support, sharing the same allocator.
@@ -26,7 +27,14 @@ Coverage:
 - e-paper shadow priming, both RAM planes, polarity, row stride and successive
   partial updates, in both directions at the icon and the two RAM boundaries;
 - dashboard frame bounds and metadata, unsupported formats/encoding, partial
-  receipt, interval overflow/clamping and deadline subtraction across work/sleep.
+  receipt, interval overflow/clamping and deadline subtraction across work/sleep;
+- PNG byte-for-byte comparison with the server's diagnostic frame and a random
+  frame using all five filters and split IDAT; invalid dimensions/format/chunks,
+  CRC, zlib, truncation, decoded size, filters, cancellation and allocation failure.
+
+PNG fixtures are checked in. To regenerate from the server's current encoder,
+run `server/.venv/bin/python firmware/test/test_dashboard/generate_fixtures.py`
+from the repository root. This does not use credentials or network access.
 
 These tests do not validate the physical display, PSRAM, task scheduling,
 concurrent memory visibility, GPIO, microphone or network. No hardware tests

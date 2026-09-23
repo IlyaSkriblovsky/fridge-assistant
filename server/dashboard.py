@@ -41,11 +41,6 @@ def render(
     return frame
 
 
-def mono1(frame: Image.Image) -> bytes:
-    # Pillow mode 1 is MSB-first, but 1 means white. The wire uses 1 for black.
-    return bytes(value ^ 0xFF for value in frame.tobytes())
-
-
 def png(frame: Image.Image) -> bytes:
     output = io.BytesIO()
     frame.save(output, format="PNG")

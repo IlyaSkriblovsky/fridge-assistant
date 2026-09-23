@@ -18,7 +18,7 @@ nothing drawn should cross one. The upper-left battery indicator is shown at
 100%, 50%, 1%, 0% and unavailable to check its fit in the top margin.
 
 The idle dashboard is rendered by the backend; preview it through
-`GET /sticky/dashboard?format=png`. There is no local idle/notebook screen.
+`GET /sticky/dashboard`. There is no local idle/notebook screen.
 
 `preview` also prints the width of each string, the ink bounds of the word
 band, how many lines each answer wanted against how many it got, how much text

@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "dashboard_png.h"
 
 #include <esp_heap_caps.h>
 #include <soc/rtc.h>
@@ -12,20 +13,26 @@ bool Dashboard::start(int battery, stickyClimate::Reading climate) {
   close();
   _ok = false;
   _requestMs = 0;
+  _decodeMs = 0;
   _cancelled = false;
   if (!_pixels) _pixels = static_cast<uint8_t*>(heap_caps_malloc(
       dashboardProtocol::kFrameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!_pixels || !secrets::kBackendBaseUrl[0]) return false;
-  _frame = dashboardProtocol::Frame{_pixels};
-  std::string url = std::string(secrets::kBackendBaseUrl) + config::kDashboardPath + "?format=mono1";
+  _encoded = static_cast<uint8_t*>(heap_caps_malloc(
+      dashboardProtocol::kMaxPngBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!_encoded) return false;
+  _frame = dashboardProtocol::Frame{_encoded};
+  std::string url = std::string(secrets::kBackendBaseUrl) + config::kDashboardPath;
+  char separator = '?';
   char value[100];
   if (battery >= 0 && battery <= 100) {
-    snprintf(value, sizeof(value), "&battery_pct=%d", battery);
+    snprintf(value, sizeof(value), "%cbattery_pct=%d", separator, battery);
     url += value;
+    separator = '&';
   }
   if (climate.valid) {
-    snprintf(value, sizeof(value), "&temperature_c=%.1f&humidity_pct=%.1f",
-             climate.temperatureC, climate.humidityPercent);
+    snprintf(value, sizeof(value), "%ctemperature_c=%.1f&humidity_pct=%.1f",
+             separator, climate.temperatureC, climate.humidityPercent);
     url += value;
   }
   esp_http_client_config_t cfg = {};
@@ -65,6 +72,9 @@ void Dashboard::close() {
   if (!done()) return;
   _socket = -1;
   if (_client) { esp_http_client_cleanup(_client); _client = nullptr; }
+  heap_caps_free(_encoded);
+  _encoded = nullptr;
+  _frame.data = nullptr;
 }
 
 void Dashboard::poll() {
@@ -88,8 +98,9 @@ void Dashboard::run(void* context) {
   if (!self._cancelled.load() && esp_http_client_open(client, 0) == ESP_OK) {
     self._socket = esp_http_client_get_socket(client);
     const int64_t length = self._cancelled.load() ? -1 : esp_http_client_fetch_headers(client);
-    if (!self._cancelled.load() && length == dashboardProtocol::kFrameBytes &&
+    if (!self._cancelled.load() && length > 0 && length <= dashboardProtocol::kMaxPngBytes &&
         esp_http_client_get_status_code(client) == 200 && !self._frame.bad &&
+        self._frame.format && self._frame.type &&
         !esp_http_client_is_chunked_response(client)) {
       esp_http_client_set_timeout_ms(client, 500);
       char chunk[1024];
@@ -103,10 +114,20 @@ void Dashboard::run(void* context) {
       valid = receivedUs - self._startedUs < config::kDashboardRequestMs * 1000LL &&
               self._frame.valid(esp_http_client_get_status_code(client), length,
                                esp_http_client_is_complete_data_received(client));
-      if (valid) self._requestMs = static_cast<uint32_t>((receivedUs - requestUs) / 1000);
+      if (valid) {
+        self._requestMs = static_cast<uint32_t>((receivedUs - requestUs) / 1000);
+        self._receivedRtcTicks = rtc_time_get();
+        const int64_t decodeUs = esp_timer_get_time();
+        valid = dashboardPng::decode(self._encoded, self._frame.size, self._pixels,
+            [](void* context) {
+              auto& dashboard = *static_cast<Dashboard*>(context);
+              return dashboard._cancelled.load() ||
+                  esp_timer_get_time() - dashboard._startedUs >= config::kDashboardRequestMs * 1000LL;
+            }, &self);
+        self._decodeMs = static_cast<uint32_t>((esp_timer_get_time() - decodeUs) / 1000);
+      }
     }
   }
-  self._receivedRtcTicks = rtc_time_get();
   self._ok = valid;
   // Cleanup happens on the orchestrator, after this release, never concurrent
   // with cancel(). Nothing below the store touches this object.
