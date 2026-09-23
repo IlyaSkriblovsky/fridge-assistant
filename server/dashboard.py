@@ -19,7 +19,7 @@ WIDTH, HEIGHT = 800, 480
 NEXT_UPDATE_SECONDS = 3600
 SHOPPING_STALE_AFTER_SECONDS = 45 * 60
 # These rectangles belong to firmware indicators, including their backgrounds.
-LOCAL_REGIONS = ((176, 8, 223, 39), (240, 8, 271, 39))
+LOCAL_REGIONS = ((176, 8, 223, 39),)
 
 
 @lru_cache(maxsize=1)
@@ -59,7 +59,7 @@ def render(
     title = ImageFont.truetype(font_path, 36)
     number = ImageFont.truetype(font_path, 112)
     draw_indicators(draw, battery_pct, temperature_c, humidity_pct)
-    draw.line((32, 60, WIDTH - 32, 60), fill=0, width=2)
+    draw.line((16, 50, WIDTH - 16, 50), fill=0, width=2)
     draw.text((40, 102), "Список покупок", font=title, fill=0)
     draw.text((40, 160), "—" if shopping is None else str(shopping.value), font=number, fill=0)
     label = "пунктов" if shopping is None else plural_form(
