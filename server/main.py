@@ -35,6 +35,7 @@ import dashboard
 import jobs
 import metrics
 import shopping_list
+import weather
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -136,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError(
             f"Set {', '.join(missing)}: run with --env-file .env (see docs/server.md)"
         )
+    weather.coordinates()  # Validate optional location before starting jobs.
     metrics.initialize()
     app.state.gemini = genai.Client()  # takes GEMINI_API_KEY from the environment
 
@@ -157,9 +159,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "shopping-list", shopping_list.refresh, shopping_list.REFRESH_SECONDS,
         daytime_only=True
     ))
+    weather_task = asyncio.create_task(jobs.periodic(
+        "weather", weather.refresh, weather.REFRESH_SECONDS
+    ))
     try:
         yield
     finally:
+        weather_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await weather_task
         refresh_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await refresh_task
@@ -225,7 +233,7 @@ def sticky_dashboard(
     humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
 ) -> Response:
     """Render a 1bpp PNG off the event loop."""
-    frame = dashboard.render(battery_pct, temperature_c, humidity_pct, shopping_list.snapshot())
+    frame = dashboard.render(battery_pct, temperature_c, humidity_pct, shopping_list.snapshot(), weather.snapshot())
     return Response(
         dashboard.png(frame),
         media_type="image/png",

@@ -22,6 +22,7 @@
 | `dashboard.py` | Монохромный дашборд Sticky: рендер Pillow и однобитный PNG |
 | `metrics.py`, `jobs.py` | SQLite со снимками показателей и периодические задачи одного процесса |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |
+| `weather.py` | Прогноз Open-Meteo, снимки в SQLite, обновление раз в час |
 | `shopping_list.py` | Список покупок в Keep через gkeepapi |
 | `pyproject.toml`, `uv.lock` | Зависимости, ставятся через `uv` |
 | `Dockerfile` | Образ для деплоя. CI (`../.github/workflows/server.yml`) собирает его и с `main` пушит в GHCR, см. `docs/server.md` |

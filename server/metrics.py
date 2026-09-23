@@ -26,6 +26,10 @@ def initialize() -> None:
             key TEXT PRIMARY KEY, value INTEGER NOT NULL, updated_at REAL NOT NULL
         )""")
 
+        db.execute("""CREATE TABLE IF NOT EXISTS forecasts (
+            key TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at REAL NOT NULL
+        )""")
+
 
 def save(key: str, value: int) -> None:
     with closing(connect()) as db, db:

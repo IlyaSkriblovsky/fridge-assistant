@@ -13,11 +13,15 @@ import pytest_asyncio
 import main
 import metrics
 import shopping_list
+import weather
 
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.delenv("WEATHER_LATITUDE", raising=False)
+    monkeypatch.delenv("WEATHER_LONGITUDE", raising=False)
+    monkeypatch.setattr(weather, "refresh", lambda: None)
     metrics.initialize()
     monkeypatch.setattr(shopping_list, "refresh", lambda: None)
     for name in main.REQUIRED_ENV:
