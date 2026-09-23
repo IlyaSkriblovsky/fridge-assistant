@@ -1,4 +1,22 @@
-# Firmware in PyCharm
+# Run configurations in PyCharm
+
+## Server
+
+Open the repository root in PyCharm. The `Server` group contains:
+
+| Configuration | Action |
+| --- | --- |
+| Server | Run `server/main.py`, loading environment variables from `server/.env` |
+| Server Tests | Run `server/tests/` with PyCharm's pytest runner, without loading `.env` |
+
+Both configurations use `server/.venv/bin/python` and `server/` as the working
+directory. Create the environment first with `cd server && uv sync --locked`.
+If needed, select this existing interpreter in Run → Edit Configurations.
+Both **Run** and **Debug** are supported; Server Tests displays results in the
+IDE test runner. Server requires the settings described in
+[server/docs/server.md](../server/docs/server.md).
+
+## Firmware
 
 Open the repository root in PyCharm. The shared Run configurations appear in
 the `Firmware` group:
