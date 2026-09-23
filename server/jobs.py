@@ -10,10 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 def night_delay(now: datetime) -> float:
-    """Seconds until 06:00 local time, or zero during the polling window."""
-    if 6 <= now.hour < 21:
+    """Seconds until 05:00 local time, or zero during the polling window."""
+    if 5 <= now.hour < 21:
         return 0
-    morning = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    morning = now.replace(hour=5, minute=0, second=0, microsecond=0)
     if now.hour >= 21:
         morning += timedelta(days=1)
     # Timestamps account for DST changes during the night.
