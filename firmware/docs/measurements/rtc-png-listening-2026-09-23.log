@@ -1,0 +1,18 @@
+# User-supplied UART log, 2026-09-23. Four deep-sleep wakes.
+# Filtered to LISTENING timing only; no network identifiers or upload chatter.
+  listening: 2466 ms partial, 399 to 2866 ms into setup()
+    RTC PNG: 1859 bytes, restored; validate 1.714 ms, allocate 0.025 ms, copy+decode 16.581 ms, redraw 751.947 ms, shadow prime 136.967 ms, restore total 907.274 ms
+    panel update 1237.609 ms; screen preparation excluding restore 321.877 ms
+
+  listening: 2445 ms partial, 396 to 2842 ms into setup()
+    RTC PNG: 1852 bytes, restored; validate 1.615 ms, allocate 0.025 ms, copy+decode 16.515 ms, redraw 745.031 ms, shadow prime 139.921 ms, restore total 903.147 ms
+    panel update 1216.795 ms; screen preparation excluding restore 325.270 ms
+
+  listening: 2477 ms partial, 395 to 2873 ms into setup()
+    RTC PNG: 1852 bytes, restored; validate 1.648 ms, allocate 0.025 ms, copy+decode 16.608 ms, redraw 760.202 ms, shadow prime 141.745 ms, restore total 920.267 ms
+    panel update 1234.126 ms; screen preparation excluding restore 322.938 ms
+
+  listening: 2457 ms partial, 395 to 2853 ms into setup()
+    RTC PNG: 1872 bytes, restored; validate 1.576 ms, allocate 0.029 ms, copy+decode 16.849 ms, redraw 748.756 ms, shadow prime 136.022 ms, restore total 903.271 ms
+    panel update 1230.609 ms; screen preparation excluding restore 323.454 ms
+

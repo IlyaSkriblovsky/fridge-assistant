@@ -2488,3 +2488,27 @@ Removed the generated FreeSans Bold 12 pt face and its preview/generator entries
 Validation: 99 server tests and 28 native firmware tests pass; the production
 firmware and host preview build successfully. The server PNG was visually checked.
 No USB device port was present, so flashing and visual device acceptance are pending.
+
+
+### RTC PNG restoration experiment rejected — 2026-09-23
+
+Tried retaining the server PNG in a single 7168-byte RTC FAST buffer and
+restoring the previous dashboard after deep sleep so LISTENING could use
+partial refresh. The image looked correct, but four measured transitions took
+2445–2477 ms. PNG copy/decode was only 16.515–16.849 ms; bitmap/overlay redraw
+cost 745.031–760.202 ms, bringing total restoration to 903.147–920.267 ms.
+The user found it perceptually slower than full refresh, whose text becomes
+readable before its update finishes.
+
+Rejected at the user's request. Removed the RTC cache, input-preserving decoder
+change, shadow restoration, timing instrumentation and experiment-only tests;
+restored the previous full LISTENING refresh and existing partial answer/working
+paths. Server PNG transport and its original decoder remain unchanged. Results,
+limitations and filtered measurements are recorded in
+[E11](experiments.md#e11----rtc-png-restoration-before-listening-rejected).
+
+Rollback validation: production firmware built successfully and all 28 original
+native tests passed. Only experiment documentation and its filtered log remain
+changed; production code and tests match the pre-experiment revision. Uploaded
+the restored firmware on 2026-09-23; esptool verified its flash hash and reset
+the board.
