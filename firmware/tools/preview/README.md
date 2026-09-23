@@ -14,8 +14,7 @@ Two PGMs come out: `screens.pgm`, which is every local screen one under the othe
 the two words, three answers of different lengths and an error -- and
 `glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
 are the band `working()` refreshes and the box an answer is wrapped into;
-nothing drawn should cross one. The upper-left battery indicator is shown at
-100%, 50%, 1%, 0% and unavailable to check its fit in the top margin.
+nothing drawn should cross one.
 
 The idle dashboard is rendered by the backend; preview it through
 `GET /sticky/dashboard`. There is no local idle/notebook screen.
@@ -39,7 +38,6 @@ is still done when it has run on the device.**
 Nothing in here is built by PlatformIO or by CI; it is not under `src/`.
 
 Alternating screens show the silent-mode indicator from `src/silent_icon.h`,
-so its actual drawing code is checked beside the battery and answer text.
+so its actual drawing code is checked beside the answer text.
 
-The upper-right climate labels include normal, negative-temperature/100% RH,
-and unavailable samples, with the same font and placement as the firmware.
+Battery and climate indicators belong to the server dashboard, including their font.

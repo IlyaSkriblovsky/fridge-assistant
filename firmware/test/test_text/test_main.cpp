@@ -51,7 +51,7 @@ void copy_preserves_character_boundaries_at_every_buffer_size() {
 
 void every_face_supports_our_scripts_and_falls_back_per_character() {
   for (const TextFace* face : {&fontFreeSans12, &fontFreeSans18, &fontFreeSans24,
-                              &fontFreeSansBold12, &fontFreeSansBold24}) {
+                              &fontFreeSansBold24}) {
     for (uint32_t cp : {0x41u, 0x401u, 0x44fu, 0x3bbu, 0x2026u, 0x2116u})
       TEST_ASSERT_TRUE(textHasGlyph(*face, cp));
     TEST_ASSERT_FALSE(textHasGlyph(*face, 0x1f600));

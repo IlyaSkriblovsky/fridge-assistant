@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "sticky/screen.h"
+#include "sticky/climate.h"
 
 // The panel, on a thread of its own.
 //

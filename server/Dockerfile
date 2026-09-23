@@ -29,6 +29,7 @@ RUN useradd --system --no-create-home assistant
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY *.py ./
+COPY fonts/ ./fonts/
 
 # Unbuffered, because the log is print() and docker has no terminal to flush it.
 ENV PATH="/app/.venv/bin:$PATH" \

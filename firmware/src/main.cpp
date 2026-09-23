@@ -215,8 +215,7 @@ void logScreen(const char* name, Display::Screen which) {
   if (queuedMs != 0) {
     Serial1.printf(", %lu ms queued behind the panel", static_cast<unsigned long>(queuedMs));
   }
-  if (which == Display::Screen::Listening || which == Display::Screen::Answer ||
-      which == Display::Screen::Error) {
+  if (which == Display::Screen::Sensors) {
     if (shown.batteryPercent >= 0) Serial1.printf(", battery %d%%", shown.batteryPercent);
     else Serial1.print(", battery unavailable");
     if (shown.climate.valid)
@@ -806,6 +805,7 @@ void runIdle() {
       if (!waitPanel()) return;
       display.sensors();
       if (!waitPanel()) return;
+      logScreen("dashboard sensors", Display::Screen::Sensors);
       const auto snapshot = display.record(Display::Screen::Sensors);
       if (!wifi.online()) g_beginUs = esp_timer_get_time();
       if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {

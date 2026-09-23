@@ -151,14 +151,10 @@ void Display::draw(const Slot& slot) {
   Record& record = _records[static_cast<uint8_t>(slot.screen)];
   bool refused = false;
 
-  // Working updates only the middle strip and retains Listening's indicator.
-  // Read on this task, after boot, without delaying capture or the answer chirp.
-  if (slot.screen == Screen::Listening || slot.screen == Screen::Answer ||
-      slot.screen == Screen::Error || slot.screen == Screen::Silent || slot.screen == Screen::Sensors) {
+  // Sample only for the server dashboard, keeping sensor I2C on this task.
+  if (slot.screen == Screen::Sensors) {
     record.batteryPercent = stickyBattery::readPercent();
-    _screen.setBatteryPercent(record.batteryPercent);
     record.climate = stickyClimate::read();
-    _screen.setClimate(record.climate);
   }
 
   switch (slot.screen) {

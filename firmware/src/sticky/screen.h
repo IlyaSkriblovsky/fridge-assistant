@@ -1,7 +1,5 @@
 #pragma once
 
-#include "sticky/climate.h"
-
 #include <Seeed_GFX.h>
 
 #include <stddef.h>
@@ -98,9 +96,6 @@ class StickyScreen {
   // sleep. Calling it again once it has succeeded does nothing.
   bool begin();
   bool ready() const { return _ready; }
-  void setBatteryPercent(int percent) { _batteryPercent = percent; }
-
-  void setClimate(stickyClimate::Reading reading) { _climate = reading; }
 
   // A white panel, refreshed. This is the cold-start pre-clear: after a
   // power-on the controller's previous-image RAM has nothing to do with what is
@@ -157,8 +152,6 @@ class StickyScreen {
   // Every screen starts from the same state: white, black text, size 1. Set
   // rather than assumed, so no screen can inherit the last one's colour.
   void startFrame();
-  void drawBattery();
-  void drawClimate();
   void drawSilent(bool enabled);
   void rememberIndicator();
 
@@ -182,8 +175,6 @@ class StickyScreen {
   void refreshWhole();
 
   Seeed_GFX _display;
-  int _batteryPercent = -1;
-  stickyClimate::Reading _climate;
   bool _ready = false;
   bool _drewFullFrame = false;  // a full refresh has run this boot
   bool _lastWasPartial = false;

@@ -2478,3 +2478,13 @@ the absence of format selection in OpenAPI and PNG responses for old URLs.
 Deploy the server before installing firmware without `format`: the old live
 server defaults to raw pixels. The accepted trial firmware remains installed
 until that server rollout; no deployment or flashing was performed in this step.
+
+## Dashboard sensor indicators — 2026-09-23
+
+Moved battery and climate rendering to the server dashboard, preserving the top
+margin layout, battery fill and unknown-value labels. Firmware samples sensors
+only for dashboard requests; local voice screens retain the silent indicator.
+Removed the generated FreeSans Bold 12 pt face and its preview/generator entries.
+Validation: 99 server tests and 28 native firmware tests pass; the production
+firmware and host preview build successfully. The server PNG was visually checked.
+No USB device port was present, so flashing and visual device acceptance are pending.

@@ -95,3 +95,24 @@ async def test_browser_password_is_same_secret_and_only_for_dashboard(client):
         auth = "Basic " + base64.b64encode(credentials).decode()
         assert (await client.get("/sticky/dashboard", headers={"Authorization": auth})).status_code == 401
     assert (await client.get("/sticky/dashboard", headers={"Authorization": "Basic !!!"})).status_code == 401
+
+
+@pytest.mark.parametrize("percent,filled", [(None, 0), (0, 0), (1, 1), (50, 17), (100, 34)])
+def test_battery_fill_and_reserved_regions(percent, filled):
+    frame = dashboard.render(percent, -40.0, 100.0)
+    assert sum(frame.getpixel((x, 20)) == 0 for x in range(20, 54)) == filled
+    assert frame.getpixel((16, 12)) == 0
+    assert frame.getpixel((60, 24)) == 0
+    for left, top, right, bottom in dashboard.LOCAL_REGIONS:
+        assert frame.crop((left, top, right + 1, bottom + 1)).getextrema() == (1, 1)
+
+
+def test_indicators_are_in_top_margin_and_sensors_are_independent():
+    absent = dashboard.render()
+    measured = dashboard.render(100, -40.0, 100.0)
+    assert absent.crop((0, 40, 800, 480)).tobytes() == measured.crop((0, 40, 800, 480)).tobytes()
+    assert measured.crop((72, 8, 160, 40)).getextrema() == (0, 1)
+    assert measured.crop((560, 8, 784, 40)).getextrema() == (0, 1)
+    for temperature, humidity in ((0, None), (None, 0)):
+        partial = dashboard.render(temperature_c=temperature, humidity_pct=humidity)
+        assert partial.crop((560, 8, 784, 40)).tobytes() != absent.crop((560, 8, 784, 40)).tobytes()

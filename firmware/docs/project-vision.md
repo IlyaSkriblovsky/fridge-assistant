@@ -20,7 +20,7 @@ Content and layout beyond the diagnostic frame are a separate step.
 Cold startup and timer wakes fetch a dashboard without recording or chirping.
 An AI wake already released at setup and a discarded short press also fetch
 the dashboard, without an answer dwell or audio upload. There is no local
-notebook screen. Voice screens retain their local indicators.
+notebook screen. Voice screens retain only the local silent-mode indicator.
 
 1. **Asleep.** Deep sleep, woken by AI (GPIO4), Up (GPIO5), ext1 any-low, or the dashboard timer.
    Up takes the silent-mode path described below.
@@ -434,21 +434,18 @@ existing shadow-prime path. The added wake time and refreshes will be measured
 in [E9](experiments.md#e9----dashboard-energy-deferred); they are not a blocker
 for the first version.
 
-Battery level is always visible in the upper-left corner: a filled battery icon
-and a percentage. Listening reads it after boot on the display task; Working
-keeps that indicator while updating only the middle strip. Answer and error
-read it again. The image remains visible during deep sleep without periodic
-wakeups. The BQ27220 uses sensor I2C (SDA 1, SCL 0), address `0x55`, register
-`0x2C`, two bytes little-endian. Reads are bounded and failures show `?` without
-failing the question. The percentage can be removed once discharge behaviour
-is understood. Gauge accuracy and low-battery behaviour remain [D3](deferred.md).
+Battery, temperature and humidity appear only on the server-rendered dashboard:
+a filled battery icon and percentage at the upper left, `23.4°  48.2%` at the
+upper right. The server owns their FreeSans Bold font. Voice screens do not
+render these indicators. The display task reads the sensors once before each
+dashboard request, retaining sole ownership of sensor I2C. An Up-only update
+preserves the surrounding dashboard pixels.
 
-Temperature and relative humidity from the SHT40 appear in the upper-right
-corner as `23.4°  48.2%`, in the same bold 12 pt face as the battery percentage.
-They follow the battery's screen refresh schedule; sleep retains the last
-reading, and an Up-only icon update retains the surrounding indicators.
-The sensor uses the same I2C bus, address `0x44`, high-precision measurement
-with the heater off. Failed reads or CRC checks show `--°  --%`.
+The BQ27220 uses sensor I2C (SDA 1, SCL 0), address `0x55`, register `0x2C`,
+two bytes little-endian. The SHT40 uses address `0x44`, high-precision
+measurement with the heater off. Failed readings are omitted from the request;
+the server shows `?` for battery and `--°  --%` for missing climate readings.
+Gauge accuracy and low-battery behaviour remain [D3](deferred.md).
 
 The wider UI is deliberately unconsidered until the proof of concept works.
 
