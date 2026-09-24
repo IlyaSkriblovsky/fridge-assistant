@@ -58,13 +58,9 @@
 //    not wrap: its title comes from the vision's error table and its detail is
 //    a status code, and neither has ever been longer than the panel is wide.
 //
-// **listening() and working() are one screen with two words in it**, which is
-// what makes the second a partial refresh rather than a fourth full one. Both
-// draw a single word in the same face at the same size, centred, so the band of
-// panel the word occupies is a property of the face and not of the word --
-// wordBand() is that band, and working() repaints it and refreshes it alone.
-// Everything outside the band is identical between the two screens and is never
-// sent to the controller a second time.
+// LISTENING has a small label below a wave. Animation refreshes only the wave
+// rectangle. WORKING clears both wave and label and draws the centered word
+// through one partial refresh of their combined band.
 //
 // Nothing here draws by itself. begin() only brings the panel up; whether a
 // cold start wants a white frame before the first real screen is the
@@ -104,16 +100,16 @@ class StickyScreen {
   // screen overwrites anyway -- see docs/implementation.md#display-invariants.
   void clear();
 
-  // Asleep -> Listening. One word, as large as the panel takes, because it is
-  // read from wherever the user is talking rather than up close.
+  // Asleep -> Listening. Full refresh with wave and small label.
   void listening();
+  bool listeningFrame();
 
   void dashboard(const uint8_t* pixels);
   bool staleIndicator();
 
   // Listening -> working. The vision's step 6: the button is up, the question
   // is on its way, and the panel would otherwise still read LISTENING until the
-  // answer lands. The word alone is repainted, through a partial refresh: the
+  // answer lands. The wave and label are cleared through one partial refresh: the
   // answer queues behind it on the one controller, so a full refresh here
   // would put its two and a half seconds in front of the answer's own. It has
   // to follow a full refresh in the same boot, which listening() is -- see the
@@ -161,10 +157,7 @@ class StickyScreen {
   void drawCentred(const TextFace& face, const char* text, int32_t centreX,
                    int32_t middleY, uint8_t size);
 
-  // The band the one word of listening() and working() occupies, full panel
-  // width. Both draw in the same face at the same size and both centre on the
-  // same point, so the band is the face's box plus a margin and neither word
-  // can leave it.
+  // Union of the listening composition and the centered WORKING word.
   void wordBand(int32_t& y, int32_t& height);
 
   // The whole panel, refreshed differentially against the shadow. Falls back to
@@ -178,5 +171,6 @@ class StickyScreen {
   bool _ready = false;
   bool _drewFullFrame = false;  // a full refresh has run this boot
   bool _lastWasPartial = false;
+  uint8_t _waveFrame = 0;
   const char* _lastError = "";
 };

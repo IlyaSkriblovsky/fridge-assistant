@@ -10,8 +10,8 @@ c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
 ./preview
 ```
 
-Two PGMs come out: `screens.pgm`, which is every local screen one under the other --
-the two words, three answers of different lengths and an error -- and
+Three PGMs come out: `listening.pgm` is the clean listening layout; `screens.pgm`, which is every local screen one under the other --
+the listening wave, working word, three answers of different lengths and an error -- and
 `glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
 are the band `working()` refreshes and the box an answer is wrapped into;
 nothing drawn should cross one.

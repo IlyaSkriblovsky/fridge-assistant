@@ -380,10 +380,9 @@ is on the glass, what should be) -- and after a deep sleep the firmware knows
 nothing about what is on the glass: the previous-image plane is rebuilt from
 zero on every boot while the panel still holds the last answer. Only a full
 refresh drives every pixel whatever it was, so exactly one is needed per wake to
-reconcile the two, and it is `Listening`. It also clears accumulated ghosting,
-which is the other thing full refreshes are for, and it fixes the ghosting depth
-at two by construction: full, partial, partial, sleep, whatever the sequence of
-questions, so nothing accumulates across a run.
+reconcile the two, and it is `Listening`. It also clears accumulated ghosting. LISTENING now animates a decorative
+wave with partial updates while recording; repeated-frame image quality still
+needs a device check. Each new question starts with a full refresh.
 
 That is the cheap place to spend it. The Listening refresh runs under the
 recording, where the user is still talking; everything after it is on the far
@@ -405,13 +404,12 @@ it sat on the critical path -- released, draw, upload, wait, draw again -- and
 whatever it cost was added to the wait for every answer. With the panel on a
 task of its own it no longer delays the answer's chirp, but it still delays the
 answer's appearance, because the screens of one question queue on one
-controller. It repaints the word and nothing else: `LISTENING` and `WORKING` are
-one screen with two words in it, drawn in the same face at the same size and
-centred, so the strip of panel the word occupies belongs to the face rather than
-to the word, and a partial refresh of that strip -- 990 ms -- is the whole
-transition. When the answer arrives before the panel is free to draw the word,
-the word is dropped: on a short question it is still under the Listening refresh
-when the answer lands, every time.
+controller. LISTENING shows a wave above a smaller label. Only the wave window is
+updated during animation. WORKING clears the wave and label in one partial
+band and shows a large centered word. Animation yields to any queued screen;
+a refresh already started must finish before the next screen can begin.
+When the answer arrives before the panel is free to draw WORKING, that
+intermediate screen is dropped.
 
 The two shapes it was chosen over were a screen of its own at the full 2.4 s,
 which would have been slower than the wait it announced three times in four, and

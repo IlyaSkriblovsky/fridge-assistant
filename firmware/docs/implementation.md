@@ -149,8 +149,21 @@ and [E10](experiments/e10-dashboard-compression.md).
 [sticky/epaper.h](../src/sticky/epaper.h) corrects SSD1677 polarity and the
 previous-image plane needed by partial refresh. Its sleep override removes a
 measured redundant delay. Keep all three; see [E8](experiments/e8-refresh.md).
-LISTENING begins with a full refresh after deep sleep; WORKING changes the word
-band, and answer/error use whole-panel partial updates when the shadow is valid.
+LISTENING begins with a full refresh: nine rounded wave bars above a size-1
+FreeSans Bold 24 label. While listening is requested and the slot is empty,
+Display cycles three decorative wave frames with a partial refresh of only
+(288, 128, 224, 136). It waits 250 ms after each completed frame; this is an
+experimental visual cadence, not a measured refresh limit. A queued screen
+always wins over the next frame. A started refresh cannot be interrupted.
+Release observed by the orchestrator, finish/tap/abort, another screen post,
+and destruction cancel future frames. Idle remains false until animation stops.
+A refused frame disables animation until another LISTENING screen; its error
+and timing remain in the ListeningFrame record. Set config::kListeningAnimation
+false to retain the static design without animation.
+
+WORKING clears both the wave and small label in one partial band (y=128..357),
+then shows the large centered word. Answer/error use whole-panel partial
+updates when the shadow is valid.
 The RTC PNG restoration trial was rejected; no retained dashboard image is
 used to reconstruct LISTENING ([E11](experiments/e11-rtc-png-restoration.md)).
 
@@ -197,6 +210,9 @@ for layout; it cannot prove contrast or partial-refresh quality.
 These are retained observations, not new device checks made by editing this
 file. Build/host success does not establish hardware acceptance.
 
+- The animated listening wave awaits device verification: repeated frames,
+  ghosting outside the window, release during a frame, quick answers, taps,
+  errors and the 30-second cap. Host layout and RAM tests cannot prove these.
 - Voice capture, streaming, error routing, display-task transitions and wrapped
   Cyrillic answers were checked on the device. Evidence is in
   [E3](experiments/e3-microphone-settle.md), [E7](experiments/e7-upload.md) and
