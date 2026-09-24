@@ -155,7 +155,7 @@ nginx-proxy, который там уже обслуживает другие п
 | Сценарий | Состояние | Документ |
 | --- | --- | --- |
 | Список покупок | Добавление работает: Google Keep через gkeepapi, пока в тестовую заметку | [use-cases/shopping-list.md](use-cases/shopping-list.md) |
-| Таймеры и напоминания | Идея, нужна прошивка | [use-cases/timers-reminders.md](use-cases/timers-reminders.md) |
+| Таймеры и напоминания | Согласован план одноразовых напоминаний, до 10 активных; реализация впереди | [use-cases/timers-reminders.md](use-cases/timers-reminders.md) |
 | Дашборд на экране покоя | Реализованы счётчик покупок и прогноз Open-Meteo на сегодня/завтра; новый макет требует проверки на приборе | [use-cases/idle-screen.md](use-cases/idle-screen.md) |
 | Семейные записки | Идея, живут на сводке | [use-cases/family-notes.md](use-cases/family-notes.md) |
 | Telegram-бот | Идея, что он делает — не решено | [use-cases/telegram.md](use-cases/telegram.md) |

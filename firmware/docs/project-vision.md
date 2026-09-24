@@ -109,6 +109,13 @@ is tracked in [D11](deferred.md). Measurements come after the dashboard design;
 no energy advantage of remaining awake has been established. Offline reminder
 storage and alarms are a separate future feature, not part of this plan.
 
+The agreed one-shot reminder plan (2026-09-24) is in
+[timers-reminders.md](../../server/docs/use-cases/timers-reminders.md).
+It covers up to ten active reminders, offline firing, unread notification
+ordering, all three buttons, alarms that bypass silent mode, and interruption
+of unfinished audio uploads. It is not implemented yet; the behavior described
+elsewhere in this vision remains the current behavior until that work lands.
+
 ## Decisions
 
 ### Transport: HTTP POST, not WebSocket
