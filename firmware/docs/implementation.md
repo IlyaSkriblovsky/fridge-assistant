@@ -96,7 +96,7 @@ would allow the ACK to overwrite it.
 [Backend](../src/backend.h) uses `esp_http_client` with explicit HTTP chunk
 framing and Bearer authentication. The response must be valid JSON containing
 string `response`. Connect, stalled-body and response budgets are separate;
-the response budget starts at the terminating chunk. Values and routes belong
+the 60-second response budget starts at the terminating chunk. Values and routes belong
 in [config.h](../src/config.h), credentials in gitignored `secrets.h` with a
 tracked [example](../src/secrets.example.h).
 

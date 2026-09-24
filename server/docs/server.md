@@ -280,7 +280,7 @@ curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
 | --- | --- | --- |
 | `POST /audio/fault/500` | Отвечает `500` | `SERVER ERROR 500` |
 | `POST /audio/fault/empty` | Отвечает `200` и `{}` | `BAD RESPONSE` |
-| `POST /audio/fault/slow` | Молчит `FAULT_DELAY_SECONDS` (45 с) | `TIMED OUT` |
+| `POST /audio/fault/slow` | Молчит `FAULT_DELAY_SECONDS` (75 с) | `TIMED OUT` |
 
 Для `NO SERVER` сервер вовсе не нужен: прошивка сама стучится на закрытый порт
 и на адрес, где никого нет.
@@ -290,7 +290,7 @@ curl -fsS -H "Authorization: Bearer $DEVICE_TOKEN" \
 закончил загрузку, и он покажет `NO SERVER` вместо проверяемого случая.
 
 `FAULT_DELAY_SECONDS` должна быть больше `kResponseTimeoutMs` прошивки (сейчас
-30 с), чтобы прибор сдался первым. Если в прошивке таймаут увеличат, это
+60 с), чтобы прибор сдался первым. Если в прошивке таймаут увеличат, это
 значение нужно поднять вслед за ним.
 
 ## Деплой

@@ -59,9 +59,9 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024
 UNKNOWN_LENGTH = 0xFFFFFFFF
 
 # How long /audio/fault/slow holds a question before answering. Longer than the
-# device's config::kResponseTimeoutMs, which is 30 s, so the firmware gives up
+# device's config::kResponseTimeoutMs, which is 60 s, so the firmware gives up
 # first and shows TIMED OUT.
-FAULT_DELAY_SECONDS = 45
+FAULT_DELAY_SECONDS = 75
 
 
 def lan_ip() -> str | None:

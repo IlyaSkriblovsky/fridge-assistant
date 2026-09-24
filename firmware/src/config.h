@@ -55,7 +55,7 @@ constexpr uint32_t kMaxRecordSeconds = 30;
 //
 // It is the backend's thinking time and nothing else: it counts from the
 // terminating chunk, so a 30 s hold does not spend it.
-constexpr uint32_t kResponseTimeoutMs = 30000;
+constexpr uint32_t kResponseTimeoutMs = 60000;
 
 // How long the TCP connection to the backend gets before the device decides
 // there is nothing at that address. Separate from the wait above, which is for
