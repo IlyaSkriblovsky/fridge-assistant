@@ -64,7 +64,7 @@ class Display {
 
   // Every screen, and the pre-clear -- which is the record's index as well.
   enum class Screen : uint8_t { Clear, Listening, Working, Answer, Error, Silent,
-                                Sensors, Dashboard, Stale, Count };
+                                Sensors, Dashboard, Stale, ListeningFrame, Count };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
@@ -109,12 +109,16 @@ class Display {
   // of whatever is posted next. See StickyScreen::clear().
   void clear();
   void listening();
+  // Cancel future animation frames without interrupting a panel waveform.
+  // Also used by tap/abort paths which do not post WORKING.
+  void stopListening();
   void working();
   void silentIndicator();
   void answer(const char* text);
   void error(const char* title, const char* detail = nullptr);
 
-  // Blocks until nothing is waiting and the panel is not refreshing, up to
+  // Blocks until nothing is waiting, animation is inactive and the panel is
+  // not refreshing, up to
   // timeoutMs. False on the timeout, which means the task is still inside a
   // refresh. Returns true at once if the task never started.
   //
@@ -157,6 +161,7 @@ class Display {
 
   Slot _slot;
   bool _clearPending = false;
+  bool _animateRequested = false;  // guarded by _lock
 
   Record _records[static_cast<uint8_t>(Screen::Count)];
   const char* _lastError = "";

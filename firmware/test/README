@@ -40,3 +40,6 @@ These tests do not validate the physical display, PSRAM, task scheduling,
 concurrent memory visibility, GPIO, microphone or network. No hardware tests
 or device flashing are part of this suite. Add tests for readily isolated logic;
 do not duplicate production algorithms in test substitutes.
+
+`test_listening_wave` checks that every frame preserves all surrounding pixels
+and that every frame transition completely removes the previous wave.

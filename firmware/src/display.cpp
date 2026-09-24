@@ -3,11 +3,13 @@
 #include <esp_timer.h>
 
 #include "text.h"
+#include "config.h"
 #include "sticky/battery.h"
 
 namespace {
 
-// Set while nothing is waiting and the panel is not refreshing. Cleared by a
+// Set while nothing is waiting, animation is inactive and the panel is not
+// refreshing. Cleared by a
 // post, under the same lock that fills the slot, and set by the task under that
 // lock once it finds the slot empty -- so the bit and the slot never disagree.
 constexpr EventBits_t kIdleBit = BIT0;
@@ -18,6 +20,7 @@ Display::~Display() {
   if (_task != nullptr) {
     // Idle means blocked on its notification and holding nothing, which is the
     // one state it is safe to delete it in.
+    stopListening();
     waitIdle(UINT32_MAX);
     vTaskDelete(_task);
   }
@@ -55,6 +58,7 @@ void Display::clear() {
 
   xSemaphoreTake(_lock, portMAX_DELAY);
   _clearPending = true;
+  _animateRequested = false;
   _records[static_cast<uint8_t>(Screen::Clear)].postedUs = esp_timer_get_time();
   xEventGroupClearBits(_events, kIdleBit);
   xSemaphoreGive(_lock);
@@ -67,6 +71,14 @@ void Display::dashboard(const uint8_t* pixels) { post(Screen::Dashboard, nullptr
 void Display::staleIndicator() { post(Screen::Stale, nullptr, nullptr); }
 
 void Display::listening() { post(Screen::Listening, nullptr, nullptr); }
+
+void Display::stopListening() {
+  if (_task == nullptr) return;
+  xSemaphoreTake(_lock, portMAX_DELAY);
+  _animateRequested = false;
+  xSemaphoreGive(_lock);
+  xTaskNotifyGive(_task);
+}
 
 void Display::silentIndicator() { post(Screen::Silent, nullptr, nullptr); }
 
@@ -93,6 +105,7 @@ void Display::post(Screen screen, const char* text, const char* detail, const ui
     _records[static_cast<uint8_t>(_slot.screen)].superseded = true;
   }
   _slot = next;
+  _animateRequested = screen == Screen::Listening && config::kListeningAnimation;
   Record& record = _records[static_cast<uint8_t>(screen)];
   record.postedUs = esp_timer_get_time();
   record.superseded = false;
@@ -121,6 +134,8 @@ uint32_t Display::stackUnusedBytes() const {
 void Display::trampoline(void* self) { static_cast<Display*>(self)->run(); }
 
 void Display::run() {
+  bool listeningOnGlass = false;
+  int64_t nextFrameUs = 0;
   for (;;) {
     Slot slot;
 
@@ -133,6 +148,17 @@ void Display::run() {
     } else if (_slot.screen != Screen::Count) {
       slot = _slot;
       _slot.screen = Screen::Count;
+    } else if (_animateRequested && listeningOnGlass) {
+      const int64_t remainingUs = nextFrameUs - esp_timer_get_time();
+      if (remainingUs > 0) {
+        xSemaphoreGive(_lock);
+        // A post/stop wakes this wait immediately. Recheck the slot under the
+        // lock before starting a frame; animation never enters the queue.
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((remainingUs + 999) / 1000));
+        continue;
+      }
+      slot.screen = Screen::ListeningFrame;
+      _records[static_cast<uint8_t>(slot.screen)].postedUs = esp_timer_get_time();
     } else {
       xEventGroupSetBits(_events, kIdleBit);
       xSemaphoreGive(_lock);
@@ -143,6 +169,10 @@ void Display::run() {
     xSemaphoreGive(_lock);
 
     draw(slot);
+    listeningOnGlass = (slot.screen == Screen::Listening ||
+                        slot.screen == Screen::ListeningFrame) &&
+                       _screen.lastError()[0] == '\0';
+    nextFrameUs = esp_timer_get_time() + config::kListeningFramePauseMs * 1000LL;
   }
 }
 
@@ -171,6 +201,9 @@ void Display::draw(const Slot& slot) {
       break;
     case Screen::Listening:
       _screen.listening();
+      break;
+    case Screen::ListeningFrame:
+      refused = !_screen.listeningFrame();
       break;
     case Screen::Working:
       // Refused leaves LISTENING on the glass until the answer lands, which is
