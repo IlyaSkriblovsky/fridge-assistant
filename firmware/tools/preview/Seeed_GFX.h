@@ -29,6 +29,26 @@ class Seeed_GFX {
         if (i >= 0 && i < _w && j >= 0 && j < _h) px[j * _w + i] = c;
   }
   void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t c) { fillRect(x, y, w, 1, c); }
+  // Seeed_GFX2 fillCircle/fillCircleHelper, with both halves enabled.
+  // Keep its integer rasterization so previews match the firmware's circles.
+  void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color) {
+    if (r < 0) return;
+    fillRect(x, y - r, 1, 2 * r + 1, color);
+    int32_t f = 1 - r, ddF_x = 1, ddF_y = -2 * r;
+    int32_t x1 = 0, y1 = r;
+    while (x1 < y1) {
+      if (f >= 0) { --y1; ddF_y += 2; f += ddF_y; }
+      ++x1; ddF_x += 2; f += ddF_x;
+      if (x1 < y1 + 1) {
+        fillRect(x + x1, y - y1, 1, 2 * y1 + 1, color);
+        fillRect(x - x1, y - y1, 1, 2 * y1 + 1, color);
+      }
+      if (y1 != x1) {
+        fillRect(x + y1, y - x1, 1, 2 * x1 + 1, color);
+        fillRect(x - y1, y - x1, 1, 2 * x1 + 1, color);
+      }
+    }
+  }
   void setTextColor(uint16_t c) { textcolor = textbgcolor = c; }
   void setTextSize(uint8_t s) { textsize = s ? s : 1; }
   void setFreeFont(const GFXfont* f) { gfxFont = (GFXfont*)f; }

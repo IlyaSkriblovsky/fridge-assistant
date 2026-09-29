@@ -21,6 +21,8 @@ constexpr uint32_t kAnswerDwellMs = 10000;
 // completed partial refresh. Set false to keep the static wave and label.
 constexpr bool kListeningAnimation = true;
 constexpr uint32_t kListeningFramePauseMs = 250;
+constexpr bool kThinkingAnimation = true;
+constexpr uint32_t kThinkingFramePauseMs = 250;
 
 // How long a cached access point gets before the firmware stops believing it.
 // The BSSID and channel of the last successful connect are kept in RTC memory

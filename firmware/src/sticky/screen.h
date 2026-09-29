@@ -59,7 +59,7 @@
 //    a status code, and neither has ever been longer than the panel is wide.
 //
 // LISTENING has a small label below a wave. Animation refreshes only the wave
-// rectangle. WORKING clears both wave and label and draws the centered word
+// rectangle. THINKING replaces them with three animated dots and a small label
 // through one partial refresh of their combined band.
 //
 // Nothing here draws by itself. begin() only brings the panel up; whether a
@@ -107,7 +107,7 @@ class StickyScreen {
   void dashboard(const uint8_t* pixels);
   bool staleIndicator();
 
-  // Listening -> working. The vision's step 6: the button is up, the question
+  // Listening -> thinking. The vision's step 6: the button is up, the question
   // is on its way, and the panel would otherwise still read LISTENING until the
   // answer lands. The wave and label are cleared through one partial refresh: the
   // answer queues behind it on the one controller, so a full refresh here
@@ -119,17 +119,18 @@ class StickyScreen {
   // LISTENING on the glass and lastError() with the reason. It is not worth
   // failing a question over -- the answer's own full refresh repaints
   // everything either way -- so the caller logs it and carries on.
-  bool working();
+  bool thinking();
+  bool thinkingFrame();
 
   // Standalone Up wake; reconstruct only the indicator rectangle.
   bool silentIndicator();
 
-  // Working -> answer. Wrapped into the answer box and centred in it as a
+  // Thinking -> answer. Wrapped into the answer box and centred in it as a
   // block, left-aligned: a ragged right edge reads as text, and a centred one
   // reads as a poster. Partial, over the whole panel.
   void answer(const char* text);
 
-  // Working -> error. The title is one of the vision's error table; detail is
+  // Thinking -> error. The title is one of the vision's error table; detail is
   // whatever narrows it down -- a status code -- and may be null or empty.
   // Partial, over the whole panel, with one exception: an error drawn before
   // listening() ever ran has no full refresh behind it and takes one.
@@ -140,7 +141,7 @@ class StickyScreen {
   // seconds, not correctness -- but is worth a line in the log.
   bool lastWasPartial() const { return _lastWasPartial; }
 
-  // Human-readable reason begin() or working() returned false, straight from
+  // Human-readable reason begin() or thinking() returned false, straight from
   // the library.
   const char* lastError() const { return _lastError; }
 
@@ -157,7 +158,7 @@ class StickyScreen {
   void drawCentred(const TextFace& face, const char* text, int32_t centreX,
                    int32_t middleY, uint8_t size);
 
-  // Union of the listening composition and the centered WORKING word.
+  // Union of the listening and thinking compositions.
   void wordBand(int32_t& y, int32_t& height);
 
   // The whole panel, refreshed differentially against the shadow. Falls back to
@@ -172,5 +173,6 @@ class StickyScreen {
   bool _drewFullFrame = false;  // a full refresh has run this boot
   bool _lastWasPartial = false;
   uint8_t _waveFrame = 0;
+  uint8_t _dotsFrame = 0;
   const char* _lastError = "";
 };
