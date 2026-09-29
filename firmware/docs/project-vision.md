@@ -37,9 +37,9 @@ notebook screen. Voice screens retain only the local silent-mode indicator.
    long enough to count, open the request and stream the recording into it as
    it is captured.
 5. **Release.** Debounce, then stop capturing.
-6. **Working.** Say that the question was taken and is being answered, twice
+6. **Thinking.** Say that the question was taken and is being answered, twice
    over: a chirp the moment the button comes up, and the word on the panel
-   changing from "Listening" to "Working". The backend runs speech recognition
+   changing from "Listening" to "Thinking". The backend runs speech recognition
    and a language model, which is seconds -- `kResponseTimeoutMs` allows thirty
    of them -- and the panel would otherwise still read "Listening", which stops
    being true the moment the button comes up. The word is a partial refresh, not
@@ -405,10 +405,11 @@ whatever it cost was added to the wait for every answer. With the panel on a
 task of its own it no longer delays the answer's chirp, but it still delays the
 answer's appearance, because the screens of one question queue on one
 controller. LISTENING shows a wave above a smaller label. Only the wave window is
-updated during animation. WORKING clears the wave and label in one partial
-band and shows a large centered word. Animation yields to any queued screen;
+updated during animation. THINKING clears the wave and label in one partial
+band and shows three dots above THINKING. The dots animate by enlarging one
+at a time, using a partial refresh of their own window. Animation yields to any queued screen;
 a refresh already started must finish before the next screen can begin.
-When the answer arrives before the panel is free to draw WORKING, that
+When the answer arrives before the panel is free to draw THINKING, that
 intermediate screen is dropped.
 
 The two shapes it was chosen over were a screen of its own at the full 2.4 s,

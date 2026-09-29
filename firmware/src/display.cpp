@@ -20,7 +20,7 @@ Display::~Display() {
   if (_task != nullptr) {
     // Idle means blocked on its notification and holding nothing, which is the
     // one state it is safe to delete it in.
-    stopListening();
+    stopAnimation();
     waitIdle(UINT32_MAX);
     vTaskDelete(_task);
   }
@@ -58,7 +58,7 @@ void Display::clear() {
 
   xSemaphoreTake(_lock, portMAX_DELAY);
   _clearPending = true;
-  _animateRequested = false;
+  _animationRequested = Screen::Count;
   _records[static_cast<uint8_t>(Screen::Clear)].postedUs = esp_timer_get_time();
   xEventGroupClearBits(_events, kIdleBit);
   xSemaphoreGive(_lock);
@@ -72,17 +72,17 @@ void Display::staleIndicator() { post(Screen::Stale, nullptr, nullptr); }
 
 void Display::listening() { post(Screen::Listening, nullptr, nullptr); }
 
-void Display::stopListening() {
+void Display::stopAnimation() {
   if (_task == nullptr) return;
   xSemaphoreTake(_lock, portMAX_DELAY);
-  _animateRequested = false;
+  _animationRequested = Screen::Count;
   xSemaphoreGive(_lock);
   xTaskNotifyGive(_task);
 }
 
 void Display::silentIndicator() { post(Screen::Silent, nullptr, nullptr); }
 
-void Display::working() { post(Screen::Working, nullptr, nullptr); }
+void Display::thinking() { post(Screen::Thinking, nullptr, nullptr); }
 
 void Display::answer(const char* text) { post(Screen::Answer, text, nullptr); }
 
@@ -105,7 +105,10 @@ void Display::post(Screen screen, const char* text, const char* detail, const ui
     _records[static_cast<uint8_t>(_slot.screen)].superseded = true;
   }
   _slot = next;
-  _animateRequested = screen == Screen::Listening && config::kListeningAnimation;
+  _animationRequested = screen == Screen::Listening && config::kListeningAnimation
+      ? Screen::ListeningFrame
+      : screen == Screen::Thinking && config::kThinkingAnimation
+          ? Screen::ThinkingFrame : Screen::Count;
   Record& record = _records[static_cast<uint8_t>(screen)];
   record.postedUs = esp_timer_get_time();
   record.superseded = false;
@@ -134,7 +137,7 @@ uint32_t Display::stackUnusedBytes() const {
 void Display::trampoline(void* self) { static_cast<Display*>(self)->run(); }
 
 void Display::run() {
-  bool listeningOnGlass = false;
+  Screen animationOnGlass = Screen::Count;
   int64_t nextFrameUs = 0;
   for (;;) {
     Slot slot;
@@ -148,7 +151,7 @@ void Display::run() {
     } else if (_slot.screen != Screen::Count) {
       slot = _slot;
       _slot.screen = Screen::Count;
-    } else if (_animateRequested && listeningOnGlass) {
+    } else if (_animationRequested != Screen::Count && _animationRequested == animationOnGlass) {
       const int64_t remainingUs = nextFrameUs - esp_timer_get_time();
       if (remainingUs > 0) {
         xSemaphoreGive(_lock);
@@ -157,7 +160,7 @@ void Display::run() {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((remainingUs + 999) / 1000));
         continue;
       }
-      slot.screen = Screen::ListeningFrame;
+      slot.screen = animationOnGlass;
       _records[static_cast<uint8_t>(slot.screen)].postedUs = esp_timer_get_time();
     } else {
       xEventGroupSetBits(_events, kIdleBit);
@@ -169,10 +172,16 @@ void Display::run() {
     xSemaphoreGive(_lock);
 
     draw(slot);
-    listeningOnGlass = (slot.screen == Screen::Listening ||
-                        slot.screen == Screen::ListeningFrame) &&
-                       _screen.lastError()[0] == '\0';
-    nextFrameUs = esp_timer_get_time() + config::kListeningFramePauseMs * 1000LL;
+    animationOnGlass = Screen::Count;
+    if (_screen.lastError()[0] == '\0') {
+      if (slot.screen == Screen::Listening || slot.screen == Screen::ListeningFrame)
+        animationOnGlass = Screen::ListeningFrame;
+      else if (slot.screen == Screen::Thinking || slot.screen == Screen::ThinkingFrame)
+        animationOnGlass = Screen::ThinkingFrame;
+    }
+    const uint32_t pauseMs = animationOnGlass == Screen::ThinkingFrame
+        ? config::kThinkingFramePauseMs : config::kListeningFramePauseMs;
+    nextFrameUs = esp_timer_get_time() + pauseMs * 1000LL;
   }
 }
 
@@ -205,10 +214,13 @@ void Display::draw(const Slot& slot) {
     case Screen::ListeningFrame:
       refused = !_screen.listeningFrame();
       break;
-    case Screen::Working:
+    case Screen::ThinkingFrame:
+      refused = !_screen.thinkingFrame();
+      break;
+    case Screen::Thinking:
       // Refused leaves LISTENING on the glass until the answer lands, which is
-      // not worth failing a question over -- see StickyScreen::working().
-      refused = !_screen.working();
+      // not worth failing a question over -- see StickyScreen::thinking().
+      refused = !_screen.thinking();
       break;
     case Screen::Answer:
       // Full with a reason is a partial the controller refused. Full without

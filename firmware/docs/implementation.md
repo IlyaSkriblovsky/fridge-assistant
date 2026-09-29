@@ -28,7 +28,7 @@ voice cycles without recursion.
    A wall-clock threshold alone can misclassify a release still in debounce.
 5. Capture stops on stable release, the 30-second cap, abort or read failure.
    A discarded tap uploads nothing and goes straight to dashboard fetch.
-6. For a valid question, post WORKING. If streaming already started, send its
+6. For a valid question, post THINKING. If streaming already started, send its
    remaining bytes and terminating chunk before the taken chirp, letting the
    server work during that chirp. Otherwise wait for WiFi within its budget,
    then send the recording. Read the JSON answer and post answer or error;
@@ -65,7 +65,7 @@ a long blocking read by itself does not measure time spent away from DMA.
 
 Display has one pending slot: a newer post replaces work not yet started.
 An active refresh always finishes, and the cold-start pre-clear cannot be
-replaced. Thus an answer can supersede WORKING while LISTENING is still drawing.
+replaced. Thus an answer can supersede THINKING while LISTENING is still drawing.
 Text is copied into the slot. Dashboard pixels are borrowed and must remain
 alive and unchanged until `Display::waitIdle()` succeeds. Display records are
 read after it becomes idle, when its worker is no longer changing them.
@@ -161,8 +161,13 @@ A refused frame disables animation until another LISTENING screen; its error
 and timing remain in the ListeningFrame record. Set config::kListeningAnimation
 false to retain the static design without animation.
 
-WORKING clears both the wave and small label in one partial band (y=128..357),
-then shows the large centered word. Answer/error use whole-panel partial
+THINKING clears both the wave and small label in one partial band (y=128..357),
+then shows three dots and a size-1 THINKING label at the same height as LISTENING.
+Thinking animation cycles the enlarged dot left to right, refreshing only
+(320, 172, 160, 48), with a 250 ms pause after each refresh. Set
+config::kThinkingAnimation false for the static first frame. Answer/error
+posts cancel subsequent frames; an in-flight refresh must finish.
+The thinking dots and transition still need visual device verification. Answer/error use whole-panel partial
 updates when the shadow is valid.
 The RTC PNG restoration trial was rejected; no retained dashboard image is
 used to reconstruct LISTENING ([E11](experiments/e11-rtc-png-restoration.md)).

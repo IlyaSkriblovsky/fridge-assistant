@@ -10,10 +10,10 @@ c++ -std=c++17 -I. -I../../src -o preview preview.cpp \
 ./preview
 ```
 
-Three PGMs come out: `listening.pgm` is the clean listening layout; `screens.pgm`, which is every local screen one under the other --
-the listening wave, working word, three answers of different lengths and an error -- and
+Four PGMs come out: `thinking.pgm` shows the thinking dots; `listening.pgm` is the clean listening layout; `screens.pgm`, which is every local screen one under the other --
+the listening wave, thinking dots, three answers of different lengths and an error -- and
 `glyphs.pgm`, which is every script the faces carry. The hairlines on a screen
-are the band `working()` refreshes and the box an answer is wrapped into;
+are the band `thinking()` refreshes and the box an answer is wrapped into;
 nothing drawn should cross one.
 
 The idle dashboard is rendered by the backend; preview it through
