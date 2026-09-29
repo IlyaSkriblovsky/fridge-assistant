@@ -1,0 +1,33 @@
+E14 trill span preference, 2026-09-25
+Device: assembled reTerminal Sticky E1005
+Rig: exp_e14, eight 40 ms notes, 3850 Hz centre, 50% duty
+Seed: 3542946600
+
+trial  1  A span-1000  B span-600   chose A
+trial  2  A span-1000  B span-800   chose B
+trial  3  A span-400   B span-600   chose B
+trial  4  A span-600   B span-800   chose A
+trial  5  A span-400   B span-800   chose B
+trial  6  A span-400   B span-1000  chose A
+trial  7  A span-1000  B span-800   chose B
+trial  8  A span-400   B span-800   chose B
+trial  9  A span-600   B span-800   chose A
+trial 10  A span-400   B span-1000  chose A
+trial 11  A span-1000  B span-600   chose B
+trial 12  A span-400   B span-600   chose A
+
+Repeated round-robin scores:
+  span-400   3/6
+  span-600   4/6
+  span-800   4/6
+  span-1000  1/6
+
+Final:
+trial 13  A span-600  B span-800  chose A
+trial 14  A span-600  B span-800  chose A
+trial 15  A span-800  B span-600  chose B
+trial 16  A span-800  B span-600  chose B
+trial 17  A span-600  B span-800  chose A
+
+Final score: span-600 5, span-800 0
+Across round robin and final, span-600 beat span-800 in 7/7 direct comparisons.

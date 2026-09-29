@@ -1,6 +1,7 @@
 #include "sticky/buzzer.h"
 
 #include <Arduino.h>
+#include <array>
 #include "silent_mode.h"
 
 namespace {
@@ -22,7 +23,7 @@ constexpr uint8_t kResolutionBits = 10;
 // pitches so it is neither of them, and short enough that it cannot be taken
 // for the error's sustained note.
 //
-// Kept near 2-3 kHz, where a small piezo is loudest.
+// Legacy voice cues; E12 later preferred the 3.75-4.0 kHz region on this unit.
 constexpr uint16_t kLowHz = 2000;
 constexpr uint16_t kMidHz = 2500;
 constexpr uint16_t kHighHz = 3000;
@@ -31,6 +32,39 @@ constexpr stickyBuzzer::Note kReady[] = {{kLowHz, 40}, {0, 30}, {kHighHz, 40}};
 constexpr stickyBuzzer::Note kTaken[] = {{kMidHz, 60}};
 constexpr stickyBuzzer::Note kAnswer[] = {{kHighHz, 90}, {0, 50}, {kLowHz, 90}};
 constexpr stickyBuzzer::Note kError[] = {{1500, 450}};
+
+// E14's full trill, E15's preferred 0/+2/0/+2 melody. The +2-semitone
+// frequencies are round(base * 2^(2/12)). The user requested three repeats;
+// the 500 ms phrase gap is a design choice, not a measured optimum.
+constexpr uint16_t kNotificationHz[2][2] = {{3550, 4150}, {3985, 4658}};
+constexpr size_t kNotificationRepeats = 3;
+constexpr size_t kNotificationElements = 4;
+constexpr size_t kTrillNotes = 8;
+constexpr uint16_t kTrillNoteMs = 40;
+constexpr uint16_t kElementGapMs = 50;
+constexpr uint16_t kPhraseGapMs = 500;
+constexpr size_t kNotificationSteps =
+    kNotificationRepeats * (kNotificationElements * kTrillNotes +
+                            kNotificationElements - 1) +
+    kNotificationRepeats - 1;
+
+constexpr std::array<stickyBuzzer::Note, kNotificationSteps> notificationNotes() {
+  std::array<stickyBuzzer::Note, kNotificationSteps> notes{};
+  size_t index = 0;
+  for (size_t repeat = 0; repeat < kNotificationRepeats; ++repeat) {
+    for (size_t element = 0; element < kNotificationElements; ++element) {
+      for (size_t note = 0; note < kTrillNotes; ++note)
+        notes[index++] = {kNotificationHz[element % 2][note % 2], kTrillNoteMs};
+      if (element + 1 < kNotificationElements)
+        notes[index++] = {0, kElementGapMs};
+    }
+    if (repeat + 1 < kNotificationRepeats)
+      notes[index++] = {0, kPhraseGapMs};
+  }
+  return notes;
+}
+
+constexpr auto kNotification = notificationNotes();
 
 // Detached and driven low by hand rather than left as an idle LEDC output:
 // prepareDeepSleep() parks GPIO48 low through the sleep, and gpio_hold_en()
@@ -66,3 +100,5 @@ void stickyBuzzer::taken() { play(kTaken); }
 void stickyBuzzer::answer() { play(kAnswer); }
 
 void stickyBuzzer::error() { play(kError); }
+
+void stickyBuzzer::notification() { play(kNotification.data(), kNotification.size()); }
