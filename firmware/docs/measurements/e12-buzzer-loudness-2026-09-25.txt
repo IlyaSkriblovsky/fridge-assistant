@@ -1,0 +1,72 @@
+E12 subjective buzzer loudness, 2026-09-25
+Device: assembled reTerminal Sticky E1005
+Rig: exp_e12, 350 ms tones, 650 ms A/B gap
+Listener position and room details were held fixed during each run but not recorded.
+
+Run 1, seed 1509145848
+
+trial  1  frequency r1  A 5500 Hz 50.0%  B 2250 Hz 50.0%  chose B
+trial  2  frequency r1  A 3250 Hz 50.0%  B 1250 Hz 50.0%  chose A
+trial  3  frequency r1  A 3500 Hz 50.0%  B 2750 Hz 50.0%  chose A
+trial  4  frequency r1  A 5000 Hz 50.0%  B 4000 Hz 50.0%  chose B
+trial  5  frequency r1  A 4500 Hz 50.0%  B 6000 Hz 50.0%  chose A
+trial  6  frequency r1  A 5750 Hz 50.0%  B 4250 Hz 50.0%  chose B
+trial  7  frequency r1  A 5250 Hz 50.0%  B 3750 Hz 50.0%  chose B
+trial  8  frequency r1  A 3000 Hz 50.0%  B 4750 Hz 50.0%  chose A
+trial  9  frequency r1  A 1000 Hz 50.0%  B 1500 Hz 50.0%  chose B
+trial 10  frequency r1  A 2500 Hz 50.0%  B 1750 Hz 50.0%  chose A
+trial 11  frequency r2  A 4500 Hz 50.0%  B 3250 Hz 50.0%  chose B
+trial 12  frequency r2  A 4250 Hz 50.0%  B 3500 Hz 50.0%  chose B
+trial 13  frequency r2  A 4000 Hz 50.0%  B 2500 Hz 50.0%  chose A
+trial 14  frequency r2  A 3000 Hz 50.0%  B 1500 Hz 50.0%  chose B
+trial 15  frequency r2  A 3750 Hz 50.0%  B 2250 Hz 50.0%  chose A
+trial 16  frequency r3  A 2000 Hz 50.0%  B 4000 Hz 50.0%  chose B
+trial 17  frequency r3  A 3750 Hz 50.0%  B 3250 Hz 50.0%  chose A
+trial 18  frequency r3  A 1500 Hz 50.0%  B 3500 Hz 50.0%  chose A
+trial 19  frequency r4  A 4000 Hz 50.0%  B 1500 Hz 50.0%  chose A
+trial 20  frequency r5  A 3750 Hz 50.0%  B 4000 Hz 50.0%  chose A
+frequency winner: 3750 Hz, 50.0%
+
+trial 21  duty r1       A 3750 Hz 37.5%  B 3750 Hz 12.5%  chose A
+trial 22  duty r1       A 3750 Hz 25.0%  B 3750 Hz 50.0%  chose B
+trial 23  duty r2       A 3750 Hz 50.0%  B 3750 Hz 37.5%  chose A
+duty winner: 3750 Hz, 50.0%
+
+trial 24  confirmation  A 3750 Hz 50.0%  B 2500 Hz 50.0%  chose A
+trial 25  confirmation  A 3750 Hz 50.0%  B 2500 Hz 50.0%  chose A
+trial 26  confirmation  A 3750 Hz 50.0%  B 2500 Hz 50.0%  chose A
+optimized beat reference: 3/3
+
+Run 2, seed 76187039
+
+trial  1  frequency r1  A 3000 Hz 50.0%  B 4000 Hz 50.0%  chose B
+trial  2  frequency r1  A 1000 Hz 50.0%  B 6000 Hz 50.0%  chose A
+trial  3  frequency r1  A 1500 Hz 50.0%  B 4500 Hz 50.0%  chose A
+trial  4  frequency r1  A 4250 Hz 50.0%  B 5000 Hz 50.0%  chose A
+trial  5  frequency r1  A 2750 Hz 50.0%  B 1750 Hz 50.0%  chose A
+trial  6  frequency r1  A 3750 Hz 50.0%  B 5250 Hz 50.0%  chose A
+trial  7  frequency r1  A 5750 Hz 50.0%  B 1250 Hz 50.0%  chose B
+trial  8  frequency r1  A 2500 Hz 50.0%  B 3500 Hz 50.0%  chose B
+trial  9  frequency r1  A 5500 Hz 50.0%  B 2000 Hz 50.0%  chose B
+trial 10  frequency r1  A 4750 Hz 50.0%  B 2250 Hz 50.0%  chose A
+trial 11  frequency r2  A 3750 Hz 50.0%  B 4250 Hz 50.0%  chose B
+trial 12  frequency r2  A 4000 Hz 50.0%  B 2000 Hz 50.0%  chose A
+trial 13  frequency r2  A 4750 Hz 50.0%  B 3250 Hz 50.0%  chose A
+trial 14  frequency r2  A 1250 Hz 50.0%  B 1500 Hz 50.0%  chose B
+trial 15  frequency r2  A 2750 Hz 50.0%  B 3500 Hz 50.0%  chose B
+trial 16  frequency r3  A 1500 Hz 50.0%  B 1000 Hz 50.0%  chose A
+trial 17  frequency r3  A 3500 Hz 50.0%  B 4750 Hz 50.0%  chose B
+trial 18  frequency r3  A 4250 Hz 50.0%  B 4000 Hz 50.0%  chose B
+trial 19  frequency r4  A 4000 Hz 50.0%  B 1500 Hz 50.0%  chose A
+trial 20  frequency r5  A 4000 Hz 50.0%  B 4750 Hz 50.0%  chose A
+frequency winner: 4000 Hz, 50.0%
+
+trial 21  duty r1       A 4000 Hz 12.5%  B 4000 Hz 25.0%  chose A
+trial 22  duty r1       A 4000 Hz 37.5%  B 4000 Hz 50.0%  chose A
+trial 23  duty r2       A 4000 Hz 37.5%  B 4000 Hz 12.5%  chose A
+duty winner: 4000 Hz, 37.5%
+
+trial 24  confirmation  A 2500 Hz 50.0%  B 4000 Hz 37.5%  chose B
+trial 25  confirmation  A 4000 Hz 37.5%  B 2500 Hz 50.0%  chose A
+trial 26  confirmation  A 2500 Hz 50.0%  B 4000 Hz 37.5%  chose B
+optimized beat reference: 3/3

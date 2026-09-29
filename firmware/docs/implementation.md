@@ -175,6 +175,17 @@ activation; never replace it with initialization of only the window.
 The [host regression](../test/test_epaper/) checks both planes and subsequent
 partials, while physical image quality still needs a device check.
 
+## Notification sound
+
+`stickyBuzzer::notification()` provides the E15-selected 0/+2/0/+2 melody:
+four full trills of eight 40 ms notes, alternating 3550/4150 Hz at offset 0
+and 3985/4658 Hz at +2 semitones. There are 50 ms gaps between elements.
+The user-selected arrangement repeats the phrase three times with 500 ms
+between phrases (the pause is a design choice), for 5290 ms nominal total.
+It uses the existing blocking LEDC playback, respects silent mode, and leaves
+GPIO48 detached and low. No event currently calls it. The three-repeat
+arrangement still needs device listening acceptance.
+
 ## Silent mode and indicator state
 
 [silent_mode](../src/silent_mode.cpp) stores the preference in NVS, writing only
