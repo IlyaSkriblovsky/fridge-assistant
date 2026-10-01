@@ -1,3 +1,4 @@
+#include "voice_upload_gate.h"
 #include <unity.h>
 #include "reminder_json.h"
 #include <string>
@@ -112,13 +113,13 @@ void json_validation() {
   TEST_ASSERT_EQUAL(0, s.count);
 }
 void upload_race_and_full_text() {
-  reminder::UploadGate before;
+  VoiceUploadGate before;
   TEST_ASSERT_TRUE(before.interrupt());
   TEST_ASSERT_FALSE(before.commit(false));
-  reminder::UploadGate after;
+  VoiceUploadGate after;
   TEST_ASSERT_TRUE(after.commit(false));
   TEST_ASSERT_FALSE(after.interrupt());
-  reminder::UploadGate sameTime;
+  VoiceUploadGate sameTime;
   TEST_ASSERT_FALSE(sameTime.commit(true));
   // Worst-width text plus the entire interruption label must fit the smallest
   // face; normal reminders use the largest face that fits.

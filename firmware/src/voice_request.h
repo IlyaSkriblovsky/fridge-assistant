@@ -1,6 +1,6 @@
 #pragma once
 #include <atomic>
-#include "reminder_state.h"
+#include "voice_upload_gate.h"
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -61,7 +61,7 @@ struct esp_http_client;
 // RESPONSE), and something that took the question and never came back (TIMED
 // OUT). Anything finer belongs in the log, which is what lastError() is for --
 // the same division WifiLink draws between NO WIFI and its own strings.
-class Backend {
+class VoiceRequest {
  public:
   // How a call ended. The orchestrator turns these into the vision's screens;
   // nothing here knows what they are called.
@@ -100,13 +100,15 @@ class Backend {
   // opened, or during a stall -- and the buffer it is framed in.
   static constexpr size_t kFrameBytes = 2048;
 
-  // Both come from src/secrets.h and have to outlive the Backend, since they
+  // Both come from src/secrets.h and have to outlive the VoiceRequest, since they
   // are kept by pointer; its string constants do. `baseUrl` is the backend
   // without the path, and an empty one fails every open() as NoServer, saying
   // why. `token` goes up with every request as `Authorization: Bearer`; an
   // empty one is not sent at all, and the backend's 401 is how that shows.
-  Backend(const char* baseUrl, const char* token);
-  ~Backend();
+  VoiceRequest(const char* baseUrl, const char* token);
+  ~VoiceRequest();
+  VoiceRequest(const VoiceRequest&) = delete;
+  VoiceRequest& operator=(const VoiceRequest&) = delete;
 
   // Connects and sends the request line and headers, within
   // config::kBackendConnectTimeoutMs. True means the request is open and
@@ -133,8 +135,14 @@ class Backend {
   bool end();
   bool interrupted() const { return _interrupted.load(); }
   bool committed() const { return _gate.committed; }
-  bool armReminder(int64_t deadlineUs, void (*abortCapture)());
-  void disarmReminder();
+  // Start a voice cycle with an optional cancellation deadline, in esp_timer
+  // microseconds (zero disables it). Retries through open() keep this deadline.
+  // Before the terminal chunk, expiry interrupts the upload and calls onCancel
+  // from either the timer task or the caller; it must not block or reenter us.
+  // After commitment, expiry cannot cancel a possibly accepted request.
+  // Returns false if the timer cannot be created or started.
+  bool armCancellation(int64_t deadlineUs, void (*onCancel)());
+  void disarmCancellation();
 
   // Waits for the answer and reads it. Returns how the question ended; after
   // Ok, answer() holds the text. The connection is closed either way.
@@ -227,12 +235,15 @@ class Backend {
   esp_http_client* _client = nullptr;
   bool _ended = false;
   std::atomic<bool> _interrupted{false};
-  SemaphoreHandle_t _deadlineLock = nullptr;
+  // The mutex lives as long as the request, including before the first cycle.
+  StaticSemaphore_t _deadlineLockStorage;
+  SemaphoreHandle_t _deadlineLock;
   esp_timer_handle_t _deadlineTimer = nullptr;
   int64_t _deadlineUs = 0;
   int _deadlineSocket = -1;
-  reminder::UploadGate _gate;
-  void (*_abortCapture)() = nullptr;
+  VoiceUploadGate _gate;
+  void (*_onCancel)() = nullptr;
+  bool cancelIfDue();
   static void deadlineReached(void* context);
   Result _result = Result::Ok;
 

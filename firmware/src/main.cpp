@@ -34,7 +34,7 @@
 // an offline Up wake) enters deep sleep, after the display finishes.
 //
 // The stale-lease rule, openRenewingStaleLease(), lives here because it spans
-// Backend and WifiLink and neither half can see it alone.
+// VoiceRequest and WifiLink and neither half can see it alone.
 
 #include <Arduino.h>
 #include <esp_timer.h>
@@ -53,7 +53,7 @@
 #include "sticky/mic.h"
 #include "sticky/power.h"
 
-#include "backend.h"
+#include "voice_request.h"
 #include "capture.h"
 #include "display.h"
 #include "recording.h"
@@ -78,7 +78,7 @@ constexpr uint32_t kPollMs = 10;
 // 16 ms, so an abort that is going to land has landed long before this.
 constexpr uint32_t kCaptureJoinMs = 500;
 
-// What the question came to. The first five are Backend's results, the rest are
+// What the question came to. The first five are VoiceRequest's results, the rest are
 // the ways one ends before there is anything to send.
 enum class Outcome : uint8_t {
   Answered,
@@ -98,7 +98,7 @@ Recording audio;
 Capture capture;
 WifiLink wifi;
 Display display;
-Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
+VoiceRequest voiceRequest(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 Dashboard dashboard;
 RTC_DATA_ATTR uint64_t dashboardDeadlineTicks = 0;
 enum class IdlePhase { Sleep, AfterVoice, Fetch };
@@ -149,13 +149,13 @@ void showReminders(bool fire = true) {
 }
 
 bool interruptVoice() {
-  if (voiceActive && backend.committed()) return false;
-  if (!(voiceActive && backend.interrupted()) && !reminders::due()) return false;
+  if (voiceActive && voiceRequest.committed()) return false;
+  if (!(voiceActive && voiceRequest.interrupted()) && !reminders::due()) return false;
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
-  backend.disarmReminder();
-  backend.close();
+  voiceRequest.disarmCancellation();
+  voiceRequest.close();
   voiceActive = false;
   interruptedVoice = true;
   reminderButtons.armed = false;
@@ -343,11 +343,11 @@ void waitForRelease() {
 void finish(Outcome outcome) {
   display.stopListening();
   voiceActive = false;
-  backend.disarmReminder();
+  voiceRequest.disarmCancellation();
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
-  backend.close();
+  voiceRequest.close();
   logRecording();
   lastOutcome = outcome;
   idlePhase = outcome == Outcome::Tap || outcome == Outcome::Idle
@@ -387,7 +387,7 @@ void fail(Outcome outcome, const char* title, const char* detail) {
 }
 
 // The request, opened with the stale-lease rule around it. False means it
-// could not be, and backend.result() says how.
+// could not be, and voiceRequest.result() says how.
 //
 // **A connect that nothing answered is the only thing that can say a cached
 // lease has gone stale**, because a lease that has outlived its network installs
@@ -409,19 +409,19 @@ void fail(Outcome outcome, const char* title, const char* detail) {
 // underneath it: a retry costs the user nothing until the release, and every
 // retry is a new request that starts again from the header.
 bool openRenewingStaleLease() {
-  if (backend.open()) return true;
-  if (backend.interrupted()) return false;
+  if (voiceRequest.open()) return true;
+  if (voiceRequest.interrupted()) return false;
 
-  const bool couldBeStale = backend.unreachable() && wifi.usedLease();
+  const bool couldBeStale = voiceRequest.unreachable() && wifi.usedLease();
   if (!couldBeStale) return false;
 
   Serial1.printf("  nothing answered in %lu ms, and this question is on a reused address"
                  " -- connecting once more before believing it\n",
-                 static_cast<unsigned long>(millisBetween(backend.openUs(), backend.doneUs())));
+                 static_cast<unsigned long>(millisBetween(voiceRequest.openUs(), voiceRequest.doneUs())));
 
-  const bool opened = backend.open();
-  if (backend.interrupted()) return false;
-  if (opened || !backend.unreachable()) {
+  const bool opened = voiceRequest.open();
+  if (voiceRequest.interrupted()) return false;
+  if (opened || !voiceRequest.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
     return opened;
   }
@@ -430,7 +430,7 @@ bool openRenewingStaleLease() {
   const uint32_t stale = wifi.ipv4();
   wifi.renewAddress();
   while (wifi.poll() == WifiLink::State::Connecting) {
-    if (backend.interrupted()) return false;
+    if (voiceRequest.interrupted()) return false;
     delay(kPollMs);
   }
 
@@ -451,7 +451,7 @@ bool openRenewingStaleLease() {
                      ? "the same address, so the lease was not what was wrong"
                      : "a different address, so it was");
 
-  return backend.open();
+  return voiceRequest.open();
 }
 
 // Sends whatever the capture task has committed that has not gone up yet. The
@@ -460,45 +460,45 @@ bool openRenewingStaleLease() {
 // ordering that makes everything below it safe to read (Recording).
 bool sendCommitted() {
   const size_t ready = audio.wavBytes();
-  const size_t sent = backend.sentBytes();
-  return ready == sent || backend.write(audio.wav() + sent, ready - sent);
+  const size_t sent = voiceRequest.sentBytes();
+  return ready == sent || voiceRequest.write(audio.wav() + sent, ready - sent);
 }
 
 // The rest of the body and the terminating chunk, once the recording is over.
-bool endBody() { return sendCommitted() && backend.end(); }
+bool endBody() { return sendCommitted() && voiceRequest.end(); }
 
 // The request's own story, for the log: when it opened against the hold, what
 // it carried, where its longest write was, and the two halves the round trip
 // splits into -- the tail after the release, which is what streaming exists to
 // shrink, and the answer after the terminating chunk. The second is
 // read after the taken chirp, so a backend quicker than the chirp reads as the
-// chirp: Backend::firstByteUs() has why.
-void logStream(Backend::Result result) {
-  if (backend.openUs() == 0) return;
+// chirp: VoiceRequest::firstByteUs() has why.
+void logStream(VoiceRequest::Result result) {
+  if (voiceRequest.openUs() == 0) return;
 
   Serial1.printf("  request: opened %lu ms into setup()",
-                 static_cast<unsigned long>(millisBetween(g_entryUs, backend.openUs())));
-  if (backend.connectedUs() == 0) {
+                 static_cast<unsigned long>(millisBetween(g_entryUs, voiceRequest.openUs())));
+  if (voiceRequest.connectedUs() == 0) {
     Serial1.println(", and never connected");
   } else {
-    const uint32_t connectMs = millisBetween(backend.openUs(), backend.connectedUs());
-    const uint32_t longestAtMs = millisBetween(g_entryUs, backend.longestWriteAtUs());
+    const uint32_t connectMs = millisBetween(voiceRequest.openUs(), voiceRequest.connectedUs());
+    const uint32_t longestAtMs = millisBetween(g_entryUs, voiceRequest.longestWriteAtUs());
     Serial1.printf(", connected in %lu ms; %lu bytes of the recording's %lu in %lu chunks, the"
                    " longest write %lu ms at %lu ms into setup()\n",
                    static_cast<unsigned long>(connectMs),
-                   static_cast<unsigned long>(backend.sentBytes()),
+                   static_cast<unsigned long>(voiceRequest.sentBytes()),
                    static_cast<unsigned long>(audio.wavBytes()),
-                   static_cast<unsigned long>(backend.frames()),
-                   static_cast<unsigned long>(backend.longestWriteUs() / 1000),
+                   static_cast<unsigned long>(voiceRequest.frames()),
+                   static_cast<unsigned long>(voiceRequest.longestWriteUs() / 1000),
                    static_cast<unsigned long>(longestAtMs));
   }
 
-  if (backend.endUs() != 0 && g_releaseUs != 0) {
+  if (voiceRequest.endUs() != 0 && g_releaseUs != 0) {
     Serial1.printf("  the terminating chunk %lu ms after the release",
-                   static_cast<unsigned long>(millisBetween(g_releaseUs, backend.endUs())));
-    if (backend.firstByteUs() != 0) {
-      const uint32_t firstByteMs = millisBetween(backend.endUs(), backend.firstByteUs());
-      const uint32_t doneMs = millisBetween(backend.endUs(), backend.doneUs());
+                   static_cast<unsigned long>(millisBetween(g_releaseUs, voiceRequest.endUs())));
+    if (voiceRequest.firstByteUs() != 0) {
+      const uint32_t firstByteMs = millisBetween(voiceRequest.endUs(), voiceRequest.firstByteUs());
+      const uint32_t doneMs = millisBetween(voiceRequest.endUs(), voiceRequest.doneUs());
       Serial1.printf(", the answer's first byte read %lu ms after that, all of it %lu ms after"
                      " that",
                      static_cast<unsigned long>(firstByteMs), static_cast<unsigned long>(doneMs));
@@ -506,11 +506,11 @@ void logStream(Backend::Result result) {
     Serial1.println();
   }
 
-  if (result == Backend::Result::Ok) {
-    Serial1.printf("  answer: \"%s\", %lu bytes of JSON\n", backend.answer(),
-                   static_cast<unsigned long>(backend.replyBytes()));
+  if (result == VoiceRequest::Result::Ok) {
+    Serial1.printf("  answer: \"%s\", %lu bytes of JSON\n", voiceRequest.answer(),
+                   static_cast<unsigned long>(voiceRequest.replyBytes()));
   } else {
-    Serial1.printf("  failed: %s\n", backend.lastError());
+    Serial1.printf("  failed: %s\n", voiceRequest.lastError());
   }
 }
 
@@ -522,9 +522,9 @@ void logStream(Backend::Result result) {
 // Also reached from under the hold, when the request fails while the user is
 // still talking -- which is why the recording is stopped first. It is a
 // no-op on one that has already stopped.
-void conclude(Backend::Result result) {
-  if (backend.interrupted() && interruptVoice()) return;
-  if (result == Backend::Result::NoServer && !wifi.online())
+void conclude(VoiceRequest::Result result) {
+  if (voiceRequest.interrupted() && interruptVoice()) return;
+  if (result == VoiceRequest::Result::NoServer && !wifi.online())
     return fail(Outcome::NoWifi, "NO WIFI", nullptr);
   capture.abort();
 
@@ -533,23 +533,23 @@ void conclude(Backend::Result result) {
   const char* title = nullptr;
 
   switch (result) {
-    case Backend::Result::Ok:
+    case VoiceRequest::Result::Ok:
       outcome = Outcome::Answered;
       break;
-    case Backend::Result::NoServer:
+    case VoiceRequest::Result::NoServer:
       outcome = Outcome::NoServer;
       title = "NO SERVER";
       break;
-    case Backend::Result::ServerError:
+    case VoiceRequest::Result::ServerError:
       outcome = Outcome::ServerError;
       title = "SERVER ERROR";
-      snprintf(detail, sizeof(detail), "%d", backend.status());
+      snprintf(detail, sizeof(detail), "%d", voiceRequest.status());
       break;
-    case Backend::Result::BadResponse:
+    case VoiceRequest::Result::BadResponse:
       outcome = Outcome::BadResponse;
       title = "BAD RESPONSE";
       break;
-    case Backend::Result::TimedOut:
+    case VoiceRequest::Result::TimedOut:
       outcome = Outcome::TimedOut;
       title = "TIMED OUT";
       break;
@@ -561,7 +561,7 @@ void conclude(Backend::Result result) {
   // chirp starts.
   g_lastChirpUs = esp_timer_get_time();
   if (title == nullptr) {
-    display.answer(backend.answer());
+    display.answer(voiceRequest.answer());
     stickyBuzzer::answer();
   } else {
     display.error(title, detail[0] != '\0' ? detail : nullptr);
@@ -607,8 +607,8 @@ void conclude(Backend::Result result) {
 // through, then whatever the capture task has committed since the last pass. A
 // failure here ends the question now, with the user still talking.
 bool stream() {
-  if ((!backend.streaming() && !openRenewingStaleLease()) || !sendCommitted()) {
-    conclude(backend.result());
+  if ((!voiceRequest.streaming() && !openRenewingStaleLease()) || !sendCommitted()) {
+    conclude(voiceRequest.result());
     return false;
   }
   return true;
@@ -620,9 +620,9 @@ void runVoice(int64_t pressUs) {
   if (interruptVoice()) return;
   voiceActive = true;
   const int64_t due = reminders::state().nextDue();
-  if (!backend.armReminder(due == reminder::kMaxTime ? 0 :
+  if (!voiceRequest.armCancellation(due == reminder::kMaxTime ? 0 :
       esp_timer_get_time() + (due - reminders::nowMs()) * 1000,
-      []() { capture.abort(); })) return fail(Outcome::Broken, "NO MEMORY", "reminder timer unavailable");
+      []() { capture.abort(); })) return fail(Outcome::Broken, "NO MEMORY", "voice cancellation timer unavailable");
   shownReminder = 0;
   g_entryUs = pressUs;
   g_releaseUs = g_releaseSeenUs = g_lastChirpUs = 0;
@@ -738,12 +738,12 @@ void runVoice(int64_t pressUs) {
   // before the chirp rather than after it -- the chirp is 60 ms of blocking,
   // and the backend can spend them thinking instead of waiting for the end of
   // the body.
-  const bool streamed = backend.streaming();
+  const bool streamed = voiceRequest.streaming();
   if (streamed) {
     const int64_t startUs = esp_timer_get_time();
     const bool ended = endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) return conclude(backend.result());
+    if (!ended) return conclude(voiceRequest.result());
   }
 
   {
@@ -781,11 +781,11 @@ void runVoice(int64_t pressUs) {
     const int64_t startUs = esp_timer_get_time();
     const bool ended = openRenewingStaleLease() && endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) return conclude(backend.result());
+    if (!ended) return conclude(voiceRequest.result());
   }
 
   const int64_t startUs = esp_timer_get_time();
-  const Backend::Result result = backend.receive();
+  const VoiceRequest::Result result = voiceRequest.receive();
   g_answerWaitMs = millisBetween(startUs, esp_timer_get_time());
 
   conclude(result);

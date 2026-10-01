@@ -41,7 +41,8 @@ concurrent memory visibility, GPIO, microphone or network. No hardware tests
 or device flashing are part of this suite. Add tests for readily isolated logic;
 do not duplicate production algorithms in test substitutes.
 
-Reminder tests compile production reminder_state.h/reminder_json.h with
+Reminder tests compile production reminder_state.h/reminder_json.h and
+voice_upload_gate.h with
 ArduinoJson and check complete snapshot validation, version ordering, pending
 acknowledgements, offline reads, capacity, event ordering, the all-button release
 gate, terminal-write arbitration and full reminder text layout at 12 pt.

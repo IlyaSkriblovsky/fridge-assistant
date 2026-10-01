@@ -38,7 +38,7 @@ voice cycles without recursion.
    another question. Wait for the final display refresh before starting dwell.
 
 WiFi or upload failure during recording aborts the question. Error classification
-belongs to `Backend` and the orchestrator; the product error table is in the
+belongs to `VoiceRequest` and the orchestrator; the product error table is in the
 vision. Large diagnostic logs are emitted after the last chirp, because UART
 printing itself can add noticeable latency.
 
@@ -93,7 +93,7 @@ address is acquired, including renewal. Cache the network's DNS first so
 removing the override takes effect on the next wake. Installing it before DHCP
 would allow the ACK to overwrite it.
 
-[Backend](../src/backend.h) uses `esp_http_client` with explicit HTTP chunk
+[VoiceRequest](../src/voice_request.h) uses `esp_http_client` with explicit HTTP chunk
 framing and Bearer authentication. The response must be valid JSON containing
 string `response`. Connect, stalled-body and response budgets are separate;
 the 60-second response budget starts at the terminating chunk. Values and routes belong
@@ -289,9 +289,12 @@ is centered horizontally; multiline text remains left-aligned.
 Down is also an ext1 wake source. Sleep uses the earlier dashboard deadline or
 unfired reminder; fired items never create an immediate timer wake.
 
-During voice, a one-shot ESP timer stops capture and shuts down the established
-upload socket when a reminder becomes due. HTTP connect timeout is capped by
-the deadline. A mutex protects socket lifetime and arbitrates interruption
+The orchestrator passes the nearest reminder time to
+`VoiceRequest::armCancellation()`. The request uses that deadline without
+consulting reminder state; zero means no cancellation deadline. A one-shot ESP
+timer stops capture through the supplied callback and shuts down the established
+upload socket when the deadline expires. HTTP connect timeout is capped by
+the deadline. An object-owned static mutex protects socket lifetime and arbitrates interruption
 against starting the terminating chunk: after commitment no cancellation is
 claimed, including on an uncertain terminal write. The response/error completes
 its ten-second dwell from display completion before alarms are fired. All

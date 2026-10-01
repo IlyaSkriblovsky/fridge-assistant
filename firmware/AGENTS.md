@@ -28,7 +28,7 @@ the hardware traps.
 | `src/reminders.h/.cpp`, `src/reminder_state.h`, `src/reminder_json.h` | RTC reminder state, transactional snapshot merge, sync worker, deadlines and protocol validation |
 | `src/dashboard.h/.cpp`, `src/dashboard_protocol.h` | Background frame download, validation and interval rules |
 | `src/dashboard_png.h/.cpp`, `lib/dashboard_miniz/` | Bounded server-format 1bpp PNG decoder and vendored inflater |
-| `src/backend.h/.cpp` | The request: the recording streamed up as a chunked POST while the button is held, the answer back as JSON |
+| `src/voice_request.h/.cpp` | The voice request: chunked audio POST, JSON response and cancellation deadline; `voice_upload_gate.h` arbitrates cancellation against commitment |
 | `src/silent_mode.h/.cpp` | NVS sound preference, loaded before buzzer/display work |
 | `src/silent_icon.h` | Reserved top-margin indicator geometry, shared with the preview |
 | `src/config.h` | Tracked settings: the backend path, timeouts, button thresholds |
@@ -125,7 +125,7 @@ is excluded from the embedded build job. Nothing runs on hardware in CI.
   running. `WifiLink::linkMs()` and `onlineMs()` are timestamps from the WiFi
   task for that reason; `elapsedMs()` is deliberately the polling thread's own
   view. Time anything else that happens off this thread the same way.
-  `Backend::firstByteUs()` is the same trap from the other side: it is read
+  `VoiceRequest::firstByteUs()` is the same trap from the other side: it is read
   after the taken chirp, so a backend quicker than 60 ms reads as the chirp.
 - **The request opens on `Capture::pastMinimumHold()`, not on the clock.** A
   release is confirmed a debounce window after it happens, so the clock says
