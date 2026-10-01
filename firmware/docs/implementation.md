@@ -235,6 +235,8 @@ file. Build/host success does not establish hardware acceptance.
 - The initial dashboard worked on the device; PNG was visually accepted on
   2026-09-23. The [PNG smoke log](measurements/dashboard-png-2026-09-23.log)
   proves download/decode/refresh/sleep, not energy or interruption latency.
+  The user confirmed the shopping count and today/tomorrow weather dashboard
+  works on the device (2026-10-01).
 - Latest tap routing, server-rendered sensor placement, battery timer cycles,
   AI interruption during fetch/dwell, failure recovery and deadline preservation
   across Up wakes need explicit coverage; earlier acceptance does not prove

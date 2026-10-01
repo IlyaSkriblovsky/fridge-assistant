@@ -13,7 +13,8 @@ It is a personal device, built for one user, powered by battery.
 
 The idle dashboard transport is implemented and the user reports a successful
 device check. The latest tap-routing and timing refinements await a device recheck.
-Content and layout beyond the diagnostic frame are a separate step.
+The shopping count and today/tomorrow weather dashboard is verified working
+on the device (user confirmation, 2026-10-01).
 
 ## Interaction flow
 
@@ -673,10 +674,11 @@ Also worth knowing:
 ## What is still moving
 
 The voice flow and [idle dashboard](#idle-dashboard) transport are implemented.
-Dashboard contents and visual design remain to be chosen; detailed device
-verification gaps are tracked in [implementation.md](implementation.md#verification-state).
+The shopping count and today/tomorrow weather layout is verified on the device;
+detailed device verification gaps are tracked in [implementation.md](implementation.md#verification-state).
 PNG transport is accepted, while representative compression and energy
-measurements remain deferred, as do offline timers and reminders.
+measurements remain deferred. One-shot reminders are implemented; their
+hardware acceptance remains pending.
 
 What remains is tracked elsewhere, deliberately kept out of this document so it
 does not age every time a shortcut is taken, a number comes in or a step is
