@@ -31,10 +31,10 @@
 //    on every boot and seeded white. After a deep sleep the glass still holds
 //    the last answer and the firmware has been told nothing about it, so a
 //    partial listening() would leave that answer's black pixels exactly where
-//    they are and draw the word on top. Only a full refresh drives every pixel
-//    whatever it was, which is what reconciles the glass with the buffer once
-//    per wake -- and it also clears accumulated ghosting, which is the other
-//    thing full refreshes are for.
+//    they are and draw the Listening screen on top. Only a full refresh drives
+//    every pixel whatever it was, which is what reconciles the glass with the
+//    buffer once per wake -- and it also clears accumulated ghosting, which is
+//    the other thing full refreshes are for.
 //
 //    So the cost is paid where it is not felt. The Listening refresh runs under
 //    the recording; the three that follow it are partial and each is a little

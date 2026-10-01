@@ -652,9 +652,9 @@ void runVoice(int64_t pressUs) {
   }
 
   // The vision's step 6, in two parts: the chirp says the question was taken,
-  // and the word says the same thing to somebody who was not listening. The
-  // word waits its turn on the panel -- behind the rest of LISTENING on a short
-  // hold -- and is dropped unseen if the answer overtakes it there.
+  // and the screen says the same thing to somebody who was not listening. It
+  // waits its turn on the panel -- behind the rest of LISTENING on a short hold
+  // -- and is dropped unseen if the answer overtakes it there.
   display.thinking();
 
   // The tail, on a question whose request opened under the hold: the chunks

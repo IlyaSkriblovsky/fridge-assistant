@@ -24,7 +24,7 @@
 // waiting for the panel replaces it; the refresh already on the panel is never
 // cut short. A screen that was stale before the panel got to it is never drawn:
 // on a short hold with a quick backend the answer lands while LISTENING is
-// still refreshing, and drawing THINKING first would cost 889 ms to show a word
+// still refreshing, and drawing THINKING first would cost 889 ms to show a state
 // that stopped being true before it appeared. The pre-clear is the one post
 // that is never replaced, because it is not a screen but the controller being
 // reconciled with the glass: it runs ahead of whatever is posted after it.
