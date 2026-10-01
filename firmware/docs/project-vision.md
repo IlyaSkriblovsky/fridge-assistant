@@ -38,13 +38,13 @@ notebook screen. Voice screens retain only the local silent-mode indicator.
    it is captured.
 5. **Release.** Debounce, then stop capturing.
 6. **Thinking.** Say that the question was taken and is being answered, twice
-   over: a chirp the moment the button comes up, and the word on the panel
-   changing from "Listening" to "Thinking". The backend runs speech recognition
-   and a language model, which is seconds -- `kResponseTimeoutMs` allows thirty
-   of them -- and the panel would otherwise still read "Listening", which stops
-   being true the moment the button comes up. The word is a partial refresh, not
-   a screen of its own: the answer queues behind it on the one controller, and a
-   full refresh would put two and a half seconds in front of the answer's own.
+   over: a chirp the moment the button comes up, and the panel changing from
+   "Listening" to "Thinking". The backend runs speech recognition and a language
+   model, which is seconds -- `kResponseTimeoutMs` allows sixty of them -- and
+   the panel would otherwise still say "Listening", which stops being true the
+   moment the button comes up. The transition uses partial refreshes: the answer
+   queues behind any one already in progress on the controller, while a full
+   refresh would put two and a half seconds in front of the answer's own.
    It is drawn on the panel's own task, so the upload never waits for it, and it
    is skipped when the answer arrives before the panel is free to draw it. The
    answer chirp then marks the end of the wait rather than covering it: it
@@ -372,7 +372,7 @@ whole pipeline.
 ### Screen
 
 The current voice flow has four screen transitions: asleep -> Listening,
-Listening -> working, working -> answer, working -> error.
+Listening -> Thinking, Thinking -> answer, Thinking -> error.
 
 **One of them is a full refresh and it is the first one.** A partial update is
 differential -- the controller picks each pixel's waveform from the pair (what
@@ -389,7 +389,7 @@ recording, where the user is still talking; everything after it is on the far
 side of the button coming up, where a second is a second before the answer is on
 the glass.
 
-**So working, answer and error are partial**, and on this panel that is 1344 ms
+**So Thinking, answer and error are partial**, and on this panel that is 1344 ms
 against 2400 ms for the same area full -- measured at
 [S8](experiments/e8-refresh.md#firmware-display-validation), where taking the two window sizes apart
 also showed the difference is waveform and not transfer. Every transition comes
@@ -397,7 +397,7 @@ out clean: no smear, no residue, checked by eye over a run of consecutive
 questions. That run was the first time the partial-refresh correction in
 `src/sticky/epaper.h` had ever executed.
 
-**The working transition is what settled the shape of all of this.** Every
+**The Thinking transition is what settled the shape of all of this.** Every
 other transition happens while the user is waiting for nothing; this one is
 between the button and the answer. Until [S10](experiments/e8-refresh.md#firmware-display-validation)
 it sat on the critical path -- released, draw, upload, wait, draw again -- and
@@ -407,8 +407,9 @@ answer's appearance, because the screens of one question queue on one
 controller. LISTENING shows a wave above a smaller label. Only the wave window is
 updated during animation. THINKING clears the wave and label in one partial
 band and shows three dots above THINKING. The dots animate by enlarging one
-at a time, using a partial refresh of their own window. Animation yields to any queued screen;
-a refresh already started must finish before the next screen can begin.
+at a time, using a partial refresh of their own window. Animation yields to any
+queued screen; a refresh already started must finish before the next screen can
+begin.
 When the answer arrives before the panel is free to draw THINKING, that
 intermediate screen is dropped.
 
@@ -416,7 +417,7 @@ The two shapes it was chosen over were a screen of its own at the full 2.4 s,
 which would have been slower than the wait it announced three times in four, and
 no screen at all with only a chirp, which would have left the panel saying
 `LISTENING` after it had stopped being true. The chirp is there as well; it is
-not an alternative to the word but the part of the answer that arrives
+not an alternative to the screen but the part of the answer that arrives
 immediately.
 
 **Landscape, with the three buttons along the top edge on the left.** After
