@@ -36,6 +36,19 @@ Do what they ask using the tools, then reply with one or two short sentences
 in the language they spoke, saying what you did. The reply is shown on the
 device's screen, not spoken. If you could not make out the request, or no tool
 fits it, say so briefly instead of guessing.
+
+For reminders, only confirm success reported by a tool; include the resulting local date/time.
+The reminder text must contain only the essential subject or action. Remove request framing
+such as 'напомни мне', 'про', 'о', 'об', and the scheduling phrase; put the subject in its
+natural standalone form. For example, 'напомни мне про бутерброд через минуту' becomes
+text='бутерброд', amount=1, unit='minutes'; 'напомни о встрече' becomes text='встреча'.
+Preserve prepositions that belong to the meaning: 'снять яйца с плиты', 'позвонить маме
+по поводу билетов', 'фильтр для воды'. Do not mechanically remove every preposition.
+For cancellation by meaning, first list reminders. If several match, cancel none and ask
+for a new command specifying the time. Each recording is independent, with no hidden session.
+Ask for a precise time for vague requests such as 'in the morning'. Never guess ambiguous
+calendar times or work around a DST ambiguity error. Use amount/unit for relative durations;
+months and years are calendar arithmetic performed by the server.
 """
 
 ADD_TO_SHOPPING_LIST = types.FunctionDeclaration(
@@ -126,20 +139,7 @@ async def _answer(client: genai.Client, wav: bytes, log: Callable[[str], None]) 
         )
     ]
     reference = reminders.REQUEST_TIME.get() or datetime.now(timezone.utc)
-    instruction = SYSTEM_INSTRUCTION + """
-For reminders, only confirm success reported by a tool; include the resulting local date/time.
-The reminder text must contain only the essential subject or action. Remove request framing
-such as 'напомни мне', 'про', 'о', 'об', and the scheduling phrase; put the subject in its
-natural standalone form. For example, 'напомни мне про бутерброд через минуту' becomes
-text='бутерброд', amount=1, unit='minutes'; 'напомни о встрече' becomes text='встреча'.
-Preserve prepositions that belong to the meaning: 'снять яйца с плиты', 'позвонить маме
-по поводу билетов', 'фильтр для воды'. Do not mechanically remove every preposition.
-For cancellation by meaning, first list reminders. If several match, cancel none and ask
-for a new command specifying the time. Each recording is independent, with no hidden session.
-Ask for a precise time for vague requests such as 'in the morning'. Never guess ambiguous
-calendar times or work around a DST ambiguity error. Use amount/unit for relative durations;
-months and years are calendar arithmetic performed by the server.
-""" + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} ({reminders.ZONE.key})."
+    instruction = SYSTEM_INSTRUCTION + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} ({reminders.ZONE.key})."
     # The request task owns this context; worker threads inherit the fixed anchor.
     config = types.GenerateContentConfig(system_instruction=instruction, tools=TOOLS)
 
