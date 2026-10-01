@@ -19,6 +19,11 @@ universal timing guarantees. Current architecture is in
 | [E9](experiments/e9-dashboard-energy.md) | Dashboard and post-answer energy | Deferred | Compare awake wait with sleep/reconnect |
 | [E10](experiments/e10-dashboard-compression.md) | Dashboard compression costs | PNG accepted; benchmark deferred | Functional smoke test only; no energy claim |
 | [E11](experiments/e11-rtc-png-restoration.md) | Restore PNG before LISTENING | Rejected 2026-09-23 | Restoration cost outweighed perceived benefit |
+| [E12](experiments/e12-buzzer-loudness.md) | Loudest useful buzzer drive | Measured 2026-09-25 | 3.75--4.0 kHz beat 2.5 kHz 6/6; best duty remains unresolved |
+| [E13](experiments/e13-notification-trills.md) | Preferred energetic notification trill | Measured 2026-09-25 | Fast two-note warbles led; close won 5/5 round robin, wide won final 2:1 |
+| [E14](experiments/e14-trill-span.md) | Preferred span of the two-note trill | Measured 2026-09-25 | 3550/4150 Hz beat the nearest finalist in all 7 direct comparisons |
+| [E15](experiments/e15-notification-melodies.md) | Preferred melody of full-length trills | Measured 2026-09-25 | 0/+2/0/+2 won 5/5 round robin and 4:1 final; 1.43 s phrase |
+| [E16](experiments/e16-long-melodies.md) | Preferred eight-element notification melody | Rejected by user after computer listening | Returned to E15 motif, requesting three repetitions with pauses |
 
 ## Recording an experiment
 

@@ -3,6 +3,7 @@
 #include <esp_attr.h>
 #include "silent_mode.h"
 #include "silent_icon.h"
+#include "listening_wave.h"
 #include "stale_icon.h"
 #include "dashboard_protocol.h"
 #include "sticky/power.h"
@@ -28,11 +29,8 @@ RTC_DATA_ATTR bool dashboardStale = false;
 // at about 4.5 mm -- the first is a headline at arm's length, the second is
 // subordinate to it without being small.
 //
-//  * kWordFace, at kWordSize, is the one word of listening() and working():
-//    516 px of "LISTENING" on an 800 px panel, which is the largest of the
-//    three by a long way because it is the screen read from across a room.
-//    "WORKING" is narrower and sits in the same band, which is the point of
-//    the band.
+//  * kWordFace at size 1 labels the listening wave; kWordSize is the large,
+//    centered WORKING word. The transition band contains both compositions.
 //  * kWordFace at size 1 is an error title, white inside the bar. The widest
 //    in the vision's table is NO MICROPHONE at 416 px, so every title clears
 //    the bar's edges with room to spare.
@@ -42,7 +40,7 @@ const TextFace& kWordFace = fontFreeSansBold24;
 const TextFace& kAnswerFace = fontFreeSans24;
 const TextFace& kDetailFace = fontFreeSans18;
 
-// The word of listening() and working() is the one thing drawn at anything
+// The word of working() is the one thing drawn at anything
 // other than the face's own size.
 constexpr uint8_t kWordSize = 2;
 
@@ -179,8 +177,9 @@ void StickyScreen::refreshWhole() {
 }
 
 void StickyScreen::wordBand(int32_t& y, int32_t& height) {
-  height = textBoxHeight(kWordFace, kWordSize) + 2 * kWordBandMargin;
-  y = (_display.height() - height) / 2;
+  y = listeningWave::kY;
+  height = listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 +
+           kWordBandMargin - y;
 }
 
 void StickyScreen::dashboard(const uint8_t* pixels) {
@@ -226,12 +225,25 @@ void StickyScreen::listening() {
   if (!_ready) return;
 
   startFrame();
-  drawCentred(kWordFace, "LISTENING", _display.width() / 2, _display.height() / 2,
-              kWordSize);
+  _waveFrame = 0;
+  listeningWave::draw(_display, _waveFrame);
+  drawCentred(kWordFace, "LISTENING", _display.width() / 2, listeningWave::kLabelY, 1);
   _display.refresh();
+  _lastError = _display.lastResult().ok() ? "" : _display.lastResult().message;
   _drewFullFrame = true;
   _lastWasPartial = false;
   rememberIndicator();
+}
+
+bool StickyScreen::listeningFrame() {
+  if (!_ready || !_drewFullFrame) return false;
+  _waveFrame = (_waveFrame + 1) % listeningWave::kFrames;
+  listeningWave::draw(_display, _waveFrame);
+  const GfxResult result = _display.refreshPartial(
+      listeningWave::kX, listeningWave::kY, listeningWave::kWidth, listeningWave::kHeight);
+  _lastWasPartial = result.ok();
+  _lastError = result.ok() ? "" : result.message;
+  return result.ok();
 }
 
 bool StickyScreen::working() {

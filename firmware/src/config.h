@@ -17,6 +17,11 @@ constexpr uint32_t kDashboardMaxSeconds = 86400;
 constexpr uint32_t kDashboardRequestMs = 15000;
 constexpr uint32_t kAnswerDwellMs = 10000;
 
+// Experimental visual cadence, not a measured panel limit: pause after each
+// completed partial refresh. Set false to keep the static wave and label.
+constexpr bool kListeningAnimation = true;
+constexpr uint32_t kListeningFramePauseMs = 250;
+
 // How long a cached access point gets before the firmware stops believing it.
 // The BSSID and channel of the last successful connect are kept in RTC memory
 // across the sleep, which saves a scan on every question -- but the AP may have

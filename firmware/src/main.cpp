@@ -341,6 +341,7 @@ void waitForRelease() {
 
 // End a voice cycle without sleeping: loop() owns the dwell and dashboard.
 void finish(Outcome outcome) {
+  display.stopListening();
   voiceActive = false;
   backend.disarmReminder();
   capture.abort();
@@ -697,6 +698,7 @@ void runVoice(int64_t pressUs) {
   }
   if (interruptVoice()) return;
   g_releaseSeenUs = esp_timer_get_time();
+  display.stopListening();
 
   mic.end();
 
@@ -899,6 +901,7 @@ void runIdle() {
       const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
       const int64_t drawnUs = display.record(which).endUs;
       logScreen("final voice screen", which);
+      logScreen("last listening animation frame", Display::Screen::ListeningFrame);
       logTiming(lastOutcome, true);
       // With no working panel there is no completed refresh to wait from.
       const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;

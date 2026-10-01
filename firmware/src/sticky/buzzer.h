@@ -7,9 +7,8 @@
 //
 // The only feedback fast enough to be useful: the e-paper is one to two seconds
 // behind everything, so the buzzer is what tells the user when the microphone
-// went live, that the question was taken, and how it ended. Four patterns,
-// meant to be told apart without looking -- see the sound table in
-// docs/project-vision.md.
+// went live, that the question was taken, and how it ended. Four voice cues
+// (docs/project-vision.md), plus a longer notification melody selected in E15.
 //
 // Two properties the callers depend on:
 //
@@ -47,5 +46,11 @@ void taken();   // the question is on its way: one short note, between the two
 void answer();  // the answer is on screen: two short notes, high then low
 void reminder(); // alarm bypasses silent mode
 void error();   // one longer note, lower than either of the pairs
+
+// Three 0/+2/0/+2 phrases, each four full 320 ms trills with 50 ms gaps.
+// 500 ms between phrases; nominal total 5290 ms. Blocks until complete,
+// respects silent mode, and parks the pin as play() does. Not yet wired to
+// notification events; callers must allow for the blocking duration.
+void notification();
 
 }  // namespace stickyBuzzer

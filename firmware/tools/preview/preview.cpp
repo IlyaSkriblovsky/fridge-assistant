@@ -13,6 +13,7 @@
 #include "Seeed_GFX.h"
 #include "fonts/fonts.h"
 #include "text.h"
+#include "listening_wave.h"
 
 namespace {
 
@@ -93,8 +94,9 @@ void paste(Seeed_GFX& sheet, const Seeed_GFX& panel, int32_t y) {
 // can be seen to contain both words, and the answer box as a rectangle so
 // that the wrapping can be seen to stay inside it.
 void screens(Seeed_GFX& sheet) {
-  const int32_t band = textBoxHeight(kWordFace, kWordSize) + 2 * kWordBandMargin;
-  const int32_t bandY = (480 - band) / 2;
+  const int32_t bandY = listeningWave::kY;
+  const int32_t band = listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 +
+                       kWordBandMargin - bandY;
 
   for (int screen = 0; screen < kScreenCount; ++screen) {
     Seeed_GFX panel(800, 480);
@@ -104,10 +106,14 @@ void screens(Seeed_GFX& sheet) {
     panel.setTextSize(1);
     switch (screen) {
       case 0:
+        listeningWave::draw(panel, 0);
+        drawCentred(panel, kWordFace, "LISTENING", 400, listeningWave::kLabelY, 1);
+        save(panel, "listening.pgm");
+        break;
       case 1:
         panel.fillRect(0, bandY, 800, 1, TFT_BLACK);
         panel.fillRect(0, bandY + band - 1, 800, 1, TFT_BLACK);
-        drawCentred(panel, kWordFace, screen == 0 ? "LISTENING" : "WORKING",
+        drawCentred(panel, kWordFace, "WORKING",
                     400, 240, kWordSize);
         break;
       case 2:
@@ -147,7 +153,9 @@ void screens(Seeed_GFX& sheet) {
     Seeed_GFX panel(800, 480);
     panel.fillScreen(TFT_WHITE);
     panel.setTextColor(TFT_BLACK);
-    drawCentred(panel, kWordFace, word, 400, 240, kWordSize);
+    const bool listening = strcmp(word, "LISTENING") == 0;
+    drawCentred(panel, kWordFace, word, 400,
+                listening ? listeningWave::kLabelY : 240, listening ? 1 : kWordSize);
     int top = 480, bottom = -1;
     for (int y = 0; y < 480; ++y) {
       for (int x = 0; x < 800; ++x) {
@@ -158,7 +166,7 @@ void screens(Seeed_GFX& sheet) {
       }
     }
     printf("  %-12s ink %3d..%3d  width %3d  inside: %s\n", word, top, bottom,
-           (int)textWidth(kWordFace, word, kWordSize),
+           (int)textWidth(kWordFace, word, listening ? 1 : kWordSize),
            (top >= bandY && bottom < bandY + band) ? "yes" : "NO");
   }
 }

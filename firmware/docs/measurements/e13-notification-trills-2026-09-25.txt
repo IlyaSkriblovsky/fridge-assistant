@@ -1,0 +1,35 @@
+E13 notification trill preference, 2026-09-25
+Device: assembled reTerminal Sticky E1005
+Rig: exp_e13, six 320 ms patterns, 700 ms A/B gap
+Seed: 347821863
+
+trial  1  A spark          B arc            chose A
+trial  2  A spark          B rhythmic       chose A
+trial  3  A double-rise    B spark          chose B
+trial  4  A arc            B close-warble  chose B
+trial  5  A wide-warble   B spark          chose A
+trial  6  A arc            B wide-warble   chose B
+trial  7  A wide-warble   B close-warble  chose B
+trial  8  A close-warble  B spark          chose A
+trial  9  A arc            B rhythmic       chose A
+trial 10  A rhythmic       B wide-warble   chose B
+trial 11  A close-warble  B double-rise    chose A
+trial 12  A close-warble  B rhythmic       chose A
+trial 13  A arc            B double-rise    chose B
+trial 14  A double-rise    B rhythmic       chose A
+trial 15  A double-rise    B wide-warble   chose B
+
+Round-robin scores:
+  close-warble  5/5
+  wide-warble   4/5
+  spark          3/5
+  double-rise    2/5
+  arc            1/5
+  rhythmic       0/5
+
+Final:
+trial 16  A close-warble  B wide-warble   chose A
+trial 17  A close-warble  B wide-warble   chose B
+trial 18  A wide-warble   B close-warble  chose A
+
+Final score: wide-warble 2, close-warble 1

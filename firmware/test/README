@@ -45,3 +45,6 @@ Reminder tests compile production reminder_state.h/reminder_json.h with
 ArduinoJson and check complete snapshot validation, version ordering, pending
 acknowledgements, offline reads, capacity, event ordering, the all-button release
 gate, terminal-write arbitration and full reminder text layout at 12 pt.
+
+`test_listening_wave` checks that every frame preserves all surrounding pixels
+and that every frame transition completely removes the previous wave.
