@@ -105,10 +105,5 @@ void stickyBuzzer::error() { play(kError); }
 void stickyBuzzer::play(const Note* notes, size_t count) {
   if (!silentMode::enabled()) playNotes(notes, count);
 }
-void stickyBuzzer::reminder() {
-  // Initial pattern, awaiting audibility acceptance on battery.
-  const Note alarm[] = {{2500, 200}, {0, 120}, {2500, 200}, {0, 120}, {3000, 350}};
-  playNotes(alarm, sizeof(alarm) / sizeof(alarm[0]));
-}
-
-void stickyBuzzer::notification() { play(kNotification.data(), kNotification.size()); }
+// Reminder alarms bypass silent mode; ordinary voice cues still use play().
+void stickyBuzzer::notification() { playNotes(kNotification.data(), kNotification.size()); }

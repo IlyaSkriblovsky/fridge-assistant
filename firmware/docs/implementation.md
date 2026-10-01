@@ -182,8 +182,9 @@ four full trills of eight 40 ms notes, alternating 3550/4150 Hz at offset 0
 and 3985/4658 Hz at +2 semitones. There are 50 ms gaps between elements.
 The user-selected arrangement repeats the phrase three times with 500 ms
 between phrases (the pause is a design choice), for 5290 ms nominal total.
-It uses the existing blocking LEDC playback, respects silent mode, and leaves
-GPIO48 detached and low. No event currently calls it. The three-repeat
+Reminder groups call it once, bypassing silent mode; ordinary voice cues
+remain muted in silent mode. Playback blocks and leaves GPIO48 detached and low.
+The three-repeat
 arrangement still needs device listening acceptance.
 
 ## Silent mode and indicator state

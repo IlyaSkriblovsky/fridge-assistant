@@ -144,7 +144,7 @@ void showReminders(bool fire = true) {
   }
   if (alarm) {
     if (anyButtonDown()) reminderButtons.armed = false;
-    stickyBuzzer::reminder();
+    stickyBuzzer::notification();
   }
 }
 

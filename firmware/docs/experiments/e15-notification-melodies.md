@@ -7,7 +7,7 @@ won all five round-robin comparisons and the final 4:1 against `question`.
 Both stages support it as the preferred candidate in this listener's run.
 It uses four full 320 ms E14 trills with three 50 ms rests (1430 ms nominal).
 The three-repeat version is available as `stickyBuzzer::notification()`;
-existing event sounds are unchanged.
+reminder groups now use it, including in silent mode. Voice cues are unchanged.
 
 ## Candidates and timing
 
@@ -105,7 +105,7 @@ After trying longer melodies on the computer, the user requested this motif
 three times with pauses. It is now available as `stickyBuzzer::notification()`,
 with 500 ms between the 1430 ms phrases (5290 ms nominal). That pause is a
 design choice; the three-repeat arrangement has not been listening-tested on
-the device and is not yet connected to a notification event.
+the device. Reminder events now use this arrangement.
 
 Verification on 2026-09-28: the production environment built using the empty
 secrets template. A host harness executing the actual buzzer module verified
