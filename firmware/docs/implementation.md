@@ -163,7 +163,7 @@ false to retain the static design without animation.
 
 THINKING clears both the wave and small label in one partial band (y=128..357),
 then shows three dots and a size-1 THINKING label at the same height as LISTENING.
-Thinking animation cycles the enlarged dot left to right, refreshing only
+Thinking animation moves the enlarged dot back and forth, refreshing only
 (320, 172, 160, 48), with a 250 ms pause after each refresh. Set
 config::kThinkingAnimation false for the static first frame. Answer/error
 posts cancel subsequent frames; an in-flight refresh must finish.
