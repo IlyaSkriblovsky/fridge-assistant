@@ -1,6 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import runpy
 
 import pytest
 from google.genai import types
@@ -13,6 +15,35 @@ from test_assistant import response
 
 def dt(value):
     return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize('zone', [None, 'America/New_York'])
+def test_timezone_configuration(monkeypatch, zone):
+    monkeypatch.delenv('REMINDERS_TIMEZONE', raising=False)
+    if zone is not None:
+        monkeypatch.setenv('REMINDERS_TIMEZONE', zone)
+    configured = runpy.run_path(reminders.__file__)
+    assert configured['ZONE'].key == (zone or 'Asia/Nicosia')
+    if zone is None:
+        return
+    token = configured['REQUEST_TIME'].set(dt('2026-03-07T15:00:00'))
+    try:
+        created = configured['create']('test', amount=1, unit='days')
+        assert created['due_at'] == '2026-03-08T10:00:00-04:00'
+        assert configured['list_active']()['reminders'][0]['due_at'] == created['due_at']
+        assert configured['deadline'](dt('2026-03-07'), local_at='2026-03-08T10:00:00') == dt('2026-03-08T14:00:00')
+        for local in ['2026-03-08T02:30:00', '2026-11-01T01:30:00']:
+            with pytest.raises(ValueError):
+                configured['deadline'](dt('2026-01-01'), local_at=local)
+    finally:
+        configured['REQUEST_TIME'].reset(token)
+
+
+@pytest.mark.parametrize('zone', ['', 'Invalid/Timezone'])
+def test_invalid_timezone_rejected(monkeypatch, zone):
+    monkeypatch.setenv('REMINDERS_TIMEZONE', zone)
+    with pytest.raises((ValueError, ZoneInfoNotFoundError)):
+        runpy.run_path(reminders.__file__)
 
 
 def test_calendar_and_duration():
@@ -107,7 +138,12 @@ async def test_sync_auth_validation_and_ack(client):
 
 
 @pytest.mark.asyncio
-async def test_fixed_anchor_across_model_rounds(gemini):
+@pytest.mark.parametrize('zone, local_time', [
+    ('Asia/Nicosia', '2026-09-24T18:00:00+03:00'),
+    ('America/New_York', '2026-09-24T11:00:00-04:00'),
+])
+async def test_fixed_anchor_across_model_rounds(gemini, monkeypatch, zone, local_time):
+    monkeypatch.setattr(reminders, 'ZONE', ZoneInfo(zone))
     anchor = dt('2026-09-24T15:00:00')
     token = reminders.REQUEST_TIME.set(anchor)
     seen = []
@@ -125,4 +161,4 @@ async def test_fixed_anchor_across_model_rounds(gemini):
         reminders.REQUEST_TIME.reset(token)
     rows = reminders.snapshot()['active']
     assert rows[0]['due_at_ms'] == rows[1]['due_at_ms'] == int(anchor.timestamp() * 1000) + 300000
-    assert all('2026-09-24T18:00:00+03:00' in instruction for instruction in seen)
+    assert all(f'{local_time} ({zone})' in instruction for instruction in seen)

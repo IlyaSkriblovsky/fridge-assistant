@@ -65,7 +65,7 @@ ADD_TO_SHOPPING_LIST = types.FunctionDeclaration(
 )
 
 CREATE_REMINDER = types.FunctionDeclaration(
-    name="create_reminder", description="Create a one-shot reminder. Extract duration, never calculate its date yourself. Use local_at only for an explicit calendar date and time in Asia/Nicosia.",
+    name="create_reminder", description="Create a one-shot reminder. Extract duration, never calculate its date yourself. Use local_at only for an explicit calendar date and time in the timezone given with the request time.",
     parameters_json_schema={"type": "object", "properties": {
         "text": {"type": "string", "description": "Only the essential subject or action to remember, without reminder-request wording or its introductory prepositions; at most 240 UTF-8 bytes."},
         "amount": {"type": "integer", "minimum": 1},
@@ -139,7 +139,7 @@ for a new command specifying the time. Each recording is independent, with no hi
 Ask for a precise time for vague requests such as 'in the morning'. Never guess ambiguous
 calendar times or work around a DST ambiguity error. Use amount/unit for relative durations;
 months and years are calendar arithmetic performed by the server.
-""" + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} (Asia/Nicosia)."
+""" + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} ({reminders.ZONE.key})."
     # The request task owns this context; worker threads inherit the fixed anchor.
     config = types.GenerateContentConfig(system_instruction=instruction, tools=TOOLS)
 

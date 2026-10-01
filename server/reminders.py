@@ -4,12 +4,13 @@ from contextlib import closing
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import os
 import time
 import re
 
 import metrics
 
-ZONE = ZoneInfo("Asia/Nicosia")
+ZONE = ZoneInfo(os.environ.get("REMINDERS_TIMEZONE", "Asia/Nicosia"))
 REQUEST_TIME: ContextVar[datetime | None] = ContextVar("reminder_request_time", default=None)
 MAX_ACTIVE = 10
 MAX_TEXT_BYTES = 240

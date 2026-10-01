@@ -3,6 +3,7 @@
 import io
 import socket
 import wave
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -12,12 +13,14 @@ import pytest_asyncio
 
 import main
 import metrics
+import reminders
 import shopping_list
 import weather
 
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
+    monkeypatch.setattr(reminders, "ZONE", ZoneInfo("Asia/Nicosia"))
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.delenv("WEATHER_LATITUDE", raising=False)
     monkeypatch.delenv("WEATHER_LONGITUDE", raising=False)
