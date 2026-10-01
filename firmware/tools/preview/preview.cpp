@@ -14,6 +14,7 @@
 #include "fonts/fonts.h"
 #include "text.h"
 #include "listening_wave.h"
+#include "thinking_dots.h"
 
 namespace {
 
@@ -66,7 +67,7 @@ const char* const kAnswers[] = {
 };
 constexpr int kAnswerCount = sizeof(kAnswers) / sizeof(kAnswers[0]);
 
-// LISTENING, WORKING, one panel per answer, and an error.
+// LISTENING, THINKING, one panel per answer, and an error.
 constexpr int kScreenCount = 3 + kAnswerCount;
 
 void save(const Seeed_GFX& gfx, const char* path) {
@@ -111,10 +112,9 @@ void screens(Seeed_GFX& sheet) {
         save(panel, "listening.pgm");
         break;
       case 1:
-        panel.fillRect(0, bandY, 800, 1, TFT_BLACK);
-        panel.fillRect(0, bandY + band - 1, 800, 1, TFT_BLACK);
-        drawCentred(panel, kWordFace, "WORKING",
-                    400, 240, kWordSize);
+        thinkingDots::draw(panel, 0);
+        drawCentred(panel, kWordFace, "THINKING", 400, listeningWave::kLabelY, 1);
+        save(panel, "thinking.pgm");
         break;
       case 2:
       case 3:
@@ -146,14 +146,14 @@ void screens(Seeed_GFX& sheet) {
     paste(sheet, panel, screen * 480);
   }
 
-  // The invariant working() depends on: both words inside the band it is the
+  // The invariant thinking() depends on: both words inside the band it is the
   // only part of the panel to push.
   printf("word band: y %d height %d\n", (int)bandY, (int)band);
-  for (const char* word : {"LISTENING", "WORKING", "ЁЖ", "ΆΫ"}) {
+  for (const char* word : {"LISTENING", "THINKING", "ЁЖ", "ΆΫ"}) {
     Seeed_GFX panel(800, 480);
     panel.fillScreen(TFT_WHITE);
     panel.setTextColor(TFT_BLACK);
-    const bool listening = strcmp(word, "LISTENING") == 0;
+    const bool listening = strcmp(word, "LISTENING") == 0 || strcmp(word, "THINKING") == 0;
     drawCentred(panel, kWordFace, word, 400,
                 listening ? listeningWave::kLabelY : 240, listening ? 1 : kWordSize);
     int top = 480, bottom = -1;

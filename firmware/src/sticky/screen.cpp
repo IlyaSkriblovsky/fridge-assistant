@@ -4,6 +4,7 @@
 #include "silent_mode.h"
 #include "silent_icon.h"
 #include "listening_wave.h"
+#include "thinking_dots.h"
 #include "stale_icon.h"
 #include "dashboard_protocol.h"
 #include "sticky/power.h"
@@ -29,8 +30,7 @@ RTC_DATA_ATTR bool dashboardStale = false;
 // at about 4.5 mm -- the first is a headline at arm's length, the second is
 // subordinate to it without being small.
 //
-//  * kWordFace at size 1 labels the listening wave; kWordSize is the large,
-//    centered WORKING word. The transition band contains both compositions.
+//  * kWordFace at size 1 labels both the listening wave and thinking dots.
 //  * kWordFace at size 1 is an error title, white inside the bar. The widest
 //    in the vision's table is NO MICROPHONE at 416 px, so every title clears
 //    the bar's edges with room to spare.
@@ -40,10 +40,6 @@ const TextFace& kWordFace = fontFreeSansBold24;
 const TextFace& kAnswerFace = fontFreeSans24;
 const TextFace& kDetailFace = fontFreeSans18;
 
-// The word of working() is the one thing drawn at anything
-// other than the face's own size.
-constexpr uint8_t kWordSize = 2;
-
 // The answer's margins, and with them the box it is wrapped into: the width
 // is what a line breaks against and the height is how many lines there is
 // room for. Equal on all four sides, because the block is centred inside the
@@ -52,7 +48,7 @@ constexpr uint8_t kWordSize = 2;
 constexpr int32_t kAnswerMarginX = 40;
 constexpr int32_t kAnswerMarginY = 40;
 
-// Added above and below the face's box to make the band working() refreshes.
+// Added above and below the face's box to make the band thinking() refreshes.
 // It buys back the rounding in the centring arithmetic and a few pixels of
 // slack, and every pixel of it is rows the controller has to be sent, so it
 // is small on purpose.
@@ -246,7 +242,7 @@ bool StickyScreen::listeningFrame() {
   return result.ok();
 }
 
-bool StickyScreen::working() {
+bool StickyScreen::thinking() {
   if (!_ready) return false;
 
   int32_t y = 0;
@@ -258,8 +254,9 @@ bool StickyScreen::working() {
   // send it. Only the band is repainted, and only the band is pushed.
   _display.setTextColor(TFT_BLACK);
   _display.fillRect(0, y, _display.width(), height, TFT_WHITE);
-  drawCentred(kWordFace, "WORKING", _display.width() / 2, _display.height() / 2,
-              kWordSize);
+  _dotsFrame = 0;
+  thinkingDots::draw(_display, _dotsFrame);
+  drawCentred(kWordFace, "THINKING", _display.width() / 2, listeningWave::kLabelY, 1);
 
   const GfxResult result = _display.refreshPartial(0, y, _display.width(), height);
   _lastWasPartial = result.ok();
@@ -267,6 +264,7 @@ bool StickyScreen::working() {
     _lastError = result.message;
     return false;
   }
+  _lastError = "";
   return true;
 }
 
@@ -291,6 +289,17 @@ void StickyScreen::reminder(const char* text) {
     }
   }
   refreshWhole();
+}
+
+bool StickyScreen::thinkingFrame() {
+  if (!_ready || !_drewFullFrame) return false;
+  _dotsFrame = (_dotsFrame + 1) % thinkingDots::kFrames;
+  thinkingDots::draw(_display, _dotsFrame);
+  const GfxResult result = _display.refreshPartial(
+      thinkingDots::kX, thinkingDots::kY, thinkingDots::kWidth, thinkingDots::kHeight);
+  _lastWasPartial = result.ok();
+  _lastError = result.ok() ? "" : result.message;
+  return result.ok();
 }
 
 void StickyScreen::answer(const char* text) {

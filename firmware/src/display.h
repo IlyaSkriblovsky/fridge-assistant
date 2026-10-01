@@ -24,7 +24,7 @@
 // waiting for the panel replaces it; the refresh already on the panel is never
 // cut short. A screen that was stale before the panel got to it is never drawn:
 // on a short hold with a quick backend the answer lands while LISTENING is
-// still refreshing, and drawing WORKING first would cost 889 ms to show a word
+// still refreshing, and drawing THINKING first would cost 889 ms to show a state
 // that stopped being true before it appeared. The pre-clear is the one post
 // that is never replaced, because it is not a screen but the controller being
 // reconciled with the glass: it runs ahead of whatever is posted after it.
@@ -63,8 +63,8 @@ class Display {
   static constexpr uint32_t kStackBytes = 8192;
 
   // Every screen, and the pre-clear -- which is the record's index as well.
-  enum class Screen : uint8_t { Clear, Listening, Working, Answer, Error, Silent,
-                                Sensors, Dashboard, Stale, Reminder, ListeningFrame, Count };
+  enum class Screen : uint8_t { Clear, Listening, Thinking, Answer, Error, Silent,
+                                Sensors, Dashboard, Stale, Reminder, ListeningFrame, ThinkingFrame, Count };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
@@ -109,10 +109,10 @@ class Display {
   // of whatever is posted next. See StickyScreen::clear().
   void clear();
   void listening();
-  // Cancel future animation frames without interrupting a panel waveform.
-  // Also used by tap/abort paths which do not post WORKING.
-  void stopListening();
-  void working();
+  // Cancel future listening/thinking frames without interrupting a panel waveform.
+  // Also used by tap/abort paths which do not post THINKING.
+  void stopAnimation();
+  void thinking();
   void silentIndicator();
   void answer(const char* text);
   void reminder(const char* text);
@@ -162,7 +162,7 @@ class Display {
 
   Slot _slot;
   bool _clearPending = false;
-  bool _animateRequested = false;  // guarded by _lock
+  Screen _animationRequested = Screen::Count;  // guarded by _lock
 
   Record _records[static_cast<uint8_t>(Screen::Count)];
   const char* _lastError = "";

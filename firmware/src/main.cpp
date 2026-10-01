@@ -341,7 +341,7 @@ void waitForRelease() {
 
 // End a voice cycle without sleeping: loop() owns the dwell and dashboard.
 void finish(Outcome outcome) {
-  display.stopListening();
+  display.stopAnimation();
   voiceActive = false;
   voiceRequest.disarmCancellation();
   capture.abort();
@@ -698,7 +698,7 @@ void runVoice(int64_t pressUs) {
   }
   if (interruptVoice()) return;
   g_releaseSeenUs = esp_timer_get_time();
-  display.stopListening();
+  display.stopAnimation();
 
   mic.end();
 
@@ -728,10 +728,10 @@ void runVoice(int64_t pressUs) {
   }
 
   // The vision's step 6, in two parts: the chirp says the question was taken,
-  // and the word says the same thing to somebody who was not listening. The
-  // word waits its turn on the panel -- behind the rest of LISTENING on a short
-  // hold -- and is dropped unseen if the answer overtakes it there.
-  display.working();
+  // and the screen says the same thing to somebody who was not listening. It
+  // waits its turn on the panel -- behind the rest of LISTENING on a short hold
+  // -- and is dropped unseen if the answer overtakes it there.
+  display.thinking();
 
   // The tail, on a question whose request opened under the hold: the chunks
   // committed since the loop's last pass and the terminating chunk. It goes
@@ -902,6 +902,7 @@ void runIdle() {
       const int64_t drawnUs = display.record(which).endUs;
       logScreen("final voice screen", which);
       logScreen("last listening animation frame", Display::Screen::ListeningFrame);
+      logScreen("last thinking animation frame", Display::Screen::ThinkingFrame);
       logTiming(lastOutcome, true);
       // With no working panel there is no completed refresh to wait from.
       const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
