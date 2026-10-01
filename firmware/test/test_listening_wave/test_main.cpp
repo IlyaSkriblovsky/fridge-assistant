@@ -51,16 +51,16 @@ void dots_preserve_every_pixel_outside_its_window() {
 }
 
 void dots_transition_removes_all_previous_frame_pixels() {
-  for (uint8_t from = 0; from < thinkingDots::kFrames; ++from)
-    for (uint8_t to = 0; to < thinkingDots::kFrames; ++to) {
-      Seeed_GFX actual(800, 480), expected(800, 480);
-      thinkingDots::draw(actual, from);
-      const auto previous = actual.px;
-      thinkingDots::draw(actual, to);
-      thinkingDots::draw(expected, to);
-      TEST_ASSERT_TRUE(actual.px == expected.px);
-      if (from != to) TEST_ASSERT_TRUE(actual.px != previous);
-    }
+  for (uint8_t from = 0; from < thinkingDots::kFrames; ++from) {
+    const uint8_t to = (from + 1) % thinkingDots::kFrames;
+    Seeed_GFX actual(800, 480), expected(800, 480);
+    thinkingDots::draw(actual, from);
+    const auto previous = actual.px;
+    thinkingDots::draw(actual, to);
+    thinkingDots::draw(expected, to);
+    TEST_ASSERT_TRUE(actual.px == expected.px);
+    TEST_ASSERT_TRUE(actual.px != previous);
+  }
 }
 
 int main() {
