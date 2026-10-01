@@ -250,8 +250,9 @@ file. Build/host success does not establish hardware acceptance.
   state is inferred here from checked-in code or a historical flash report.
 
 [Host tests](../test/README) cover text, recording, controller RAM, dashboard
-protocol/scheduling and PNG decoding. CI runs the native suite and builds every
-embedded environment with example credentials. These checks do not validate
+protocol/scheduling and PNG decoding. CI runs the native suite and builds only
+the production firmware with example credentials. Experiment rigs are built
+locally when needed. These checks do not validate
 physical peripherals, task timing, concurrent visibility or network behavior.
 
 ## One-shot reminders

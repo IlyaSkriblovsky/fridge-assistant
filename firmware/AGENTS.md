@@ -72,12 +72,12 @@ A PlatformIO monitor left running in the user's editor holds the port and makes
 uploads fail with "port is busy"; ask the user to close it rather than killing
 their process.
 
-CI (`../.github/workflows/firmware.yml`) builds every embedded `[env:...]` in
-`platformio.ini`, a new rig included, with `src/secrets.example.h` copied in as
-`src/secrets.h`. So every environment has to build without real credentials.
+CI (`../.github/workflows/firmware.yml`) builds only `reterminal_e1005`, with
+`src/secrets.example.h` copied in as `src/secrets.h`. Experiment rigs are built
+locally when needed; CI does not check their buildability.
 CI also runs all host tests with `pio test -e native`; see `test/README`.
-The native environment
-is excluded from the embedded build job. Nothing runs on hardware in CI.
+The native environment is excluded from the embedded build job. Nothing runs
+on hardware in CI.
 
 ## Things that will bite
 
