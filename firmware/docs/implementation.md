@@ -223,3 +223,55 @@ file. Build/host success does not establish hardware acceptance.
 protocol/scheduling and PNG decoding. CI runs the native suite and builds every
 embedded environment with example credentials. These checks do not validate
 physical peripherals, task timing, concurrent visibility or network behavior.
+
+## One-shot reminders
+
+`reminder_state.h` owns the fixed ten-item state and ten acknowledgement IDs;
+`reminder_json.h` validates complete snapshots before merging. `reminders.cpp`
+retains state, fired flags, version and a server-time/RTC-tick anchor in RTC
+memory. Cold boots discard this cache and recover via sync. Time is UTC epoch
+milliseconds; elapsed RTC ticks cover awake work and deep sleep. Equal-version
+snapshots with older server timestamps and all lower versions are rejected.
+Local reads win until explicitly acknowledged; fired flags survive snapshot
+replacement. Queue capacity is reserved for every accepted item. An audio
+snapshot that cannot fit alongside pending acknowledgements is rejected whole;
+the next sync drains those IDs and restores the current server state.
+
+An independent bounded worker POSTs `/sticky/reminders/sync` on each dashboard
+cycle, including startup and after voice. Display failure and PNG failure do
+not suppress JSON sync. Its result is applied only by the orchestrator. Pending
+reads added during the request remain queued unless explicitly acknowledged.
+Cancellation discards a response but keeps the acknowledgement queue. Reads
+have bounded timeouts; the worker owns its HTTP cleanup. The audio backend
+also accepts snapshots. Network age is estimated from half the RTT, excluding
+server processing time for audio; exact one-way latency is unknowable here.
+
+Idle polling fires due groups and displays the maximum `(due, created, id)`.
+The reminder screen chooses 24/18/12 pt without truncating the bounded text.
+One group sounds once, bypassing silent mode. Background dashboard work stays
+active without replacing an unread notification. AI, Up and Down acknowledge
+one item; a shared stable-release gate prevents hold-through into another read,
+recording or a silent-mode toggle. After the final read, a valid downloaded
+frame is restored, otherwise a dashboard fetch starts immediately, without an
+intermediate empty-notifications screen. If that fetch fails, the read text is
+erased and the next scheduled update retries. Single-line notification text
+is centered horizontally; multiline text remains left-aligned.
+Down is also an ext1 wake source. Sleep uses the earlier dashboard deadline or
+unfired reminder; fired items never create an immediate timer wake.
+
+During voice, a one-shot ESP timer stops capture and shuts down the established
+upload socket when a reminder becomes due. HTTP connect timeout is capped by
+the deadline. A mutex protects socket lifetime and arbitrates interruption
+against starting the terminating chunk: after commitment no cancellation is
+claimed, including on an uncertain terminal write. The response/error completes
+its ten-second dwell from display completion before alarms are fired. All
+reminders that accumulated during that wait sound as one group. An interrupted
+capture requires release before a new notification can be read.
+
+Host tests cover state/JSON validation, stale snapshots, lost acknowledgements,
+capacity, overdue recovery, ordering, offline reads, the shared button gate,
+upload commitment arbitration and worst-width text layout. They do **not**
+prove GPIO/task timing or deep-sleep behavior. Pending device checks: each button,
+hold/bounce, simultaneous deadlines, alarm audibility in silent mode, interruption
+near the terminal write, full result dwell, cancellation of the shown reminder,
+offline read, battery-powered deep sleep and long-term clock error.

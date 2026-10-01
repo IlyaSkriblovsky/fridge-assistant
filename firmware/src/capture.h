@@ -143,7 +143,7 @@ class Capture {
 
   TaskHandle_t _task = nullptr;
   SemaphoreHandle_t _done = nullptr;
-  volatile bool _abort = false;
+  std::atomic<bool> _abort{false};
   std::atomic<bool> _pastMinimumHold{false};
   bool _joined = false;
 

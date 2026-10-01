@@ -20,7 +20,7 @@ import time
 import urllib.request
 import wave
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 import httpx
@@ -34,6 +34,8 @@ import assistant
 import dashboard
 import jobs
 import metrics
+import reminders
+from pydantic import BaseModel, Field, StrictInt
 import shopping_list
 import weather
 
@@ -245,8 +247,17 @@ def sticky_dashboard(
     )
 
 
+class ReminderSync(BaseModel):
+    read_ids: list[Annotated[StrictInt, Field(gt=0, le=9007199254740991)]] = Field(max_length=10)
+
+
+@app.post("/sticky/reminders/sync")
+def sync_reminders(body: ReminderSync) -> dict:
+    return reminders.snapshot(body.read_ids)
+
+
 @app.post("/audio")
-async def audio(request: Request) -> dict[str, str]:
+async def audio(request: Request) -> dict[str, object]:
     """Answer the question in a WAV recording with the text for the screen.
 
     The firmware streams the recording chunked while the button is held, so the
@@ -277,6 +288,7 @@ async def audio(request: Request) -> dict[str, str]:
         # again, so carrying this one out would do it twice.
         log(f"{size} bytes, then the device went away; nothing done")
         return {"response": ""}
+    request_time = datetime.now(timezone.utc)
     took = time.monotonic() - started
     # The device's wait for the answer starts here, at the end of the body.
     ended = time.monotonic()
@@ -293,7 +305,11 @@ async def audio(request: Request) -> dict[str, str]:
         reply = "Слишком длинная запись."
     else:
         try:
-            reply = await assistant.answer(request.app.state.gemini, bytes(wav), log)
+            token = reminders.REQUEST_TIME.set(request_time)
+            try:
+                reply = await assistant.answer(request.app.state.gemini, bytes(wav), log)
+            finally:
+                reminders.REQUEST_TIME.reset(token)
         except errors.APIError as exc:
             log(f"Gemini error: {exc}")
             reply = f"Gemini ответил ошибкой {exc.code}, попробуй ещё раз."
@@ -301,7 +317,9 @@ async def audio(request: Request) -> dict[str, str]:
             log(f"Gemini unreachable: {exc!r}")
             reply = "Не получилось связаться с Gemini, попробуй ещё раз."
     log(f"reply: {reply}  ({time.monotonic() - ended:.2f} s after the body ended)")
-    return {"response": reply}
+    snapshot = await asyncio.to_thread(reminders.snapshot)
+    snapshot["request_received_ms"] = int(request_time.timestamp() * 1000)
+    return {"response": reply, "reminders": snapshot}
 
 
 # --- Deliberate failures ------------------------------------------------------

@@ -12,6 +12,8 @@
 #include <string>
 
 #include "config.h"
+#include "reminders.h"
+#include <soc/rtc.h>
 
 namespace {
 
@@ -26,7 +28,47 @@ uint32_t millisSince(int64_t fromUs) {
 
 Backend::Backend(const char* baseUrl, const char* token) : _baseUrl(baseUrl), _token(token) {}
 
-Backend::~Backend() { close(); }
+Backend::~Backend() {
+  disarmReminder(); close();
+  if (_deadlineTimer) esp_timer_delete(_deadlineTimer);
+  if (_deadlineLock) vSemaphoreDelete(_deadlineLock);
+}
+
+bool Backend::armReminder(int64_t deadlineUs, void (*abortCapture)()) {
+  disarmReminder();
+  if (!_deadlineLock) _deadlineLock = xSemaphoreCreateMutex();
+  if (!_deadlineLock) return false;
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  _interrupted = false; _gate = reminder::UploadGate{};
+  _deadlineUs = deadlineUs; _abortCapture = abortCapture;
+  xSemaphoreGive(_deadlineLock);
+  if (!deadlineUs) return true;
+  if (!_deadlineTimer) {
+    esp_timer_create_args_t args{};
+    args.callback = deadlineReached; args.arg = this; args.name = "voice-reminder";
+    if (esp_timer_create(&args, &_deadlineTimer) != ESP_OK) return false;
+  }
+  int64_t left = deadlineUs - esp_timer_get_time();
+  return esp_timer_start_once(_deadlineTimer, left > 0 ? left : 1) == ESP_OK;
+}
+void Backend::disarmReminder() {
+  if (_deadlineTimer) esp_timer_stop(_deadlineTimer);
+  if (_deadlineLock) {
+    xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+    _gate.committed = true;
+    xSemaphoreGive(_deadlineLock);
+  }
+}
+void Backend::deadlineReached(void* context) {
+  auto& self = *static_cast<Backend*>(context);
+  xSemaphoreTake(self._deadlineLock, portMAX_DELAY);
+  if (self._deadlineUs > 0 && esp_timer_get_time() >= self._deadlineUs && self._gate.interrupt()) {
+    self._interrupted = true;
+    if (self._abortCapture) self._abortCapture();
+    if (self._deadlineSocket >= 0) shutdown(self._deadlineSocket, SHUT_RDWR);
+  }
+  xSemaphoreGive(self._deadlineLock);
+}
 
 void Backend::endpoint(char* out, size_t size) const {
   // No base URL stays no URL rather than becoming a bare path, so that open()
@@ -78,6 +120,10 @@ bool Backend::open(const char* url) {
   cfg.url = url;
   cfg.method = HTTP_METHOD_POST;
   cfg.timeout_ms = static_cast<int>(config::kBackendConnectTimeoutMs);
+  if (_deadlineUs && !_gate.committed) {
+    const int64_t remaining = (_deadlineUs - esp_timer_get_time()) / 1000;
+    if (remaining < cfg.timeout_ms) cfg.timeout_ms = remaining > 0 ? remaining : 1;
+  }
   cfg.disable_auto_redirect = true;
 
   _client = esp_http_client_init(&cfg);
@@ -138,6 +184,13 @@ bool Backend::open(const char* url) {
   const int noDelay = 1;
   if (fd >= 0) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
 
+  if (_deadlineLock) {
+    xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+    _deadlineSocket = esp_http_client_get_socket(_client);
+    const bool interrupted = _interrupted.load();
+    xSemaphoreGive(_deadlineLock);
+    if (interrupted) { close(); return false; }
+  }
   _connectedUs = esp_timer_get_time();
   return true;
 }
@@ -149,6 +202,7 @@ bool Backend::write(const uint8_t* data, size_t bytes) {
   }
 
   while (bytes > 0) {
+    if (reminders::due()) { _interrupted = true; close(); return false; }
     const size_t samples = bytes < kFrameBytes ? bytes : kFrameBytes;
 
     // <size in hex>\r\n<samples>\r\n, in one buffer and one write.
@@ -172,6 +226,17 @@ bool Backend::end() {
   if (!streaming()) {
     if (_result == Result::Ok) finish(Result::NoServer, "end() with no request open");
     return false;
+  }
+  // This check is the commit boundary: once the terminal write starts we
+  // never claim cancellation, even if its result is uncertain.
+  if (reminders::due()) { _interrupted = true; close(); return false; }
+  if (_deadlineLock) {
+    xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+    const bool interrupted = !_gate.commit(_interrupted.load() ||
+        (_deadlineUs && esp_timer_get_time() >= _deadlineUs));
+    if (interrupted) _interrupted = true;
+    xSemaphoreGive(_deadlineLock);
+    if (interrupted) { close(); return false; }
   }
   if (!send(reinterpret_cast<const uint8_t*>(kLastChunk), sizeof(kLastChunk) - 1)) return false;
 
@@ -293,12 +358,25 @@ Backend::Result Backend::receive() {
   const char* text = doc["response"].as<const char*>();
   if (text == nullptr) return finish(Result::BadResponse, "no \"response\" string in the reply");
 
+  const int64_t exchangeMs = (esp_timer_get_time() - _endUs) / 1000;
+  const int64_t generatedMs = doc["reminders"]["server_time_ms"] | int64_t(0);
+  const int64_t receivedMs = doc["reminders"]["request_received_ms"] | int64_t(0);
+  if (receivedMs > 0 && generatedMs >= receivedMs) {
+    // Remove server/LLM time from the RTT before estimating one-way transit.
+    const int64_t transit = exchangeMs - (generatedMs - receivedMs);
+    reminders::accept(doc["reminders"], rtc_time_get(), transit > 0 ? transit / 2 : 0);
+  }
   snprintf(_answer, sizeof(_answer), "%s", text);
   return finish(Result::Ok, "");
 }
 
 void Backend::close() {
   if (_client == nullptr) return;
+  if (_deadlineLock) {
+    xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+    _deadlineSocket = -1;
+    xSemaphoreGive(_deadlineLock);
+  }
   esp_http_client_cleanup(_client);
   _client = nullptr;
 }

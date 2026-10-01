@@ -1,4 +1,9 @@
 #pragma once
+#include <atomic>
+#include "reminder_state.h"
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -87,7 +92,7 @@ class Backend {
   // went wrong could have the device read and parse a megabyte, for a string
   // the panel cuts at kMaxTextChars. The reply is read into a buffer of this
   // size that lives in the object, so there is no allocation to fail.
-  static constexpr size_t kMaxReplyBytes = 4096;
+  static constexpr size_t kMaxReplyBytes = 24576;
 
   // The most samples one chunk carries. Under the hold a chunk is whatever the
   // capture task committed since the last poll, 512 bytes most of the time, so
@@ -126,6 +131,10 @@ class Backend {
   // The terminating chunk: the body is over. From here the backend has
   // config::kResponseTimeoutMs to answer.
   bool end();
+  bool interrupted() const { return _interrupted.load(); }
+  bool committed() const { return _gate.committed; }
+  bool armReminder(int64_t deadlineUs, void (*abortCapture)());
+  void disarmReminder();
 
   // Waits for the answer and reads it. Returns how the question ended; after
   // Ok, answer() holds the text. The connection is closed either way.
@@ -217,6 +226,14 @@ class Backend {
 
   esp_http_client* _client = nullptr;
   bool _ended = false;
+  std::atomic<bool> _interrupted{false};
+  SemaphoreHandle_t _deadlineLock = nullptr;
+  esp_timer_handle_t _deadlineTimer = nullptr;
+  int64_t _deadlineUs = 0;
+  int _deadlineSocket = -1;
+  reminder::UploadGate _gate;
+  void (*_abortCapture)() = nullptr;
+  static void deadlineReached(void* context);
   Result _result = Result::Ok;
 
   int64_t _openUs = 0;

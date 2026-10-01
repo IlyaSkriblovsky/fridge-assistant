@@ -48,7 +48,8 @@ async def test_audio_response_and_reassembled_wav(client, answer, gemini, wav):
         "Content-Type": "audio/wav", "Authorization": "bEaReR test"
     })
     assert reply.status_code == 200
-    assert reply.json() == {"response": answer.return_value}
+    assert reply.json()["response"] == answer.return_value
+    assert reply.json()["reminders"]["active"] == []
     answer.assert_awaited_once()
     assert answer.call_args.args[:2] == (gemini, wav)
 
@@ -59,9 +60,9 @@ async def test_size_limit(client, answer, monkeypatch, size, expected_calls):
     reply = await client.post("/audio", content=b"x" * size)
     assert reply.status_code == 200
     assert answer.await_count == expected_calls
-    assert reply.json() == {"response": (
+    assert reply.json()["response"] == (
         answer.return_value if expected_calls else "Слишком длинная запись."
-    )}
+    )
 
 
 @pytest.mark.parametrize("error,message", [
@@ -72,7 +73,7 @@ async def test_gemini_errors(client, answer, error, message):
     answer.side_effect = error
     reply = await client.post("/audio", content=b"audio")
     assert reply.status_code == 200
-    assert reply.json() == {"response": message}
+    assert reply.json()["response"] == message
 
 
 @pytest.mark.parametrize("path,status,body", [

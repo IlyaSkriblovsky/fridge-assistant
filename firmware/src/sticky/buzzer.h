@@ -45,6 +45,7 @@ inline void play(const Note (&notes)[N]) {
 void ready();   // microphone is live: two very short notes, low then high
 void taken();   // the question is on its way: one short note, between the two
 void answer();  // the answer is on screen: two short notes, high then low
+void reminder(); // alarm bypasses silent mode
 void error();   // one longer note, lower than either of the pairs
 
 }  // namespace stickyBuzzer

@@ -72,6 +72,8 @@ void Display::silentIndicator() { post(Screen::Silent, nullptr, nullptr); }
 
 void Display::working() { post(Screen::Working, nullptr, nullptr); }
 
+void Display::reminder(const char* text) { post(Screen::Reminder, text, nullptr); }
+
 void Display::answer(const char* text) { post(Screen::Answer, text, nullptr); }
 
 void Display::error(const char* title, const char* detail) { post(Screen::Error, title, detail); }
@@ -176,6 +178,9 @@ void Display::draw(const Slot& slot) {
       // Refused leaves LISTENING on the glass until the answer lands, which is
       // not worth failing a question over -- see StickyScreen::working().
       refused = !_screen.working();
+      break;
+    case Screen::Reminder:
+      _screen.reminder(slot.text);
       break;
     case Screen::Answer:
       // Full with a reason is a partial the controller refused. Full without

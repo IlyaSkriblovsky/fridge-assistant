@@ -43,6 +43,7 @@
 #include <soc/rtc.h>
 #include "config.h"
 #include "dashboard.h"
+#include "reminders.h"
 #include <stdio.h>
 
 #include "secrets.h"
@@ -106,6 +107,63 @@ Outcome lastOutcome = Outcome::Idle;
 bool recordingLogged = false;
 bool coldScreen = true;
 bool aiArmed = true;
+reminder::Buttons reminderButtons;
+RTC_DATA_ATTR int64_t shownReminder = 0;
+bool interruptedVoice = false;
+bool voiceActive = false;
+bool dashboardPixelsValid = false;
+bool dashboardRestorePending = false;
+bool reminderDismissed = false;
+bool startDisplay();
+
+bool anyButtonDown() {
+  return button.isDown() || digitalRead(stickyPower::kPinUpButton) == LOW ||
+      digitalRead(stickyPower::kPinDownButton) == LOW;
+}
+
+void showReminders(bool fire = true) {
+  auto& state = reminders::state();
+  const bool alarm = fire && state.fire(reminders::nowMs());
+  const int current = state.current();
+  const int64_t id = current < 0 ? 0 : state.items[current].id;
+  if ((id != shownReminder || alarm) && startDisplay()) {
+    if (coldScreen) { display.clear(); coldScreen = false; }
+    if (current >= 0) {
+      char text[400];
+      snprintf(text, sizeof(text), "%s%s", state.items[current].text,
+               interruptedVoice ? "\n\nГолосовой запрос прерван" : "");
+      display.reminder(text);
+    } else if (dashboardPixelsValid) {
+      display.dashboard(dashboard.pixels());
+    } else {
+      dashboardRestorePending = true;
+      reminderDismissed = true;
+    }
+    shownReminder = id;
+    interruptedVoice = false;
+  }
+  if (alarm) {
+    if (anyButtonDown()) reminderButtons.armed = false;
+    stickyBuzzer::reminder();
+  }
+}
+
+bool interruptVoice() {
+  if (voiceActive && backend.committed()) return false;
+  if (!(voiceActive && backend.interrupted()) && !reminders::due()) return false;
+  capture.abort();
+  capture.wait(kCaptureJoinMs);
+  mic.end();
+  backend.disarmReminder();
+  backend.close();
+  voiceActive = false;
+  interruptedVoice = true;
+  reminderButtons.armed = false;
+  aiArmed = false;
+  idlePhase = IdlePhase::Fetch;
+  showReminders();
+  return true;
+}
 
 // The moments the question is measured against, and two of them are not the
 // moment this thread reaches them:
@@ -283,6 +341,8 @@ void waitForRelease() {
 
 // End a voice cycle without sleeping: loop() owns the dwell and dashboard.
 void finish(Outcome outcome) {
+  voiceActive = false;
+  backend.disarmReminder();
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
@@ -312,6 +372,7 @@ bool startDisplay() {
 // nothing, and the chirp is 450 ms the panel would otherwise spend waiting for
 // this thread to finish making a sound.
 void fail(Outcome outcome, const char* title, const char* detail) {
+  if (voiceActive && interruptVoice()) return;
   Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
 
   if (startDisplay()) {
@@ -348,6 +409,7 @@ void fail(Outcome outcome, const char* title, const char* detail) {
 // retry is a new request that starts again from the header.
 bool openRenewingStaleLease() {
   if (backend.open()) return true;
+  if (backend.interrupted()) return false;
 
   const bool couldBeStale = backend.unreachable() && wifi.usedLease();
   if (!couldBeStale) return false;
@@ -357,6 +419,7 @@ bool openRenewingStaleLease() {
                  static_cast<unsigned long>(millisBetween(backend.openUs(), backend.doneUs())));
 
   const bool opened = backend.open();
+  if (backend.interrupted()) return false;
   if (opened || !backend.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
     return opened;
@@ -365,7 +428,10 @@ bool openRenewingStaleLease() {
   Serial1.println("  twice, so the address is the suspect -- dropping the lease and asking DHCP");
   const uint32_t stale = wifi.ipv4();
   wifi.renewAddress();
-  while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+  while (wifi.poll() == WifiLink::State::Connecting) {
+    if (backend.interrupted()) return false;
+    delay(kPollMs);
+  }
 
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.renewMs()),
@@ -456,6 +522,7 @@ void logStream(Backend::Result result) {
 // still talking -- which is why the recording is stopped first. It is a
 // no-op on one that has already stopped.
 void conclude(Backend::Result result) {
+  if (backend.interrupted() && interruptVoice()) return;
   if (result == Backend::Result::NoServer && !wifi.online())
     return fail(Outcome::NoWifi, "NO WIFI", nullptr);
   capture.abort();
@@ -549,6 +616,13 @@ bool stream() {
 }  // namespace
 
 void runVoice(int64_t pressUs) {
+  if (interruptVoice()) return;
+  voiceActive = true;
+  const int64_t due = reminders::state().nextDue();
+  if (!backend.armReminder(due == reminder::kMaxTime ? 0 :
+      esp_timer_get_time() + (due - reminders::nowMs()) * 1000,
+      []() { capture.abort(); })) return fail(Outcome::Broken, "NO MEMORY", "reminder timer unavailable");
+  shownReminder = 0;
   g_entryUs = pressUs;
   g_releaseUs = g_releaseSeenUs = g_lastChirpUs = 0;
   g_tailMs = g_takenChirpMs = g_networkWaitMs = g_answerWaitMs = 0;
@@ -613,6 +687,7 @@ void runVoice(int64_t pressUs) {
   // network is up at about 300 ms (S7b), which is where the minimum hold ends
   // anyway, so on most questions the two arrive together.
   while (!capture.finished()) {
+    if (interruptVoice()) return;
     if (wifi.poll() == WifiLink::State::Failed) {
       capture.abort();
     } else if (wifi.online() && capture.pastMinimumHold()) {
@@ -620,6 +695,7 @@ void runVoice(int64_t pressUs) {
     }
     delay(kPollMs);
   }
+  if (interruptVoice()) return;
   g_releaseSeenUs = esp_timer_get_time();
 
   mic.end();
@@ -686,7 +762,10 @@ void runVoice(int64_t pressUs) {
   if (!streamed) {
     {
       const int64_t startUs = esp_timer_get_time();
-      while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+      while (wifi.poll() == WifiLink::State::Connecting) {
+        if (interruptVoice()) return;
+        delay(kPollMs);
+      }
       g_networkWaitMs = millisBetween(startUs, esp_timer_get_time());
     }
 
@@ -724,13 +803,30 @@ uint64_t nextSleepUs() {
   // and move the deadline. Only the remaining duration uses current calibration.
   const uint64_t left = dashboardDeadlineTicks > now
       ? rtc_time_slowclk_to_us(dashboardDeadlineTicks - now, esp_clk_slowclk_cal_get()) : 0;
-  return dashboardProtocol::sleepUs(left, 0);
+  return reminders::sleepUs(dashboardProtocol::sleepUs(left, 0));
 }
 
 // Poll on every idle path, including panel and sensor waits. Never join a
 // cancelled network worker before starting capture.
 bool idleButton() {
   dashboard.poll();
+  reminders::pollSync();
+  const bool defer = idlePhase == IdlePhase::AfterVoice;
+  if (!defer) showReminders();
+  const bool hasReminder = reminders::state().current() >= 0;
+  const bool gated = !reminderButtons.armed;
+  const bool readPress = reminderButtons.poll(anyButtonDown(), esp_timer_get_time(),
+                                             config::kButtonDebounceMs * 1000LL);
+  if (hasReminder || gated) {
+    aiArmed = false;
+    if (hasReminder && readPress && !defer) {
+      reminders::state().read();
+      showReminders(false);
+    }
+    return false;
+  }
+  // Due alarms cannot shorten the final voice screen's full dwell.
+  if (defer && reminders::due()) return false;
   static int64_t releasedUs = 0;
   if (!button.isDown()) {
     if (!releasedUs) releasedUs = esp_timer_get_time();
@@ -740,6 +836,7 @@ bool idleButton() {
     releasedUs = 0;
     if (aiArmed) {
       dashboard.cancel();
+      reminders::cancelSync();
       return true;
     }
   }
@@ -771,103 +868,131 @@ bool waitPanel() {
 void dashboardFailed() {
   Serial1.println("  dashboard unavailable; keeping the previous screen, retry in one hour");
   scheduleDashboard(rtc_time_get(), config::kDashboardDefaultSeconds);
-  if (startDisplay()) {
-    if (coldScreen) {
+  if (reminders::state().current() < 0 && startDisplay()) {
+    if (reminderDismissed) {
+      // With no cached frame and no network, erase the already-read text.
+      // The next scheduled attempt will restore the dashboard.
+      display.clear();
+      coldScreen = false;
+    }
+    else if (coldScreen) {
       display.clear();
       display.error("NO DASHBOARD", nullptr);
       coldScreen = false;
     } else display.staleIndicator();
   }
+  dashboardRestorePending = false;
+  reminderDismissed = false;
   idlePhase = IdlePhase::Sleep;
 }
 
 // Runs until sleep or a new AI press. All long panel/network operations live
 // on their own tasks, so this loop can hand a press straight to runVoice().
 void runIdle() {
-  if (idlePhase == IdlePhase::AfterVoice) {
-    if (!waitPanel()) return;
-    const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
-    const int64_t drawnUs = display.record(which).endUs;
-    logScreen("final voice screen", which);
-    logTiming(lastOutcome, true);
-    // With no working panel there is no completed refresh to wait from.
-    const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
-    while (esp_timer_get_time() < until) {
-      if (idleButton()) return;
-      delay(kPollMs);
+  for (;;) {
+    if (dashboardRestorePending && idlePhase != IdlePhase::AfterVoice) {
+      dashboardRestorePending = false;
+      idlePhase = IdlePhase::Fetch;
     }
-    idlePhase = IdlePhase::Fetch;
-  }
-  if (idlePhase == IdlePhase::Fetch) {
-    if (idleButton()) return;
-    if (!startDisplay()) { dashboardFailed(); }
-    else {
+    if (idlePhase == IdlePhase::AfterVoice) {
       if (!waitPanel()) return;
-      display.sensors();
-      if (!waitPanel()) return;
-      logScreen("dashboard sensors", Display::Screen::Sensors);
-      const auto snapshot = display.record(Display::Screen::Sensors);
-      if (!wifi.online()) g_beginUs = esp_timer_get_time();
-      if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
-        dashboardFailed();
-      } else {
-        while (wifi.poll() == WifiLink::State::Connecting) {
-          if (idleButton()) return;
-          delay(kPollMs);
-        }
-        // A previous request may still be returning from cancellation.
-        while (!dashboard.done()) {
-          if (idleButton()) return;
-          delay(kPollMs);
-        }
-        if (!wifi.online() || !dashboard.start(snapshot.batteryPercent, snapshot.climate)) {
+      const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
+      const int64_t drawnUs = display.record(which).endUs;
+      logScreen("final voice screen", which);
+      logTiming(lastOutcome, true);
+      // With no working panel there is no completed refresh to wait from.
+      const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
+      while (esp_timer_get_time() < until) {
+        if (idleButton()) return;
+        delay(kPollMs);
+      }
+      idlePhase = IdlePhase::Fetch;
+    }
+    if (idlePhase == IdlePhase::Fetch) {
+      if (idleButton()) return;
+      {
+        startDisplay(); // Reminder sync still runs if the panel could not start.
+        if (!waitPanel()) return;
+        display.sensors();
+        if (!waitPanel()) return;
+        logScreen("dashboard sensors", Display::Screen::Sensors);
+        const auto snapshot = display.record(Display::Screen::Sensors);
+        if (!wifi.online()) g_beginUs = esp_timer_get_time();
+        if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
           dashboardFailed();
         } else {
+          while (wifi.poll() == WifiLink::State::Connecting) {
+            if (idleButton()) return;
+            delay(kPollMs);
+          }
+          if (wifi.online()) {
+            while (reminders::syncing()) {
+              if (idleButton()) return;
+              delay(kPollMs);
+            }
+            reminders::startSync();
+          }
+          // A previous request may still be returning from cancellation.
           while (!dashboard.done()) {
             if (idleButton()) return;
             delay(kPollMs);
           }
-          if (idleButton()) return;
-          if (!dashboard.ok()) dashboardFailed();
-          else {
-            scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
-            Serial1.printf("  dashboard: PNG %u bytes -> 48000 bytes, HTTP request %lu ms, decode %lu ms, next update in %lu s\n",
-                           static_cast<unsigned>(dashboard.downloadBytes()),
-                           static_cast<unsigned long>(dashboard.requestMs()),
-                           static_cast<unsigned long>(dashboard.decodeMs()),
-                           static_cast<unsigned long>(dashboard.nextSeconds()));
-            if (coldScreen) { display.clear(); coldScreen = false; }
-            display.dashboard(dashboard.pixels());
-            idlePhase = IdlePhase::Sleep;
+          dashboardPixelsValid = false;
+          if (!wifi.online() || !dashboard.start(snapshot.batteryPercent, snapshot.climate)) {
+            dashboardFailed();
+          } else {
+            while (!dashboard.done()) {
+              if (idleButton()) return;
+              delay(kPollMs);
+            }
+            if (idleButton()) return;
+            if (!dashboard.ok()) dashboardFailed();
+            else {
+              scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
+              Serial1.printf("  dashboard: PNG %u bytes -> 48000 bytes, HTTP request %lu ms, decode %lu ms, next update in %lu s\n",
+                             static_cast<unsigned>(dashboard.downloadBytes()),
+                             static_cast<unsigned long>(dashboard.requestMs()),
+                             static_cast<unsigned long>(dashboard.decodeMs()),
+                             static_cast<unsigned long>(dashboard.nextSeconds()));
+              if (coldScreen) { display.clear(); coldScreen = false; }
+              dashboardPixelsValid = true;
+              if (reminders::state().current() < 0) display.dashboard(dashboard.pixels());
+              dashboardRestorePending = false;
+              reminderDismissed = false;
+              idlePhase = IdlePhase::Sleep;
+            }
           }
         }
       }
     }
-  }
-  if (!waitPanel()) return;
-  while (!dashboard.done()) {
+    if (!waitPanel()) return;
+    while (!dashboard.done() || reminders::syncing()) {
+      if (idleButton()) return;
+      delay(kPollMs);
+    }
+    if (dashboardRestorePending) continue;
+    // Preserve the deadline even if Up (or a held AI after a capped recording)
+    // delays entry to sleep. AI remains responsive while Up is held.
+    while (anyButtonDown() || !reminderButtons.armed) {
+      if (idleButton()) return;
+      if (dashboardRestorePending) break;
+      delay(kPollMs);
+    }
     if (idleButton()) return;
-    delay(kPollMs);
+    if (!waitPanel()) return;
+    if (dashboardRestorePending) continue;
+    logScreen("dashboard", Display::Screen::Dashboard);
+    logScreen("dashboard status", Display::Screen::Stale);
+    Serial1.printf("  %s; panel startup %lu ms, display stack unused %lu bytes\n",
+                   outcomeName(lastOutcome), static_cast<unsigned long>(g_panelUpMs),
+                   static_cast<unsigned long>(display.stackUnusedBytes()));
+    Serial1.printf("  sleeping; dashboard timer in %llu ms\n",
+                   static_cast<unsigned long long>(nextSleepUs() / 1000));
+    dashboard.close();
+    wifi.end();
+    Serial1.flush();
+    stickyPower::deepSleep(nextSleepUs());
   }
-  // Preserve the deadline even if Up (or a held AI after a capped recording)
-  // delays entry to sleep. AI remains responsive while Up is held.
-  while (digitalRead(stickyPower::kPinUpButton) == LOW || button.isDown()) {
-    if (idleButton()) return;
-    delay(kPollMs);
-  }
-  if (idleButton()) return;
-  if (!waitPanel()) return;
-  logScreen("dashboard", Display::Screen::Dashboard);
-  logScreen("dashboard status", Display::Screen::Stale);
-  Serial1.printf("  %s; panel startup %lu ms, display stack unused %lu bytes\n",
-                 outcomeName(lastOutcome), static_cast<unsigned long>(g_panelUpMs),
-                 static_cast<unsigned long>(display.stackUnusedBytes()));
-  Serial1.printf("  sleeping; dashboard timer in %llu ms\n",
-                 static_cast<unsigned long long>(nextSleepUs() / 1000));
-  dashboard.close();
-  wifi.end();
-  Serial1.flush();
-  stickyPower::deepSleep(nextSleepUs());
 }
 
 }  // namespace
@@ -876,16 +1001,26 @@ void setup() {
   g_entryUs = esp_timer_get_time();
   stickyPower::holdLatch();
   stickyPower::enableUpWake();
+  stickyPower::enableDownWake();
   button.begin(g_entryUs);
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   coldScreen = !stickyPower::wokeFromDeepSleep();
-  if (coldScreen) dashboardDeadlineTicks = 0;
+  reminders::begin(coldScreen);
+  if (coldScreen) { dashboardDeadlineTicks = 0; shownReminder = 0; }
+  const uint64_t wakeButtons = stickyPower::wokeFromDeepSleep() &&
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 ? esp_sleep_get_ext1_wakeup_status() : 0;
+  const bool unreadWake = reminders::state().current() >= 0;
+  if (unreadWake && wakeButtons) {
+    reminders::state().read();
+    reminderButtons.armed = false;
+    aiArmed = false;
+  }
   const bool preferenceLoaded = silentMode::load();
   if (!preferenceLoaded) Serial1.println("  sound preference unreadable; muted");
   const bool upWake = stickyPower::wokeFromDeepSleep() &&
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
       (esp_sleep_get_ext1_wakeup_status() & (1ULL << stickyPower::kPinUpButton));
-  if (upWake) {
+  if (upWake && !unreadWake && !reminders::due()) {
     if (!preferenceLoaded || !silentMode::toggle())
       Serial1.println("  silent mode could not be saved; unchanged");
     Serial1.printf("  silent mode: %s\n", silentMode::enabled() ? "on" : "off");
@@ -900,7 +1035,11 @@ void setup() {
   }
   Serial1.printf("wake %s, reset %s\n", stickyPower::wakeupCauseName(), stickyPower::resetReasonName());
   // Keep this physical check in setup: exp_e1_firmware wraps it for its rig.
-  if (button.isDown()) runVoice(g_entryUs);
+  if (unreadWake || reminders::due()) {
+    showReminders();
+    if (dashboardDeadlineTicks > rtc_time_get()) idlePhase = IdlePhase::Sleep;
+  }
+  else if (button.isDown()) runVoice(g_entryUs);
   // Also fetch after a tap released before setup could start recording.
   else idlePhase = IdlePhase::Fetch;
 }

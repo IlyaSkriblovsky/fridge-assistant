@@ -64,7 +64,7 @@ class Display {
 
   // Every screen, and the pre-clear -- which is the record's index as well.
   enum class Screen : uint8_t { Clear, Listening, Working, Answer, Error, Silent,
-                                Sensors, Dashboard, Stale, Count };
+                                Sensors, Dashboard, Stale, Reminder, Count };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
@@ -112,6 +112,7 @@ class Display {
   void working();
   void silentIndicator();
   void answer(const char* text);
+  void reminder(const char* text);
   void error(const char* title, const char* detail = nullptr);
 
   // Blocks until nothing is waiting and the panel is not refreshing, up to

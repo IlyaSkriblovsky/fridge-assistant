@@ -106,15 +106,19 @@ full-plane shadow-prime initialization and known previous indicator pixels.
 
 PNG transport was accepted on the device on 2026-09-23. The awake-wait choice
 is tracked in [D11](deferred.md). Measurements come after the dashboard design;
-no energy advantage of remaining awake has been established. Offline reminder
-storage and alarms are a separate future feature, not part of this plan.
+no energy advantage of remaining awake has been established. Offline reminder storage and alarms are implemented as a separate controller
+beside the dashboard worker; hardware acceptance remains pending.
 
 The agreed one-shot reminder plan (2026-09-24) is in
 [timers-reminders.md](../../server/docs/use-cases/timers-reminders.md).
 It covers up to ten active reminders, offline firing, unread notification
 ordering, all three buttons, alarms that bypass silent mode, and interruption
-of unfinished audio uploads. It is not implemented yet; the behavior described
-elsewhere in this vision remains the current behavior until that work lands.
+of unfinished audio uploads. It is implemented in both parts; battery-powered hardware acceptance is pending.
+Unread notifications take priority over the idle flow described above. Down
+(GPIO6) now wakes the device as well; any button acknowledges only the current
+notification, with a stable release required before the next action. Reminder
+alarms bypass silent mode. Interrupted voice capture is labelled explicitly;
+a committed request always keeps its complete ten-second result dwell.
 
 ## Decisions
 

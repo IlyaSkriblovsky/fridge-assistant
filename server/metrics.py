@@ -22,6 +22,8 @@ def initialize() -> None:
     path = Path(os.environ.get("DATABASE_PATH", "data/dashboard.sqlite3"))
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect()) as db, db:
+        import reminders
+        reminders.initialize(db)
         db.execute("""CREATE TABLE IF NOT EXISTS metrics (
             key TEXT PRIMARY KEY, value INTEGER NOT NULL, updated_at REAL NOT NULL
         )""")

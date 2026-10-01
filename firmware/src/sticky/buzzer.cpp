@@ -43,8 +43,9 @@ void park() {
 
 }  // namespace
 
-void stickyBuzzer::play(const Note* notes, size_t count) {
-  if (silentMode::enabled() || notes == nullptr || count == 0) return;
+static void playNotes(const stickyBuzzer::Note* notes, size_t count) {
+  using namespace stickyBuzzer;
+  if (notes == nullptr || count == 0) return;
 
   // Attached once for the whole pattern; re-attaching between notes would put a
   // pad glitch into every gap. The attach frequency is irrelevant -- the first
@@ -66,3 +67,12 @@ void stickyBuzzer::taken() { play(kTaken); }
 void stickyBuzzer::answer() { play(kAnswer); }
 
 void stickyBuzzer::error() { play(kError); }
+
+void stickyBuzzer::play(const Note* notes, size_t count) {
+  if (!silentMode::enabled()) playNotes(notes, count);
+}
+void stickyBuzzer::reminder() {
+  // Initial pattern, awaiting audibility acceptance on battery.
+  const Note alarm[] = {{2500, 200}, {0, 120}, {2500, 200}, {0, 120}, {3000, 350}};
+  playNotes(alarm, sizeof(alarm) / sizeof(alarm[0]));
+}
