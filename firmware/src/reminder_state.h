@@ -28,7 +28,22 @@ inline bool later(const Item& a, const Item& b) {
   return a.due != b.due ? a.due > b.due :
       a.created != b.created ? a.created > b.created : a.id > b.id;
 }
+// Raw RTC ticks keep repeats independent of server wall-clock adjustments.
+struct Alarm {
+  static constexpr uint64_t kIntervalUs = 180000000;
+  static constexpr unsigned kLimit = 5;
+  unsigned count = 0;
+  uint64_t nextTicks = 0;
+  bool poll(bool fresh, uint64_t now, uint64_t intervalTicks) {
+    if (fresh) count = 0;
+    else if (!nextTicks || now < nextTicks) return false;
+    ++count;
+    nextTicks = count < kLimit ? now + intervalTicks : 0;
+    return true;
+  }
+};
 struct State {
+  Alarm alarm;
   Item items[kLimit] = {};
   size_t count = 0;
   int64_t pending[kLimit] = {};
@@ -53,6 +68,7 @@ struct State {
       for (size_t j = 0; j < count; ++j)
         if (items[j].id == added.id) added.fired = items[j].fired;
     }
+    if (next.current() >= 0) next.alarm = alarm;
     *this = next;
     return true;
   }
@@ -78,6 +94,7 @@ struct State {
     pending[pendingCount++] = items[index].id;
     for (size_t i = index + 1; i < count; ++i) items[i - 1] = items[i];
     --count;
+    if (current() < 0) alarm = Alarm{};
     return true;
   }
   int64_t nextDue() const {

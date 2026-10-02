@@ -7,6 +7,8 @@ void begin(bool cold);
 reminder::State& state();
 int64_t nowMs();
 bool due();
+// Consume one new or repeated alarm using the retained RTC deadline.
+bool notification(bool fresh);
 uint64_t sleepUs(uint64_t other);
 bool accept(JsonVariantConst json, uint64_t receivedTicks, int64_t ageMs);
 // Independent bounded worker; polled by the orchestrator alongside dashboard.

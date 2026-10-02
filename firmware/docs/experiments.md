@@ -25,6 +25,8 @@ universal timing guarantees. Current architecture is in
 | [E15](experiments/e15-notification-melodies.md) | Preferred melody of full-length trills | Measured 2026-09-25 | 0/+2/0/+2 won 5/5 round robin and 4:1 final; 1.43 s phrase |
 | [E16](experiments/e16-long-melodies.md) | Preferred eight-element notification melody | Rejected by user after computer listening | Returned to E15 motif, requesting three repetitions with pauses |
 
+| [E17](experiments/e17-rtttl-console.md) | RTTTL ringtone and octave listening on the device | Built/flashed; user selection 2026-10-02 | DeskPhon at octave 6 selected through live USB listening |
+
 ## Recording an experiment
 
 Keep one file per experiment: conclusion and status first, then the question,

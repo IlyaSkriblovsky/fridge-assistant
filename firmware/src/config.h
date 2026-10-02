@@ -7,6 +7,10 @@
 
 namespace config {
 
+// One complete notification, including its internal repeat and pause.
+// Replace this valid RTTTL string to change the ringtone; no extra loops.
+constexpr const char* kNotificationRtttl = "DeskPhon:d=8,o=6,b=500:c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f";
+
 // POST target for the recording: secrets::kBackendBaseUrl + this path,
 // Content-Type audio/wav.
 constexpr const char* kAudioPath = "/audio";

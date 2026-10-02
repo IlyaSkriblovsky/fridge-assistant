@@ -162,3 +162,25 @@ async def test_fixed_anchor_across_model_rounds(gemini, monkeypatch, zone, local
     rows = reminders.snapshot()['active']
     assert rows[0]['due_at_ms'] == rows[1]['due_at_ms'] == int(anchor.timestamp() * 1000) + 300000
     assert all(f'{local_time} ({zone})' in instruction for instruction in seen)
+
+
+@pytest.mark.parametrize(('source', 'expected'), [
+    ('  проверить USB  ', 'Проверить USB'),
+    ('buy USB cable', 'Buy USB cable'),
+    ('νερό', 'Νερό'),
+    ('5 минут — проверить духовку', '5 минут — проверить духовку'),
+    (' «проверить духовку» ', '«проверить духовку»'),
+    ('USB', 'USB'),
+])
+def test_text_initial_uppercase(source, expected):
+    result = reminders.create(source, amount=1, unit='minutes')
+    assert result['text'] == expected
+    assert reminders.snapshot()['active'][0]['text'] == expected
+    assert reminders.list_active()['reminders'][0]['text'] == expected
+
+
+def test_uppercase_utf8_expansion_limit():
+    # U+0149 uppercases to U+02BC plus N: two bytes become three.
+    assert 'error' in reminders.create('ŉ' + 'a' * 238, amount=1, unit='minutes')
+    result = reminders.create('ŉ' + 'a' * 237, amount=1, unit='minutes')
+    assert len(result['text'].encode('utf-8')) == 240

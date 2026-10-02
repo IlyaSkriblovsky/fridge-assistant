@@ -3,6 +3,7 @@
 #include "reminder_json.h"
 #include <string>
 #include "text.h"
+#include "reminder_layout.h"
 #include "fonts/fonts.h"
 
 void setUp() {}
@@ -125,15 +126,69 @@ void upload_race_and_full_text() {
   // face; normal reminders use the largest face that fits.
   std::string text(240, 'W');
   text += "\n\nГолосовой запрос прерван";
-  const int lines = textWrapLines(fontFreeSans12, text.c_str(), 1, 720);
-  TEST_ASSERT_LESS_OR_EQUAL(400, (lines - 1) * fontFreeSans12.yAdvance + textBoxHeight(fontFreeSans12, 1));
+  const int lines = textWrapLines(fontFreeSans12, text.c_str(), 1, reminderLayout::kWidth);
+  TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kHeight, (lines - 1) * fontFreeSans12.yAdvance + textBoxHeight(fontFreeSans12, 1));
   TEST_ASSERT_FALSE(reminder::validText("a\nb"));
   TEST_ASSERT_FALSE(reminder::validText("\xc0\x80"));
   TEST_ASSERT_FALSE(reminder::validText("\xed\xa0\x80"));
   TEST_ASSERT_TRUE(reminder::validText("Фильтр — νερό"));
 }
+void repeat_series() {
+  reminder::State state;
+  auto s = snapshot(2);
+  state.apply(s);
+  state.fire(2000);
+  TEST_ASSERT_TRUE(state.alarm.poll(true, 100, 180));
+  TEST_ASSERT_FALSE(state.alarm.poll(false, 279, 180));
+  // A successful sync with a different server clock must preserve raw ticks.
+  s.serverMs += 100000;
+  state.apply(s);
+  TEST_ASSERT_EQUAL(280, state.alarm.nextTicks);
+  auto retained = state; // RTC state survives deep sleep verbatim.
+  for (int i = 1; i < 5; ++i)
+    TEST_ASSERT_TRUE(retained.alarm.poll(false, 100 + i * 180, 180));
+  TEST_ASSERT_FALSE(retained.alarm.poll(false, 10000, 180));
+  TEST_ASSERT_EQUAL(5, retained.alarm.count);
+  // New event restarts an exhausted series, even at an overdue repeat.
+  TEST_ASSERT_TRUE(retained.fire(3000));
+  TEST_ASSERT_TRUE(retained.alarm.poll(true, 10000, 180));
+  TEST_ASSERT_EQUAL(1, retained.alarm.count);
+  retained.read();
+  TEST_ASSERT_EQUAL(10180, retained.alarm.nextTicks);
+  TEST_ASSERT_TRUE(retained.alarm.poll(false, 20000, 180));
+  TEST_ASSERT_EQUAL(20180, retained.alarm.nextTicks);
+  TEST_ASSERT_FALSE(retained.alarm.poll(false, 20000, 180));
+  retained.read();
+  TEST_ASSERT_EQUAL(0, retained.alarm.nextTicks);
+  TEST_ASSERT_EQUAL(0, retained.alarm.count);
+  // Cancellation clears the series too, but future reminders remain.
+  s.version++; s.items[0] = s.items[1]; s.count = 1;
+  state.apply(s);
+  TEST_ASSERT_EQUAL(0, state.alarm.nextTicks);
+  TEST_ASSERT_EQUAL(0, state.alarm.count);
+}
+void reminder_layout_bounds() {
+  const std::string samples[] = {"Яйца", "Проверить духовку и выключить свет",
+    std::string(240, 'W') + "\n\nГолосовой запрос прерван"};
+  for (const auto& text : samples) {
+    const auto box = reminderLayout::measure(text.c_str());
+    TEST_ASSERT_GREATER_OR_EQUAL(reminderLayout::kTop, box.y);
+    TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kTop + reminderLayout::kHeight,
+                              box.y + box.height);
+    Seeed_GFX gfx(800, 480);
+    reminderLayout::draw(gfx, text.c_str());
+    for (int y = 0; y < 480; ++y)
+      for (int x = 0; x < 800; ++x)
+        if (gfx.px[y * 800 + x] == TFT_BLACK) {
+          TEST_ASSERT_TRUE(x >= 40 && x < 760);
+          TEST_ASSERT_TRUE(y >= reminderLayout::kTop && y < 470);
+        }
+  }
+}
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(repeat_series);
+  RUN_TEST(reminder_layout_bounds);
   RUN_TEST(sequence_and_offline_read);
   RUN_TEST(simultaneous_order_and_cancellation);
   RUN_TEST(stale_and_queue_capacity);

@@ -182,15 +182,31 @@ partials, while physical image quality still needs a device check.
 
 ## Notification sound
 
-`stickyBuzzer::notification()` provides the E15-selected 0/+2/0/+2 melody:
-four full trills of eight 40 ms notes, alternating 3550/4150 Hz at offset 0
-and 3985/4658 Hz at +2 semitones. There are 50 ms gaps between elements.
-The user-selected arrangement repeats the phrase three times with 500 ms
-between phrases (the pause is a design choice), for 5290 ms nominal total.
-Reminder groups call it once, bypassing silent mode; ordinary voice cues
-remain muted in silent mode. Playback blocks and leaves GPIO48 detached and low.
-The three-repeat
-arrangement still needs device listening acceptance.
+`stickyBuzzer::notification()` plays the complete `config::kNotificationRtttl`
+string once with [PlayRtttl](https://github.com/ArminJo/PlayRtttl), pinned to
+commit `7f13d04d7803b937d102e725c0e41cd8bb95bd77` (2.2.0). Replace that valid
+RTTTL string to change the ringtone. The melody includes its own repeats and
+rests; no additional phrase loops or transposition are applied in production.
+The Ericcson test fixture has 48 notes (B4/D5, D5/F5, F5/A5), two rests and
+about 3030 ms duration. The user selected DeskPhon at octave 6 through E17
+(2026-10-02); it alternates approximately 1108/1397 Hz notes.
+
+The ESP32 path uses LEDC. Local header-scoped adapters route both notes and
+rests to the already attached GPIO48: upstream incorrectly sends rests to
+channel number 0, which Arduino 3 interprets as GPIO0. Completion also uses
+synchronous LEDC silence instead of asynchronous `noTone()`. The blocking call
+finishes the last note, detaches LEDC and parks the pin low before sleep.
+Library sources in `.pio/libdeps/` are not modified.
+
+Reminder groups play it initially and up to four more times at three-minute
+intervals, bypassing silent mode; ordinary voice cues retain their patterns
+and silent-mode behavior. The shared `startRtttl`/`pollRtttl`/`stopRtttl` API also serves E17's live USB
+console, with validated input and octave shifts. Production notification calls
+this same player to completion. Host tests execute the real buzzer module and library
+with fake GPIO/time, checking pitches, rests, total duration, completion,
+repeat calls, mute bypass and failed attachment. The configured DeskPhon
+ringtone is user-selected after device listening; three-minute repeat checks
+remain pending.
 
 ## Silent mode and indicator state
 
@@ -284,16 +300,25 @@ server processing time for audio; exact one-way latency is unknowable here.
 
 Idle polling fires due groups and displays the maximum `(due, created, id)`.
 The reminder screen chooses 24/18/12 pt without truncating the bounded text.
-One group sounds once, bypassing silent mode. Background dashboard work stays
+A group starts a shared five-signal series, bypassing silent mode. Each new group
+restarts it; partial reads preserve it, and reading/cancelling all fired items
+clears it. The retained count and raw RTC deadline survive sleep and snapshot
+merges, independent of server-time corrections. A delayed repeat plays once and
+schedules from its actual start; missed intervals never cause a burst. Repeat-only
+wakes need neither screen redraw nor network access. Background dashboard work stays
 active without replacing an unread notification. AI, Up and Down acknowledge
 one item; a shared stable-release gate prevents hold-through into another read,
 recording or a silent-mode toggle. After the final read, a valid downloaded
 frame is restored, otherwise a dashboard fetch starts immediately, without an
 intermediate empty-notifications screen. If that fetch fails, the read text is
 erased and the next scheduled update retries. Single-line notification text
-is centered horizontally; multiline text remains left-aligned.
-Down is also an ext1 wake source. Sleep uses the earlier dashboard deadline or
-unfired reminder; fired items never create an immediate timer wake.
+and a 56x56 clock to its left are centered together; multiline text remains
+left-aligned. A 24 px gap separates the clock and text. The 640x352 text area
+starts at y=56; the FreeSans12 footer at y=432 says «нажмите любую кнопку».
+The same renderer is exercised by host layout checks.
+Down is also an ext1 wake source. Sleep uses the earliest dashboard, unfired
+reminder or repeat deadline.
+After the fifth signal no more repeat wakes are scheduled.
 
 The orchestrator passes the nearest reminder time to
 `VoiceRequest::armCancellation()`. The request uses that deadline without
@@ -308,9 +333,11 @@ reminders that accumulated during that wait sound as one group. An interrupted
 capture requires release before a new notification can be read.
 
 Host tests cover state/JSON validation, stale snapshots, lost acknowledgements,
-capacity, overdue recovery, ordering, offline reads, the shared button gate,
+capacity, overdue recovery, ordering, offline reads, repeat limits/restart/reset,
+retained deadlines across snapshot merges, the shared button gate,
 upload commitment arbitration and worst-width text layout. They do **not**
 prove GPIO/task timing or deep-sleep behavior. Pending device checks: each button,
 hold/bounce, simultaneous deadlines, alarm audibility in silent mode, interruption
 near the terminal write, full result dwell, cancellation of the shown reminder,
-offline read, battery-powered deep sleep and long-term clock error.
+offline read, battery-powered deep sleep and long-term clock error. The clock/footer layout is user-accepted. Ringtone listening and real
+three-minute repeat checks remain pending.

@@ -1,3 +1,4 @@
+#include "reminder_layout.h"
 #include "sticky/screen.h"
 
 #include <esp_attr.h>
@@ -271,23 +272,7 @@ bool StickyScreen::thinking() {
 void StickyScreen::reminder(const char* text) {
   if (!_ready) return;
   startFrame();
-  // The bounded reminder is always shown whole; step down the face instead
-  // of using the voice answer's ellipsis. 240 bytes plus the interruption note
-  // fit even with the widest glyphs at 12 pt.
-  const TextFace* faces[] = {&fontFreeSans24, &fontFreeSans18, &fontFreeSans12};
-  for (const auto* face : faces) {
-    const int lines = textWrapLines(*face, text, 1, 720);
-    const int height = (lines - 1) * face->yAdvance + textBoxHeight(*face, 1);
-    if (height <= 400) {
-      if (lines == 1) {
-        textDraw(_display, *face, text, (800 - textWidth(*face, text, 1)) / 2,
-                 (480 - height) / 2, 1);
-      } else {
-        textDrawWrapped(_display, *face, text, 40, (480 - height) / 2, 1, 720, lines);
-      }
-      break;
-    }
-  }
+  reminderLayout::draw(_display, text);
   refreshWhole();
 }
 

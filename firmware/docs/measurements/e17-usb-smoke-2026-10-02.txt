@@ -1,0 +1,39 @@
+RX ESP-ROM:esp32s3-20210327
+RX Build:Mar 27 2021
+RX rst:0x1 (POWERON),boot:0xa (SPI_FAST_FLASH_BOOT)
+RX SPIWP:0xee
+RX mode:DIO, clock div:1
+RX load:0x3fce2820,len:0xfb0
+RX load:0x403c8700,len:0xaf4
+RX load:0x403cb700,len:0x2e34
+RX entry 0x403c8898
+RX E17 READY — RTTTL console, 115200 baud. :help for commands
+TX :help
+RX RTTTL line plays; :repeat :stop :up :down :reset :help
+TX Broken:d=0:oops
+RX ERROR invalid standard RTTTL (d/o/b, lowercase notes, no spaces)
+TX Smoke:d=1,o=5,b=120:a
+RX PLAY octave +0: Smoke:d=1,o=5,b=120:a
+TX :stop
+RX STOP
+TX :up
+RX PLAY octave +1: Smoke:d=1,o=5,b=120:a
+TX :stop
+RX STOP
+TX :reset
+RX PLAY octave +0: Smoke:d=1,o=5,b=120:a
+TX :stop
+RX STOP
+TX Smoke:d=32,o=5,b=120:c,d,p
+RX PLAY octave +0: Smoke:d=32,o=5,b=120:c,d,p
+RX DONE
+TX :repeat
+RX PLAY octave +0: Smoke:d=32,o=5,b=120:c,d,p
+RX DONE
+TX :stop
+RX STOP
+TX DeskPhon:d=8,o=5,b=500:c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f
+RX PLAY octave +0: DeskPhon:d=8,o=5,b=500:c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f,1p.,c#,f,c#,f,c#,f,c#,f,c#,f,4p.,c#,f,c#,f,c#,f,c#,f,c#,f
+TX :stop
+RX STOP
+PASS: USB receive, validation, playback, stop, octave, completion, repeat
