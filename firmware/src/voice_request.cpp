@@ -1,4 +1,4 @@
-#include "backend.h"
+#include "voice_request.h"
 
 #include <ArduinoJson.h>
 #include <esp_http_client.h>
@@ -12,6 +12,8 @@
 #include <string>
 
 #include "config.h"
+#include "reminders.h"
+#include <soc/rtc.h>
 
 namespace {
 
@@ -24,11 +26,63 @@ uint32_t millisSince(int64_t fromUs) {
 
 }  // namespace
 
-Backend::Backend(const char* baseUrl, const char* token) : _baseUrl(baseUrl), _token(token) {}
+VoiceRequest::VoiceRequest(const char* baseUrl, const char* token)
+    : _baseUrl(baseUrl), _token(token),
+      _deadlineLock(xSemaphoreCreateMutexStatic(&_deadlineLockStorage)) {}
 
-Backend::~Backend() { close(); }
+VoiceRequest::~VoiceRequest() {
+  disarmCancellation();
+  close();
+  if (_deadlineTimer) esp_timer_delete(_deadlineTimer);
+  vSemaphoreDelete(_deadlineLock);
+}
 
-void Backend::endpoint(char* out, size_t size) const {
+bool VoiceRequest::armCancellation(int64_t deadlineUs, void (*onCancel)()) {
+  disarmCancellation();
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  _interrupted = false;
+  _gate = VoiceUploadGate{};
+  _deadlineUs = deadlineUs;
+  _onCancel = onCancel;
+  xSemaphoreGive(_deadlineLock);
+  if (!deadlineUs) return true;
+  if (!_deadlineTimer) {
+    esp_timer_create_args_t args{};
+    args.callback = deadlineReached;
+    args.arg = this;
+    args.name = "voice-cancel";
+    if (esp_timer_create(&args, &_deadlineTimer) != ESP_OK) return false;
+  }
+  const int64_t left = deadlineUs - esp_timer_get_time();
+  return esp_timer_start_once(_deadlineTimer, left > 0 ? left : 1) == ESP_OK;
+}
+
+void VoiceRequest::disarmCancellation() {
+  if (_deadlineTimer) esp_timer_stop(_deadlineTimer);
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  _gate.committed = true;
+  _deadlineUs = 0;
+  _onCancel = nullptr;
+  xSemaphoreGive(_deadlineLock);
+}
+
+void VoiceRequest::deadlineReached(void* context) {
+  static_cast<VoiceRequest*>(context)->cancelIfDue();
+}
+
+bool VoiceRequest::cancelIfDue() {
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  if (!_interrupted && _deadlineUs > 0 && esp_timer_get_time() >= _deadlineUs && _gate.interrupt()) {
+    _interrupted = true;
+    if (_onCancel) _onCancel();
+    if (_deadlineSocket >= 0) shutdown(_deadlineSocket, SHUT_RDWR);
+  }
+  const bool interrupted = _interrupted.load();
+  xSemaphoreGive(_deadlineLock);
+  return interrupted;
+}
+
+void VoiceRequest::endpoint(char* out, size_t size) const {
   // No base URL stays no URL rather than becoming a bare path, so that open()
   // can say what is missing instead of that the library would not take it.
   if (_baseUrl[0] == '\0') {
@@ -38,13 +92,13 @@ void Backend::endpoint(char* out, size_t size) const {
   snprintf(out, size, "%s%s", _baseUrl, config::kAudioPath);
 }
 
-bool Backend::open() {
+bool VoiceRequest::open() {
   char url[kMaxUrlChars];
   endpoint(url, sizeof(url));
   return open(url);
 }
 
-bool Backend::open(const char* url) {
+bool VoiceRequest::open(const char* url) {
   close();
 
   _ended = false;
@@ -78,6 +132,10 @@ bool Backend::open(const char* url) {
   cfg.url = url;
   cfg.method = HTTP_METHOD_POST;
   cfg.timeout_ms = static_cast<int>(config::kBackendConnectTimeoutMs);
+  if (_deadlineUs && !_gate.committed) {
+    const int64_t remaining = (_deadlineUs - esp_timer_get_time()) / 1000;
+    if (remaining < cfg.timeout_ms) cfg.timeout_ms = remaining > 0 ? remaining : 1;
+  }
   cfg.disable_auto_redirect = true;
 
   _client = esp_http_client_init(&cfg);
@@ -138,17 +196,23 @@ bool Backend::open(const char* url) {
   const int noDelay = 1;
   if (fd >= 0) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
 
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  _deadlineSocket = fd;
+  const bool interrupted = _interrupted.load();
+  xSemaphoreGive(_deadlineLock);
+  if (interrupted) { close(); return false; }
   _connectedUs = esp_timer_get_time();
   return true;
 }
 
-bool Backend::write(const uint8_t* data, size_t bytes) {
+bool VoiceRequest::write(const uint8_t* data, size_t bytes) {
   if (!streaming()) {
     if (_result == Result::Ok) finish(Result::NoServer, "write() with no request open");
     return false;
   }
 
   while (bytes > 0) {
+    if (cancelIfDue()) { close(); return false; }
     const size_t samples = bytes < kFrameBytes ? bytes : kFrameBytes;
 
     // <size in hex>\r\n<samples>\r\n, in one buffer and one write.
@@ -168,11 +232,22 @@ bool Backend::write(const uint8_t* data, size_t bytes) {
   return true;
 }
 
-bool Backend::end() {
+bool VoiceRequest::end() {
   if (!streaming()) {
     if (_result == Result::Ok) finish(Result::NoServer, "end() with no request open");
     return false;
   }
+  // This check is the commit boundary: once the terminal write starts we
+  // never claim cancellation, even if its result is uncertain.
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  const bool interrupted = !_gate.commit(_interrupted.load() ||
+      (_deadlineUs && esp_timer_get_time() >= _deadlineUs));
+  if (interrupted && !_interrupted) {
+    _interrupted = true;
+    if (_onCancel) _onCancel();
+  }
+  xSemaphoreGive(_deadlineLock);
+  if (interrupted) { close(); return false; }
   if (!send(reinterpret_cast<const uint8_t*>(kLastChunk), sizeof(kLastChunk) - 1)) return false;
 
   _ended = true;
@@ -180,7 +255,7 @@ bool Backend::end() {
   return true;
 }
 
-bool Backend::send(const uint8_t* data, size_t bytes) {
+bool VoiceRequest::send(const uint8_t* data, size_t bytes) {
   const int64_t startUs = esp_timer_get_time();
   const int written =
       esp_http_client_write(_client, reinterpret_cast<const char*>(data), static_cast<int>(bytes));
@@ -207,7 +282,7 @@ bool Backend::send(const uint8_t* data, size_t bytes) {
   return false;
 }
 
-Backend::Result Backend::receive() {
+VoiceRequest::Result VoiceRequest::receive() {
   if (_client == nullptr || !_ended) {
     if (_result != Result::Ok) return _result;
     return finish(Result::NoServer, "receive() with no finished request");
@@ -293,17 +368,28 @@ Backend::Result Backend::receive() {
   const char* text = doc["response"].as<const char*>();
   if (text == nullptr) return finish(Result::BadResponse, "no \"response\" string in the reply");
 
+  const int64_t exchangeMs = (esp_timer_get_time() - _endUs) / 1000;
+  const int64_t generatedMs = doc["reminders"]["server_time_ms"] | int64_t(0);
+  const int64_t receivedMs = doc["reminders"]["request_received_ms"] | int64_t(0);
+  if (receivedMs > 0 && generatedMs >= receivedMs) {
+    // Remove server/LLM time from the RTT before estimating one-way transit.
+    const int64_t transit = exchangeMs - (generatedMs - receivedMs);
+    reminders::accept(doc["reminders"], rtc_time_get(), transit > 0 ? transit / 2 : 0);
+  }
   snprintf(_answer, sizeof(_answer), "%s", text);
   return finish(Result::Ok, "");
 }
 
-void Backend::close() {
+void VoiceRequest::close() {
   if (_client == nullptr) return;
+  xSemaphoreTake(_deadlineLock, portMAX_DELAY);
+  _deadlineSocket = -1;
+  xSemaphoreGive(_deadlineLock);
   esp_http_client_cleanup(_client);
   _client = nullptr;
 }
 
-Backend::Result Backend::finish(Result result, const char* format, ...) {
+VoiceRequest::Result VoiceRequest::finish(Result result, const char* format, ...) {
   _doneUs = esp_timer_get_time();
   _result = result;
 

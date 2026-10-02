@@ -129,6 +129,7 @@ class StickyScreen {
   // block, left-aligned: a ragged right edge reads as text, and a centred one
   // reads as a poster. Partial, over the whole panel.
   void answer(const char* text);
+  void reminder(const char* text);
 
   // Thinking -> error. The title is one of the vision's error table; detail is
   // whatever narrows it down -- a status code -- and may be null or empty.

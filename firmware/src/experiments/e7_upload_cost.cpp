@@ -33,11 +33,11 @@
 //                  question; uploads 2 and 3 are the same upload on a link that
 //                  has settled.
 //   the firmware's own path
-//                  upload 4 goes through Backend, unchanged. It anchors the
+//                  upload 4 goes through VoiceRequest, unchanged. It anchors the
 //                  rig's four clocks to the one number S7 reported, so the
 //                  finding transfers to the firmware rather than to the rig.
 //                  The result in docs/experiments.md was taken through
-//                  HTTPClient; Backend is a chunked esp_http_client request,
+//                  HTTPClient; VoiceRequest is a chunked esp_http_client request,
 //                  and the payload goes up through it as a body of one write.
 //
 // **The connects that never arrive are the other half of the question.** Four of
@@ -68,7 +68,7 @@
 #include "sticky/buzzer.h"
 #include "sticky/power.h"
 
-#include "backend.h"
+#include "voice_request.h"
 #include "recording.h"
 #include "wifi_link.h"
 
@@ -124,7 +124,7 @@ struct Row {
   uint8_t cycle;
   uint8_t index;   // 1..kUploadsPerWake
   bool sleepOff;   // this wake ran with WiFi.setSleep(false)
-  bool viaHttp;    // upload 4: the firmware's own Backend
+  bool viaHttp;    // upload 4: the firmware's own VoiceRequest
   uint16_t connectMs;
   uint16_t retryMs;  // a second connect, after the first gave up; 0 if not needed
   uint16_t headerMs;
@@ -146,7 +146,7 @@ RTC_DATA_ATTR Row g_log[kLogRows];
 
 WifiLink wifi;
 Recording audio;
-Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
+VoiceRequest voiceRequest(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 
 uint16_t g_chunkMs[kMaxChunks];
 uint32_t g_chunkCount = 0;
@@ -338,7 +338,7 @@ Row postBare(const uint8_t* body, size_t bytes) {
 }
 
 // Upload 4: the firmware's own path, so the four clocks above have something to
-// be checked against. Backend reports two numbers rather than six, which
+// be checked against. VoiceRequest reports two numbers rather than six, which
 // is the whole reason this experiment exists.
 Row postViaFirmware(const uint8_t* body, size_t bytes) {
   Row row = {};
@@ -346,23 +346,23 @@ Row postViaFirmware(const uint8_t* body, size_t bytes) {
   row.rssi = static_cast<int8_t>(WiFi.RSSI());
   g_chunkCount = 0;
 
-  const bool sent = backend.open() && backend.write(body, bytes) && backend.end();
-  const Backend::Result result = sent ? backend.receive() : backend.result();
-  row.totalMs = static_cast<uint16_t>((backend.doneUs() - backend.openUs()) / 1000);
-  if (backend.firstByteUs() != 0) {
-    row.waitMs = static_cast<uint16_t>((backend.firstByteUs() - backend.openUs()) / 1000);
+  const bool sent = voiceRequest.open() && voiceRequest.write(body, bytes) && voiceRequest.end();
+  const VoiceRequest::Result result = sent ? voiceRequest.receive() : voiceRequest.result();
+  row.totalMs = static_cast<uint16_t>((voiceRequest.doneUs() - voiceRequest.openUs()) / 1000);
+  if (voiceRequest.firstByteUs() != 0) {
+    row.waitMs = static_cast<uint16_t>((voiceRequest.firstByteUs() - voiceRequest.openUs()) / 1000);
   }
-  row.status = static_cast<uint16_t>(backend.status());
+  row.status = static_cast<uint16_t>(voiceRequest.status());
 
   switch (result) {
-    case Backend::Result::Ok: row.outcome = kOk; break;
-    case Backend::Result::NoServer: row.outcome = kConnectFailed; break;
-    case Backend::Result::ServerError: row.outcome = kBadStatus; break;
-    case Backend::Result::BadResponse: row.outcome = kBadStatus; break;
-    case Backend::Result::TimedOut: row.outcome = kNoAnswer; break;
+    case VoiceRequest::Result::Ok: row.outcome = kOk; break;
+    case VoiceRequest::Result::NoServer: row.outcome = kConnectFailed; break;
+    case VoiceRequest::Result::ServerError: row.outcome = kBadStatus; break;
+    case VoiceRequest::Result::BadResponse: row.outcome = kBadStatus; break;
+    case VoiceRequest::Result::TimedOut: row.outcome = kNoAnswer; break;
   }
-  if (result != Backend::Result::Ok) {
-    Serial1.printf("       Backend: %s\n", backend.lastError());
+  if (result != VoiceRequest::Result::Ok) {
+    Serial1.printf("       VoiceRequest: %s\n", voiceRequest.lastError());
   }
   return row;
 }
@@ -389,7 +389,7 @@ void describe(const Row& row, size_t bytes) {
                             : 0;
 
   if (row.viaHttp) {
-    Serial1.printf("  up %u  Backend: %lu ms to the first byte, %lu ms in all -> %u (%s)\n",
+    Serial1.printf("  up %u  VoiceRequest: %lu ms to the first byte, %lu ms in all -> %u (%s)\n",
                    row.index, static_cast<unsigned long>(row.waitMs),
                    static_cast<unsigned long>(row.totalMs), row.status, outcomeName(row.outcome));
     return;

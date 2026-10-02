@@ -48,8 +48,8 @@ void error();   // one longer note, lower than either of the pairs
 
 // Three 0/+2/0/+2 phrases, each four full 320 ms trills with 50 ms gaps.
 // 500 ms between phrases; nominal total 5290 ms. Blocks until complete,
-// respects silent mode, and parks the pin as play() does. Not yet wired to
-// notification events; callers must allow for the blocking duration.
+// bypasses silent mode for reminder alarms and parks the pin as play() does.
+// Callers must allow for the blocking duration.
 void notification();
 
 }  // namespace stickyBuzzer

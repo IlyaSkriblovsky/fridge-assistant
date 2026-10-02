@@ -28,6 +28,8 @@ constexpr int kPinLock = 46;      // PWR_LOCK
 constexpr int kPinUpButton = 5;
 // Opt-in so measurement rigs retain their AI-only wake behavior.
 void enableUpWake();
+constexpr int kPinDownButton = 6;
+void enableDownWake();
 // Wait indefinitely for a stable release; a held wake pin would loop on wake.
 void waitForWakeButtonsReleased();
 

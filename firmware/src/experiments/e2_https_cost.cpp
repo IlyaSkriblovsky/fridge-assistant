@@ -1,4 +1,4 @@
-// E2: identical production Backend requests over HTTP and verified HTTPS.
+// E2: identical production VoiceRequest requests over HTTP and verified HTTPS.
 // Link wrapping adds trust only to this environment; production is unchanged.
 #include <Arduino.h>
 #include <WiFi.h>
@@ -8,7 +8,7 @@
 #include <esp_timer.h>
 #include <time.h>
 
-#include "backend.h"
+#include "voice_request.h"
 #include "recording.h"
 #include "secrets.h"
 #include "sticky/power.h"
@@ -21,7 +21,7 @@ RTC_DATA_ATTR unsigned cycle = 0;
 int64_t transportConnectedUs = 0;
 Recording audio;
 WifiLink wifi;
-Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
+VoiceRequest voiceRequest(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 
 esp_err_t event(esp_http_client_event_t* e) {
   if (e->event_id == HTTP_EVENT_ON_CONNECTED)
@@ -99,24 +99,24 @@ void setup() {
 
   const unsigned heapBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   heap_caps_monitor_local_minimum_free_size_start();
-  bool ok = backend.open(url);
+  bool ok = voiceRequest.open(url);
   const int64_t uploadStart = esp_timer_get_time();
   int64_t releaseUs = uploadStart;
-  if (ok && !streamed) ok = backend.write(audio.wav(), audio.wavBytes());
+  if (ok && !streamed) ok = voiceRequest.write(audio.wav(), audio.wavBytes());
   if (ok && streamed) {
-    ok = backend.write(audio.wav(), Recording::kHeaderBytes);
+    ok = voiceRequest.write(audio.wav(), Recording::kHeaderBytes);
     // 4 seconds of generated PCM at the actual 512 bytes / 16 ms cadence.
     for (unsigned n = 0; ok && n < 250; ++n) {
       const int64_t due = uploadStart + (n + 1) * 16000LL;
       while (esp_timer_get_time() < due) delay(1);
-      ok = backend.write(audio.wav() + Recording::kHeaderBytes + n * 512, 512);
+      ok = voiceRequest.write(audio.wav() + Recording::kHeaderBytes + n * 512, 512);
     }
     releaseUs = uploadStart + 4000000;
   } else {
     releaseUs = esp_timer_get_time();
   }
-  if (ok) ok = backend.end();
-  if (ok) backend.receive(); // No chirp or display before reading headers.
+  if (ok) ok = voiceRequest.end();
+  if (ok) voiceRequest.receive(); // No chirp or display before reading headers.
   const unsigned heapMin = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   heap_caps_monitor_local_minimum_free_size_stop();
   const auto delta = [](int64_t end, int64_t start) -> long long {
@@ -124,14 +124,14 @@ void setup() {
   };
   Serial1.printf("E2 ROW,%u,%s,%s,%d,%u,%lld,%lld,%lld,%lld,%lld,%lu,%u,%u\n",
       cycle, tls ? "https" : "http", streamed ? "stream" : "tiny",
-      backend.status(), (unsigned)backend.sentBytes(),
-      delta(transportConnectedUs, backend.openUs()),
-      delta(backend.connectedUs(), backend.openUs()),
-      delta(backend.firstByteUs(), backend.openUs()),
-      delta(backend.firstByteUs(), backend.endUs()),
-      delta(backend.firstByteUs(), releaseUs),
-      (unsigned long)backend.longestWriteUs(), heapBefore, heapMin);
-  if (backend.status() != 500) Serial1.printf("E2 ERROR %s\n", backend.lastError());
+      voiceRequest.status(), (unsigned)voiceRequest.sentBytes(),
+      delta(transportConnectedUs, voiceRequest.openUs()),
+      delta(voiceRequest.connectedUs(), voiceRequest.openUs()),
+      delta(voiceRequest.firstByteUs(), voiceRequest.openUs()),
+      delta(voiceRequest.firstByteUs(), voiceRequest.endUs()),
+      delta(voiceRequest.firstByteUs(), releaseUs),
+      (unsigned long)voiceRequest.longestWriteUs(), heapBefore, heapMin);
+  if (voiceRequest.status() != 500) Serial1.printf("E2 ERROR %s\n", voiceRequest.lastError());
   ++cycle;
   if (cycle == kCycles) Serial1.println("E2 DONE");
   Serial1.flush();

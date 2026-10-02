@@ -1,9 +1,7 @@
 name: firmware
 
-# Builds every PlatformIO environment: the firmware and each experiment rig. A
-# rig that no longer builds cannot be re-run when its experiment has to be, and
-# exp_e1_firmware wraps main.cpp's functions by mangled name, so a rename there
-# fails its link. Host tests run separately; nothing is flashed.
+# Builds the production firmware only. Experiment rigs are built locally when
+# needed. Host tests run separately; nothing is flashed.
 
 on:
   push:
@@ -51,18 +49,8 @@ jobs:
       - name: Stand in for the gitignored secrets.h
         run: cp src/secrets.example.h src/secrets.h
 
-      # default_envs names only the firmware; this overrides it with every
-      # embedded environment, so a new rig is built too. Native runs above.
-      - name: List embedded environments
-        run: |
-          {
-            echo 'PLATFORMIO_DEFAULT_ENVS<<EOF'
-            grep -oP '^\[env:\K[^]]+' platformio.ini | grep -v '^native$'
-            echo EOF
-          } >> "$GITHUB_ENV"
-
       - name: Install the platform and libraries
-        run: pio pkg install
+        run: pio pkg install -e reterminal_e1005
 
       # Seeed_GFX2 names four headers *_EPaper_* and includes all four as
       # *_ePaper_*. macOS finds them anyway; Linux does not. Upstream main is the
@@ -76,5 +64,5 @@ jobs:
             [ -e "$link" ] || ln -s "$name" "$link"
           done
 
-      - name: Build every environment
-        run: pio run
+      - name: Build production firmware
+        run: pio run -e reterminal_e1005

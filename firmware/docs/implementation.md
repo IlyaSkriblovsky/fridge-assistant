@@ -38,7 +38,7 @@ voice cycles without recursion.
    another question. Wait for the final display refresh before starting dwell.
 
 WiFi or upload failure during recording aborts the question. Error classification
-belongs to `Backend` and the orchestrator; the product error table is in the
+belongs to `VoiceRequest` and the orchestrator; the product error table is in the
 vision. Large diagnostic logs are emitted after the last chirp, because UART
 printing itself can add noticeable latency.
 
@@ -93,7 +93,7 @@ address is acquired, including renewal. Cache the network's DNS first so
 removing the override takes effect on the next wake. Installing it before DHCP
 would allow the ACK to overwrite it.
 
-[Backend](../src/backend.h) uses `esp_http_client` with explicit HTTP chunk
+[VoiceRequest](../src/voice_request.h) uses `esp_http_client` with explicit HTTP chunk
 framing and Bearer authentication. The response must be valid JSON containing
 string `response`. Connect, stalled-body and response budgets are separate;
 the 60-second response budget starts at the terminating chunk. Values and routes belong
@@ -187,8 +187,9 @@ four full trills of eight 40 ms notes, alternating 3550/4150 Hz at offset 0
 and 3985/4658 Hz at +2 semitones. There are 50 ms gaps between elements.
 The user-selected arrangement repeats the phrase three times with 500 ms
 between phrases (the pause is a design choice), for 5290 ms nominal total.
-It uses the existing blocking LEDC playback, respects silent mode, and leaves
-GPIO48 detached and low. No event currently calls it. The three-repeat
+Reminder groups call it once, bypassing silent mode; ordinary voice cues
+remain muted in silent mode. Playback blocks and leaves GPIO48 detached and low.
+The three-repeat
 arrangement still needs device listening acceptance.
 
 ## Silent mode and indicator state
@@ -239,6 +240,8 @@ file. Build/host success does not establish hardware acceptance.
 - The initial dashboard worked on the device; PNG was visually accepted on
   2026-09-23. The [PNG smoke log](measurements/dashboard-png-2026-09-23.log)
   proves download/decode/refresh/sleep, not energy or interruption latency.
+  The user confirmed the shopping count and today/tomorrow weather dashboard
+  works on the device (2026-10-01).
 - Latest tap routing, server-rendered sensor placement, battery timer cycles,
   AI interruption during fetch/dwell, failure recovery and deadline preservation
   across Up wakes need explicit coverage; earlier acceptance does not prove
@@ -252,6 +255,62 @@ file. Build/host success does not establish hardware acceptance.
   state is inferred here from checked-in code or a historical flash report.
 
 [Host tests](../test/README) cover text, recording, controller RAM, dashboard
-protocol/scheduling and PNG decoding. CI runs the native suite and builds every
-embedded environment with example credentials. These checks do not validate
+protocol/scheduling and PNG decoding. CI runs the native suite and builds only
+the production firmware with example credentials. Experiment rigs are built
+locally when needed. These checks do not validate
 physical peripherals, task timing, concurrent visibility or network behavior.
+
+## One-shot reminders
+
+`reminder_state.h` owns the fixed ten-item state and ten acknowledgement IDs;
+`reminder_json.h` validates complete snapshots before merging. `reminders.cpp`
+retains state, fired flags, version and a server-time/RTC-tick anchor in RTC
+memory. Cold boots discard this cache and recover via sync. Time is UTC epoch
+milliseconds; elapsed RTC ticks cover awake work and deep sleep. Equal-version
+snapshots with older server timestamps and all lower versions are rejected.
+Local reads win until explicitly acknowledged; fired flags survive snapshot
+replacement. Queue capacity is reserved for every accepted item. An audio
+snapshot that cannot fit alongside pending acknowledgements is rejected whole;
+the next sync drains those IDs and restores the current server state.
+
+An independent bounded worker POSTs `/sticky/reminders/sync` on each dashboard
+cycle, including startup and after voice. Display failure and PNG failure do
+not suppress JSON sync. Its result is applied only by the orchestrator. Pending
+reads added during the request remain queued unless explicitly acknowledged.
+Cancellation discards a response but keeps the acknowledgement queue. Reads
+have bounded timeouts; the worker owns its HTTP cleanup. The audio backend
+also accepts snapshots. Network age is estimated from half the RTT, excluding
+server processing time for audio; exact one-way latency is unknowable here.
+
+Idle polling fires due groups and displays the maximum `(due, created, id)`.
+The reminder screen chooses 24/18/12 pt without truncating the bounded text.
+One group sounds once, bypassing silent mode. Background dashboard work stays
+active without replacing an unread notification. AI, Up and Down acknowledge
+one item; a shared stable-release gate prevents hold-through into another read,
+recording or a silent-mode toggle. After the final read, a valid downloaded
+frame is restored, otherwise a dashboard fetch starts immediately, without an
+intermediate empty-notifications screen. If that fetch fails, the read text is
+erased and the next scheduled update retries. Single-line notification text
+is centered horizontally; multiline text remains left-aligned.
+Down is also an ext1 wake source. Sleep uses the earlier dashboard deadline or
+unfired reminder; fired items never create an immediate timer wake.
+
+The orchestrator passes the nearest reminder time to
+`VoiceRequest::armCancellation()`. The request uses that deadline without
+consulting reminder state; zero means no cancellation deadline. A one-shot ESP
+timer stops capture through the supplied callback and shuts down the established
+upload socket when the deadline expires. HTTP connect timeout is capped by
+the deadline. An object-owned static mutex protects socket lifetime and arbitrates interruption
+against starting the terminating chunk: after commitment no cancellation is
+claimed, including on an uncertain terminal write. The response/error completes
+its ten-second dwell from display completion before alarms are fired. All
+reminders that accumulated during that wait sound as one group. An interrupted
+capture requires release before a new notification can be read.
+
+Host tests cover state/JSON validation, stale snapshots, lost acknowledgements,
+capacity, overdue recovery, ordering, offline reads, the shared button gate,
+upload commitment arbitration and worst-width text layout. They do **not**
+prove GPIO/task timing or deep-sleep behavior. Pending device checks: each button,
+hold/bounce, simultaneous deadlines, alarm audibility in silent mode, interruption
+near the terminal write, full result dwell, cancellation of the shown reminder,
+offline read, battery-powered deep sleep and long-term clock error.

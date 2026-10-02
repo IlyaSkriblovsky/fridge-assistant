@@ -34,7 +34,7 @@
 // an offline Up wake) enters deep sleep, after the display finishes.
 //
 // The stale-lease rule, openRenewingStaleLease(), lives here because it spans
-// Backend and WifiLink and neither half can see it alone.
+// VoiceRequest and WifiLink and neither half can see it alone.
 
 #include <Arduino.h>
 #include <esp_timer.h>
@@ -43,6 +43,7 @@
 #include <soc/rtc.h>
 #include "config.h"
 #include "dashboard.h"
+#include "reminders.h"
 #include <stdio.h>
 
 #include "secrets.h"
@@ -52,7 +53,7 @@
 #include "sticky/mic.h"
 #include "sticky/power.h"
 
-#include "backend.h"
+#include "voice_request.h"
 #include "capture.h"
 #include "display.h"
 #include "recording.h"
@@ -77,7 +78,7 @@ constexpr uint32_t kPollMs = 10;
 // 16 ms, so an abort that is going to land has landed long before this.
 constexpr uint32_t kCaptureJoinMs = 500;
 
-// What the question came to. The first five are Backend's results, the rest are
+// What the question came to. The first five are VoiceRequest's results, the rest are
 // the ways one ends before there is anything to send.
 enum class Outcome : uint8_t {
   Answered,
@@ -97,7 +98,7 @@ Recording audio;
 Capture capture;
 WifiLink wifi;
 Display display;
-Backend backend(secrets::kBackendBaseUrl, secrets::kDeviceToken);
+VoiceRequest voiceRequest(secrets::kBackendBaseUrl, secrets::kDeviceToken);
 Dashboard dashboard;
 RTC_DATA_ATTR uint64_t dashboardDeadlineTicks = 0;
 enum class IdlePhase { Sleep, AfterVoice, Fetch };
@@ -106,6 +107,63 @@ Outcome lastOutcome = Outcome::Idle;
 bool recordingLogged = false;
 bool coldScreen = true;
 bool aiArmed = true;
+reminder::Buttons reminderButtons;
+RTC_DATA_ATTR int64_t shownReminder = 0;
+bool interruptedVoice = false;
+bool voiceActive = false;
+bool dashboardPixelsValid = false;
+bool dashboardRestorePending = false;
+bool reminderDismissed = false;
+bool startDisplay();
+
+bool anyButtonDown() {
+  return button.isDown() || digitalRead(stickyPower::kPinUpButton) == LOW ||
+      digitalRead(stickyPower::kPinDownButton) == LOW;
+}
+
+void showReminders(bool fire = true) {
+  auto& state = reminders::state();
+  const bool alarm = fire && state.fire(reminders::nowMs());
+  const int current = state.current();
+  const int64_t id = current < 0 ? 0 : state.items[current].id;
+  if ((id != shownReminder || alarm) && startDisplay()) {
+    if (coldScreen) { display.clear(); coldScreen = false; }
+    if (current >= 0) {
+      char text[400];
+      snprintf(text, sizeof(text), "%s%s", state.items[current].text,
+               interruptedVoice ? "\n\nГолосовой запрос прерван" : "");
+      display.reminder(text);
+    } else if (dashboardPixelsValid) {
+      display.dashboard(dashboard.pixels());
+    } else {
+      dashboardRestorePending = true;
+      reminderDismissed = true;
+    }
+    shownReminder = id;
+    interruptedVoice = false;
+  }
+  if (alarm) {
+    if (anyButtonDown()) reminderButtons.armed = false;
+    stickyBuzzer::notification();
+  }
+}
+
+bool interruptVoice() {
+  if (voiceActive && voiceRequest.committed()) return false;
+  if (!(voiceActive && voiceRequest.interrupted()) && !reminders::due()) return false;
+  capture.abort();
+  capture.wait(kCaptureJoinMs);
+  mic.end();
+  voiceRequest.disarmCancellation();
+  voiceRequest.close();
+  voiceActive = false;
+  interruptedVoice = true;
+  reminderButtons.armed = false;
+  aiArmed = false;
+  idlePhase = IdlePhase::Fetch;
+  showReminders();
+  return true;
+}
 
 // The moments the question is measured against, and two of them are not the
 // moment this thread reaches them:
@@ -284,10 +342,12 @@ void waitForRelease() {
 // End a voice cycle without sleeping: loop() owns the dwell and dashboard.
 void finish(Outcome outcome) {
   display.stopAnimation();
+  voiceActive = false;
+  voiceRequest.disarmCancellation();
   capture.abort();
   capture.wait(kCaptureJoinMs);
   mic.end();
-  backend.close();
+  voiceRequest.close();
   logRecording();
   lastOutcome = outcome;
   idlePhase = outcome == Outcome::Tap || outcome == Outcome::Idle
@@ -313,6 +373,7 @@ bool startDisplay() {
 // nothing, and the chirp is 450 ms the panel would otherwise spend waiting for
 // this thread to finish making a sound.
 void fail(Outcome outcome, const char* title, const char* detail) {
+  if (voiceActive && interruptVoice()) return;
   Serial1.printf("  %s: %s\n", title, detail != nullptr ? detail : "");
 
   if (startDisplay()) {
@@ -326,7 +387,7 @@ void fail(Outcome outcome, const char* title, const char* detail) {
 }
 
 // The request, opened with the stale-lease rule around it. False means it
-// could not be, and backend.result() says how.
+// could not be, and voiceRequest.result() says how.
 //
 // **A connect that nothing answered is the only thing that can say a cached
 // lease has gone stale**, because a lease that has outlived its network installs
@@ -348,17 +409,19 @@ void fail(Outcome outcome, const char* title, const char* detail) {
 // underneath it: a retry costs the user nothing until the release, and every
 // retry is a new request that starts again from the header.
 bool openRenewingStaleLease() {
-  if (backend.open()) return true;
+  if (voiceRequest.open()) return true;
+  if (voiceRequest.interrupted()) return false;
 
-  const bool couldBeStale = backend.unreachable() && wifi.usedLease();
+  const bool couldBeStale = voiceRequest.unreachable() && wifi.usedLease();
   if (!couldBeStale) return false;
 
   Serial1.printf("  nothing answered in %lu ms, and this question is on a reused address"
                  " -- connecting once more before believing it\n",
-                 static_cast<unsigned long>(millisBetween(backend.openUs(), backend.doneUs())));
+                 static_cast<unsigned long>(millisBetween(voiceRequest.openUs(), voiceRequest.doneUs())));
 
-  const bool opened = backend.open();
-  if (opened || !backend.unreachable()) {
+  const bool opened = voiceRequest.open();
+  if (voiceRequest.interrupted()) return false;
+  if (opened || !voiceRequest.unreachable()) {
     Serial1.println("  the second connect got somewhere -- the lease was not the problem");
     return opened;
   }
@@ -366,7 +429,10 @@ bool openRenewingStaleLease() {
   Serial1.println("  twice, so the address is the suspect -- dropping the lease and asking DHCP");
   const uint32_t stale = wifi.ipv4();
   wifi.renewAddress();
-  while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+  while (wifi.poll() == WifiLink::State::Connecting) {
+    if (voiceRequest.interrupted()) return false;
+    delay(kPollMs);
+  }
 
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.renewMs()),
@@ -385,7 +451,7 @@ bool openRenewingStaleLease() {
                      ? "the same address, so the lease was not what was wrong"
                      : "a different address, so it was");
 
-  return backend.open();
+  return voiceRequest.open();
 }
 
 // Sends whatever the capture task has committed that has not gone up yet. The
@@ -394,45 +460,45 @@ bool openRenewingStaleLease() {
 // ordering that makes everything below it safe to read (Recording).
 bool sendCommitted() {
   const size_t ready = audio.wavBytes();
-  const size_t sent = backend.sentBytes();
-  return ready == sent || backend.write(audio.wav() + sent, ready - sent);
+  const size_t sent = voiceRequest.sentBytes();
+  return ready == sent || voiceRequest.write(audio.wav() + sent, ready - sent);
 }
 
 // The rest of the body and the terminating chunk, once the recording is over.
-bool endBody() { return sendCommitted() && backend.end(); }
+bool endBody() { return sendCommitted() && voiceRequest.end(); }
 
 // The request's own story, for the log: when it opened against the hold, what
 // it carried, where its longest write was, and the two halves the round trip
 // splits into -- the tail after the release, which is what streaming exists to
 // shrink, and the answer after the terminating chunk. The second is
 // read after the taken chirp, so a backend quicker than the chirp reads as the
-// chirp: Backend::firstByteUs() has why.
-void logStream(Backend::Result result) {
-  if (backend.openUs() == 0) return;
+// chirp: VoiceRequest::firstByteUs() has why.
+void logStream(VoiceRequest::Result result) {
+  if (voiceRequest.openUs() == 0) return;
 
   Serial1.printf("  request: opened %lu ms into setup()",
-                 static_cast<unsigned long>(millisBetween(g_entryUs, backend.openUs())));
-  if (backend.connectedUs() == 0) {
+                 static_cast<unsigned long>(millisBetween(g_entryUs, voiceRequest.openUs())));
+  if (voiceRequest.connectedUs() == 0) {
     Serial1.println(", and never connected");
   } else {
-    const uint32_t connectMs = millisBetween(backend.openUs(), backend.connectedUs());
-    const uint32_t longestAtMs = millisBetween(g_entryUs, backend.longestWriteAtUs());
+    const uint32_t connectMs = millisBetween(voiceRequest.openUs(), voiceRequest.connectedUs());
+    const uint32_t longestAtMs = millisBetween(g_entryUs, voiceRequest.longestWriteAtUs());
     Serial1.printf(", connected in %lu ms; %lu bytes of the recording's %lu in %lu chunks, the"
                    " longest write %lu ms at %lu ms into setup()\n",
                    static_cast<unsigned long>(connectMs),
-                   static_cast<unsigned long>(backend.sentBytes()),
+                   static_cast<unsigned long>(voiceRequest.sentBytes()),
                    static_cast<unsigned long>(audio.wavBytes()),
-                   static_cast<unsigned long>(backend.frames()),
-                   static_cast<unsigned long>(backend.longestWriteUs() / 1000),
+                   static_cast<unsigned long>(voiceRequest.frames()),
+                   static_cast<unsigned long>(voiceRequest.longestWriteUs() / 1000),
                    static_cast<unsigned long>(longestAtMs));
   }
 
-  if (backend.endUs() != 0 && g_releaseUs != 0) {
+  if (voiceRequest.endUs() != 0 && g_releaseUs != 0) {
     Serial1.printf("  the terminating chunk %lu ms after the release",
-                   static_cast<unsigned long>(millisBetween(g_releaseUs, backend.endUs())));
-    if (backend.firstByteUs() != 0) {
-      const uint32_t firstByteMs = millisBetween(backend.endUs(), backend.firstByteUs());
-      const uint32_t doneMs = millisBetween(backend.endUs(), backend.doneUs());
+                   static_cast<unsigned long>(millisBetween(g_releaseUs, voiceRequest.endUs())));
+    if (voiceRequest.firstByteUs() != 0) {
+      const uint32_t firstByteMs = millisBetween(voiceRequest.endUs(), voiceRequest.firstByteUs());
+      const uint32_t doneMs = millisBetween(voiceRequest.endUs(), voiceRequest.doneUs());
       Serial1.printf(", the answer's first byte read %lu ms after that, all of it %lu ms after"
                      " that",
                      static_cast<unsigned long>(firstByteMs), static_cast<unsigned long>(doneMs));
@@ -440,11 +506,11 @@ void logStream(Backend::Result result) {
     Serial1.println();
   }
 
-  if (result == Backend::Result::Ok) {
-    Serial1.printf("  answer: \"%s\", %lu bytes of JSON\n", backend.answer(),
-                   static_cast<unsigned long>(backend.replyBytes()));
+  if (result == VoiceRequest::Result::Ok) {
+    Serial1.printf("  answer: \"%s\", %lu bytes of JSON\n", voiceRequest.answer(),
+                   static_cast<unsigned long>(voiceRequest.replyBytes()));
   } else {
-    Serial1.printf("  failed: %s\n", backend.lastError());
+    Serial1.printf("  failed: %s\n", voiceRequest.lastError());
   }
 }
 
@@ -456,8 +522,9 @@ void logStream(Backend::Result result) {
 // Also reached from under the hold, when the request fails while the user is
 // still talking -- which is why the recording is stopped first. It is a
 // no-op on one that has already stopped.
-void conclude(Backend::Result result) {
-  if (result == Backend::Result::NoServer && !wifi.online())
+void conclude(VoiceRequest::Result result) {
+  if (voiceRequest.interrupted() && interruptVoice()) return;
+  if (result == VoiceRequest::Result::NoServer && !wifi.online())
     return fail(Outcome::NoWifi, "NO WIFI", nullptr);
   capture.abort();
 
@@ -466,23 +533,23 @@ void conclude(Backend::Result result) {
   const char* title = nullptr;
 
   switch (result) {
-    case Backend::Result::Ok:
+    case VoiceRequest::Result::Ok:
       outcome = Outcome::Answered;
       break;
-    case Backend::Result::NoServer:
+    case VoiceRequest::Result::NoServer:
       outcome = Outcome::NoServer;
       title = "NO SERVER";
       break;
-    case Backend::Result::ServerError:
+    case VoiceRequest::Result::ServerError:
       outcome = Outcome::ServerError;
       title = "SERVER ERROR";
-      snprintf(detail, sizeof(detail), "%d", backend.status());
+      snprintf(detail, sizeof(detail), "%d", voiceRequest.status());
       break;
-    case Backend::Result::BadResponse:
+    case VoiceRequest::Result::BadResponse:
       outcome = Outcome::BadResponse;
       title = "BAD RESPONSE";
       break;
-    case Backend::Result::TimedOut:
+    case VoiceRequest::Result::TimedOut:
       outcome = Outcome::TimedOut;
       title = "TIMED OUT";
       break;
@@ -494,7 +561,7 @@ void conclude(Backend::Result result) {
   // chirp starts.
   g_lastChirpUs = esp_timer_get_time();
   if (title == nullptr) {
-    display.answer(backend.answer());
+    display.answer(voiceRequest.answer());
     stickyBuzzer::answer();
   } else {
     display.error(title, detail[0] != '\0' ? detail : nullptr);
@@ -540,8 +607,8 @@ void conclude(Backend::Result result) {
 // through, then whatever the capture task has committed since the last pass. A
 // failure here ends the question now, with the user still talking.
 bool stream() {
-  if ((!backend.streaming() && !openRenewingStaleLease()) || !sendCommitted()) {
-    conclude(backend.result());
+  if ((!voiceRequest.streaming() && !openRenewingStaleLease()) || !sendCommitted()) {
+    conclude(voiceRequest.result());
     return false;
   }
   return true;
@@ -550,6 +617,13 @@ bool stream() {
 }  // namespace
 
 void runVoice(int64_t pressUs) {
+  if (interruptVoice()) return;
+  voiceActive = true;
+  const int64_t due = reminders::state().nextDue();
+  if (!voiceRequest.armCancellation(due == reminder::kMaxTime ? 0 :
+      esp_timer_get_time() + (due - reminders::nowMs()) * 1000,
+      []() { capture.abort(); })) return fail(Outcome::Broken, "NO MEMORY", "voice cancellation timer unavailable");
+  shownReminder = 0;
   g_entryUs = pressUs;
   g_releaseUs = g_releaseSeenUs = g_lastChirpUs = 0;
   g_tailMs = g_takenChirpMs = g_networkWaitMs = g_answerWaitMs = 0;
@@ -614,6 +688,7 @@ void runVoice(int64_t pressUs) {
   // network is up at about 300 ms (S7b), which is where the minimum hold ends
   // anyway, so on most questions the two arrive together.
   while (!capture.finished()) {
+    if (interruptVoice()) return;
     if (wifi.poll() == WifiLink::State::Failed) {
       capture.abort();
     } else if (wifi.online() && capture.pastMinimumHold()) {
@@ -621,6 +696,7 @@ void runVoice(int64_t pressUs) {
     }
     delay(kPollMs);
   }
+  if (interruptVoice()) return;
   g_releaseSeenUs = esp_timer_get_time();
   display.stopAnimation();
 
@@ -662,12 +738,12 @@ void runVoice(int64_t pressUs) {
   // before the chirp rather than after it -- the chirp is 60 ms of blocking,
   // and the backend can spend them thinking instead of waiting for the end of
   // the body.
-  const bool streamed = backend.streaming();
+  const bool streamed = voiceRequest.streaming();
   if (streamed) {
     const int64_t startUs = esp_timer_get_time();
     const bool ended = endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) return conclude(backend.result());
+    if (!ended) return conclude(voiceRequest.result());
   }
 
   {
@@ -688,7 +764,10 @@ void runVoice(int64_t pressUs) {
   if (!streamed) {
     {
       const int64_t startUs = esp_timer_get_time();
-      while (wifi.poll() == WifiLink::State::Connecting) delay(kPollMs);
+      while (wifi.poll() == WifiLink::State::Connecting) {
+        if (interruptVoice()) return;
+        delay(kPollMs);
+      }
       g_networkWaitMs = millisBetween(startUs, esp_timer_get_time());
     }
 
@@ -702,11 +781,11 @@ void runVoice(int64_t pressUs) {
     const int64_t startUs = esp_timer_get_time();
     const bool ended = openRenewingStaleLease() && endBody();
     g_tailMs = millisBetween(startUs, esp_timer_get_time());
-    if (!ended) return conclude(backend.result());
+    if (!ended) return conclude(voiceRequest.result());
   }
 
   const int64_t startUs = esp_timer_get_time();
-  const Backend::Result result = backend.receive();
+  const VoiceRequest::Result result = voiceRequest.receive();
   g_answerWaitMs = millisBetween(startUs, esp_timer_get_time());
 
   conclude(result);
@@ -726,13 +805,30 @@ uint64_t nextSleepUs() {
   // and move the deadline. Only the remaining duration uses current calibration.
   const uint64_t left = dashboardDeadlineTicks > now
       ? rtc_time_slowclk_to_us(dashboardDeadlineTicks - now, esp_clk_slowclk_cal_get()) : 0;
-  return dashboardProtocol::sleepUs(left, 0);
+  return reminders::sleepUs(dashboardProtocol::sleepUs(left, 0));
 }
 
 // Poll on every idle path, including panel and sensor waits. Never join a
 // cancelled network worker before starting capture.
 bool idleButton() {
   dashboard.poll();
+  reminders::pollSync();
+  const bool defer = idlePhase == IdlePhase::AfterVoice;
+  if (!defer) showReminders();
+  const bool hasReminder = reminders::state().current() >= 0;
+  const bool gated = !reminderButtons.armed;
+  const bool readPress = reminderButtons.poll(anyButtonDown(), esp_timer_get_time(),
+                                             config::kButtonDebounceMs * 1000LL);
+  if (hasReminder || gated) {
+    aiArmed = false;
+    if (hasReminder && readPress && !defer) {
+      reminders::state().read();
+      showReminders(false);
+    }
+    return false;
+  }
+  // Due alarms cannot shorten the final voice screen's full dwell.
+  if (defer && reminders::due()) return false;
   static int64_t releasedUs = 0;
   if (!button.isDown()) {
     if (!releasedUs) releasedUs = esp_timer_get_time();
@@ -742,6 +838,7 @@ bool idleButton() {
     releasedUs = 0;
     if (aiArmed) {
       dashboard.cancel();
+      reminders::cancelSync();
       return true;
     }
   }
@@ -773,105 +870,133 @@ bool waitPanel() {
 void dashboardFailed() {
   Serial1.println("  dashboard unavailable; keeping the previous screen, retry in one hour");
   scheduleDashboard(rtc_time_get(), config::kDashboardDefaultSeconds);
-  if (startDisplay()) {
-    if (coldScreen) {
+  if (reminders::state().current() < 0 && startDisplay()) {
+    if (reminderDismissed) {
+      // With no cached frame and no network, erase the already-read text.
+      // The next scheduled attempt will restore the dashboard.
+      display.clear();
+      coldScreen = false;
+    }
+    else if (coldScreen) {
       display.clear();
       display.error("NO DASHBOARD", nullptr);
       coldScreen = false;
     } else display.staleIndicator();
   }
+  dashboardRestorePending = false;
+  reminderDismissed = false;
   idlePhase = IdlePhase::Sleep;
 }
 
 // Runs until sleep or a new AI press. All long panel/network operations live
 // on their own tasks, so this loop can hand a press straight to runVoice().
 void runIdle() {
-  if (idlePhase == IdlePhase::AfterVoice) {
-    if (!waitPanel()) return;
-    const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
-    const int64_t drawnUs = display.record(which).endUs;
-    logScreen("final voice screen", which);
-    logScreen("last listening animation frame", Display::Screen::ListeningFrame);
-    logScreen("last thinking animation frame", Display::Screen::ThinkingFrame);
-    logTiming(lastOutcome, true);
-    // With no working panel there is no completed refresh to wait from.
-    const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
-    while (esp_timer_get_time() < until) {
-      if (idleButton()) return;
-      delay(kPollMs);
+  for (;;) {
+    if (dashboardRestorePending && idlePhase != IdlePhase::AfterVoice) {
+      dashboardRestorePending = false;
+      idlePhase = IdlePhase::Fetch;
     }
-    idlePhase = IdlePhase::Fetch;
-  }
-  if (idlePhase == IdlePhase::Fetch) {
-    if (idleButton()) return;
-    if (!startDisplay()) { dashboardFailed(); }
-    else {
+    if (idlePhase == IdlePhase::AfterVoice) {
       if (!waitPanel()) return;
-      display.sensors();
-      if (!waitPanel()) return;
-      logScreen("dashboard sensors", Display::Screen::Sensors);
-      const auto snapshot = display.record(Display::Screen::Sensors);
-      if (!wifi.online()) g_beginUs = esp_timer_get_time();
-      if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
-        dashboardFailed();
-      } else {
-        while (wifi.poll() == WifiLink::State::Connecting) {
-          if (idleButton()) return;
-          delay(kPollMs);
-        }
-        // A previous request may still be returning from cancellation.
-        while (!dashboard.done()) {
-          if (idleButton()) return;
-          delay(kPollMs);
-        }
-        if (!wifi.online() || !dashboard.start(snapshot.batteryPercent, snapshot.climate)) {
+      const auto which = lastOutcome == Outcome::Answered ? Display::Screen::Answer : Display::Screen::Error;
+      const int64_t drawnUs = display.record(which).endUs;
+      logScreen("final voice screen", which);
+      logScreen("last listening animation frame", Display::Screen::ListeningFrame);
+      logScreen("last thinking animation frame", Display::Screen::ThinkingFrame);
+      logTiming(lastOutcome, true);
+      // With no working panel there is no completed refresh to wait from.
+      const int64_t until = (drawnUs ? drawnUs : esp_timer_get_time()) + config::kAnswerDwellMs * 1000LL;
+      while (esp_timer_get_time() < until) {
+        if (idleButton()) return;
+        delay(kPollMs);
+      }
+      idlePhase = IdlePhase::Fetch;
+    }
+    if (idlePhase == IdlePhase::Fetch) {
+      if (idleButton()) return;
+      {
+        startDisplay(); // Reminder sync still runs if the panel could not start.
+        if (!waitPanel()) return;
+        display.sensors();
+        if (!waitPanel()) return;
+        logScreen("dashboard sensors", Display::Screen::Sensors);
+        const auto snapshot = display.record(Display::Screen::Sensors);
+        if (!wifi.online()) g_beginUs = esp_timer_get_time();
+        if (!wifi.online() && !wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
           dashboardFailed();
         } else {
+          while (wifi.poll() == WifiLink::State::Connecting) {
+            if (idleButton()) return;
+            delay(kPollMs);
+          }
+          if (wifi.online()) {
+            while (reminders::syncing()) {
+              if (idleButton()) return;
+              delay(kPollMs);
+            }
+            reminders::startSync();
+          }
+          // A previous request may still be returning from cancellation.
           while (!dashboard.done()) {
             if (idleButton()) return;
             delay(kPollMs);
           }
-          if (idleButton()) return;
-          if (!dashboard.ok()) dashboardFailed();
-          else {
-            scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
-            Serial1.printf("  dashboard: PNG %u bytes -> 48000 bytes, HTTP request %lu ms, decode %lu ms, next update in %lu s\n",
-                           static_cast<unsigned>(dashboard.downloadBytes()),
-                           static_cast<unsigned long>(dashboard.requestMs()),
-                           static_cast<unsigned long>(dashboard.decodeMs()),
-                           static_cast<unsigned long>(dashboard.nextSeconds()));
-            if (coldScreen) { display.clear(); coldScreen = false; }
-            display.dashboard(dashboard.pixels());
-            idlePhase = IdlePhase::Sleep;
+          dashboardPixelsValid = false;
+          if (!wifi.online() || !dashboard.start(snapshot.batteryPercent, snapshot.climate)) {
+            dashboardFailed();
+          } else {
+            while (!dashboard.done()) {
+              if (idleButton()) return;
+              delay(kPollMs);
+            }
+            if (idleButton()) return;
+            if (!dashboard.ok()) dashboardFailed();
+            else {
+              scheduleDashboard(dashboard.receivedRtcTicks(), dashboard.nextSeconds());
+              Serial1.printf("  dashboard: PNG %u bytes -> 48000 bytes, HTTP request %lu ms, decode %lu ms, next update in %lu s\n",
+                             static_cast<unsigned>(dashboard.downloadBytes()),
+                             static_cast<unsigned long>(dashboard.requestMs()),
+                             static_cast<unsigned long>(dashboard.decodeMs()),
+                             static_cast<unsigned long>(dashboard.nextSeconds()));
+              if (coldScreen) { display.clear(); coldScreen = false; }
+              dashboardPixelsValid = true;
+              if (reminders::state().current() < 0) display.dashboard(dashboard.pixels());
+              dashboardRestorePending = false;
+              reminderDismissed = false;
+              idlePhase = IdlePhase::Sleep;
+            }
           }
         }
       }
     }
-  }
-  if (!waitPanel()) return;
-  while (!dashboard.done()) {
+    if (!waitPanel()) return;
+    while (!dashboard.done() || reminders::syncing()) {
+      if (idleButton()) return;
+      delay(kPollMs);
+    }
+    if (dashboardRestorePending) continue;
+    // Preserve the deadline even if Up (or a held AI after a capped recording)
+    // delays entry to sleep. AI remains responsive while Up is held.
+    while (anyButtonDown() || !reminderButtons.armed) {
+      if (idleButton()) return;
+      if (dashboardRestorePending) break;
+      delay(kPollMs);
+    }
     if (idleButton()) return;
-    delay(kPollMs);
+    if (!waitPanel()) return;
+    if (dashboardRestorePending) continue;
+    logScreen("dashboard", Display::Screen::Dashboard);
+    logScreen("dashboard status", Display::Screen::Stale);
+    Serial1.printf("  %s; panel startup %lu ms, display stack unused %lu bytes\n",
+                   outcomeName(lastOutcome), static_cast<unsigned long>(g_panelUpMs),
+                   static_cast<unsigned long>(display.stackUnusedBytes()));
+    Serial1.printf("  sleeping; dashboard timer in %llu ms\n",
+                   static_cast<unsigned long long>(nextSleepUs() / 1000));
+    dashboard.close();
+    wifi.end();
+    Serial1.flush();
+    stickyPower::deepSleep(nextSleepUs());
   }
-  // Preserve the deadline even if Up (or a held AI after a capped recording)
-  // delays entry to sleep. AI remains responsive while Up is held.
-  while (digitalRead(stickyPower::kPinUpButton) == LOW || button.isDown()) {
-    if (idleButton()) return;
-    delay(kPollMs);
-  }
-  if (idleButton()) return;
-  if (!waitPanel()) return;
-  logScreen("dashboard", Display::Screen::Dashboard);
-  logScreen("dashboard status", Display::Screen::Stale);
-  Serial1.printf("  %s; panel startup %lu ms, display stack unused %lu bytes\n",
-                 outcomeName(lastOutcome), static_cast<unsigned long>(g_panelUpMs),
-                 static_cast<unsigned long>(display.stackUnusedBytes()));
-  Serial1.printf("  sleeping; dashboard timer in %llu ms\n",
-                 static_cast<unsigned long long>(nextSleepUs() / 1000));
-  dashboard.close();
-  wifi.end();
-  Serial1.flush();
-  stickyPower::deepSleep(nextSleepUs());
 }
 
 }  // namespace
@@ -880,16 +1005,26 @@ void setup() {
   g_entryUs = esp_timer_get_time();
   stickyPower::holdLatch();
   stickyPower::enableUpWake();
+  stickyPower::enableDownWake();
   button.begin(g_entryUs);
   Serial1.begin(115200, SERIAL_8N1, kPinLogRx, kPinLogTx);
   coldScreen = !stickyPower::wokeFromDeepSleep();
-  if (coldScreen) dashboardDeadlineTicks = 0;
+  reminders::begin(coldScreen);
+  if (coldScreen) { dashboardDeadlineTicks = 0; shownReminder = 0; }
+  const uint64_t wakeButtons = stickyPower::wokeFromDeepSleep() &&
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 ? esp_sleep_get_ext1_wakeup_status() : 0;
+  const bool unreadWake = reminders::state().current() >= 0;
+  if (unreadWake && wakeButtons) {
+    reminders::state().read();
+    reminderButtons.armed = false;
+    aiArmed = false;
+  }
   const bool preferenceLoaded = silentMode::load();
   if (!preferenceLoaded) Serial1.println("  sound preference unreadable; muted");
   const bool upWake = stickyPower::wokeFromDeepSleep() &&
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
       (esp_sleep_get_ext1_wakeup_status() & (1ULL << stickyPower::kPinUpButton));
-  if (upWake) {
+  if (upWake && !unreadWake && !reminders::due()) {
     if (!preferenceLoaded || !silentMode::toggle())
       Serial1.println("  silent mode could not be saved; unchanged");
     Serial1.printf("  silent mode: %s\n", silentMode::enabled() ? "on" : "off");
@@ -904,7 +1039,11 @@ void setup() {
   }
   Serial1.printf("wake %s, reset %s\n", stickyPower::wakeupCauseName(), stickyPower::resetReasonName());
   // Keep this physical check in setup: exp_e1_firmware wraps it for its rig.
-  if (button.isDown()) runVoice(g_entryUs);
+  if (unreadWake || reminders::due()) {
+    showReminders();
+    if (dashboardDeadlineTicks > rtc_time_get()) idlePhase = IdlePhase::Sleep;
+  }
+  else if (button.isDown()) runVoice(g_entryUs);
   // Also fetch after a tap released before setup could start recording.
   else idlePhase = IdlePhase::Fetch;
 }
