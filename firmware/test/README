@@ -49,3 +49,13 @@ gate, terminal-write arbitration and full reminder text layout at 12 pt.
 
 `test_listening_wave` checks that every frame preserves all surrounding pixels
 and that every frame transition completely removes the previous wave.
+
+`test_buzzer` compiles the production buzzer module and pinned PlayRtttl's ESP32
+path against a dedicated fake Arduino clock/GPIO API. It checks the fixed
+Ericcson fixture's notes, rests on GPIO48, duration and synchronous parking,
+repeat playback, silent-mode bypass and attachment failure. No actual Arduino
+`tone()`/`noTone()` exists in this harness, so accidental use fails compilation.
+
+E17 additionally checks strict RTTTL validation before library calls, octave
+bounds/shifts and immediate stop during a note. A separate check runs the
+current configurable production ringtone without assuming its exact notes.

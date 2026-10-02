@@ -79,6 +79,10 @@ def create(text, amount=None, unit=None, local_at=None):
                 or any(ord(c) < 32 or ord(c) == 127 for c in text)
                 or len(text.encode('utf-8')) > MAX_TEXT_BYTES):
             raise ValueError(f"Текст должен содержать от 1 до {MAX_TEXT_BYTES} байт UTF-8 без управляющих символов.")
+        text = text.strip()
+        text = text[:1].upper() + text[1:]
+        if len(text.encode('utf-8')) > MAX_TEXT_BYTES:
+            raise ValueError(f"Текст должен содержать не более {MAX_TEXT_BYTES} байт UTF-8 после преобразования регистра.")
         reference = REQUEST_TIME.get() or datetime.now(timezone.utc)
         due = deadline(reference, amount=amount, unit=unit, local_at=local_at)
         with closing(metrics.connect()) as db, db:
@@ -86,9 +90,9 @@ def create(text, amount=None, unit=None, local_at=None):
             if db.execute("SELECT count(*) FROM reminders WHERE status='active'").fetchone()[0] >= MAX_ACTIVE:
                 return {"error": "Уже есть 10 активных напоминаний. Прочитай или отмени одно из них."}
             cursor = db.execute("INSERT INTO reminders(text,due_at,created_at,status) VALUES (?,?,?,'active')",
-                                (text.strip(), int(due.timestamp() * 1000), int(time.time() * 1000)))
+                                (text, int(due.timestamp() * 1000), int(time.time() * 1000)))
             bump(db)
-            return {"id": cursor.lastrowid, "text": text.strip(), "due_at": due.astimezone(ZONE).isoformat()}
+            return {"id": cursor.lastrowid, "text": text, "due_at": due.astimezone(ZONE).isoformat()}
     except (ValueError, OverflowError) as exc:
         return {"error": str(exc)}
 

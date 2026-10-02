@@ -79,11 +79,24 @@ int64_t reminders::nowMs() {
   return anchorMs + rtc_time_slowclk_to_us(rtc_time_get() - anchorTicks, esp_clk_slowclk_cal_get()) / 1000;
 }
 bool reminders::due() { return anchorMs && saved.due(nowMs()); }
+bool reminders::notification(bool fresh) {
+  if (saved.current() < 0) return false;
+  return saved.alarm.poll(fresh, rtc_time_get(), rtc_time_us_to_slowclk(
+      reminder::Alarm::kIntervalUs, esp_clk_slowclk_cal_get()));
+}
 uint64_t reminders::sleepUs(uint64_t other) {
-  if (!anchorMs || saved.nextDue() == reminder::kMaxTime) return other;
-  const int64_t left = saved.nextDue() - nowMs();
-  const uint64_t us = left > 0 ? left * 1000ULL : 1000;
-  return us < other ? us : other;
+  if (anchorMs && saved.nextDue() != reminder::kMaxTime) {
+    const int64_t left = saved.nextDue() - nowMs();
+    const uint64_t us = left > 0 ? left * 1000ULL : 1000;
+    if (us < other) other = us;
+  }
+  if (saved.alarm.nextTicks) {
+    const uint64_t now = rtc_time_get();
+    const uint64_t us = saved.alarm.nextTicks > now
+        ? rtc_time_slowclk_to_us(saved.alarm.nextTicks - now, esp_clk_slowclk_cal_get()) : 1000;
+    if (us < other) other = us;
+  }
+  return other;
 }
 bool reminders::accept(JsonVariantConst json, uint64_t ticks, int64_t age) {
   static reminder::Snapshot s;

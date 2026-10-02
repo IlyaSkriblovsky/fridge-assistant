@@ -112,3 +112,18 @@ secrets template. A host harness executing the actual buzzer module verified
 96 tones, nine 50 ms rests, two 500 ms rests, three identical phrases and
 5290 ms total, plus silent-mode suppression, failed attachment and pin parking.
 The assembled three-repeat signal has not been flashed or listening-tested.
+
+## Production listening feedback, 2026-10-02
+
+Real reminder use found the production pitches unpleasantly high. At the user's
+request, production now trials 2500/2670 Hz and 2806/2997 Hz, retaining the
+0/+2/0/+2 contour, timing and three phrases. The trill span is narrower so all
+four tones fit 2.5–3 kHz. This is a new preference trial, not a revision of the
+historical measurements above or a claim of equal loudness. Device listening
+acceptance remains pending.
+
+The user subsequently accepted the clock layout and reported working text
+capitalization, but still found the lower trill unpleasant. Production now
+uses the user-supplied Ericcson RTTTL ringtone through PlayRtttl instead of this
+trill arrangement. Listening acceptance for Ericcson and battery repeat checks
+remain pending; the experimental results above remain historical evidence.
