@@ -100,3 +100,14 @@ async def test_service_errors_propagate(gemini, error):
     with pytest.raises(type(error)) as caught:
         await assistant.answer(gemini, b"wav", Mock())
     assert caught.value is error
+
+
+@pytest.mark.parametrize('payload,mime', [('текст запроса', 'audio/wav'), (b'ogg-opus', 'audio/ogg')])
+async def test_shared_text_or_audio_input(gemini, payload, mime):
+    gemini.aio.models.generate_content.return_value = response(types.Part(text='Готово'))
+    assert await assistant.answer(gemini, payload, Mock(), mime_type=mime) == 'Готово'
+    part = gemini.aio.models.generate_content.call_args.kwargs['contents'][0].parts[0]
+    if isinstance(payload, str):
+        assert part.text == payload and part.inline_data is None
+    else:
+        assert part.inline_data.data == payload and part.inline_data.mime_type == mime
