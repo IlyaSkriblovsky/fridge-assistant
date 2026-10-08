@@ -1,9 +1,7 @@
-"""The assistant itself: a recording in, the text for the screen out.
+"""Shared stateless assistant: text or audio in, a textual reply out.
 
-The recording goes to Gemini's generateContent whole, together with the tools
-the assistant may use. The model makes out the speech, decides what to do and
-calls tools; the server runs the calls and sends the results back, round after
-round, until the model answers with text instead.
+Gemini receives the complete request and shared tools, then the server executes
+function calls until the model returns text.
 """
 
 from __future__ import annotations
@@ -30,11 +28,10 @@ MAX_ROUNDS = 5
 NO_ANSWER = "Не получилось ответить, попробуй ещё раз."
 
 SYSTEM_INSTRUCTION = """\
-You are a voice assistant on a small e-paper device on a family's fridge.
-Each request is one recording of the user speaking, usually in Russian.
+You are a family assistant available on a fridge device and in Telegram.
+Each request is independent text or a voice recording, usually in Russian.
 Do what they ask using the tools, then reply with one or two short sentences
-in the language they spoke, saying what you did. The reply is shown on the
-device's screen, not spoken. If you could not make out the request, or no tool
+in the language they used, saying what you did. The reply is displayed as text. If you could not make out the request, or no tool
 fits it, say so briefly instead of guessing.
 
 For reminders, only confirm success reported by a tool; include the resulting local date/time.
@@ -45,7 +42,7 @@ text='бутерброд', amount=1, unit='minutes'; 'напомни о встр
 Preserve prepositions that belong to the meaning: 'снять яйца с плиты', 'позвонить маме
 по поводу билетов', 'фильтр для воды'. Do not mechanically remove every preposition.
 For cancellation by meaning, first list reminders. If several match, cancel none and ask
-for a new command specifying the time. Each recording is independent, with no hidden session.
+for a new command specifying the time. Each request is independent, with no hidden session.
 Ask for a precise time for vague requests such as 'in the morning'. Never guess ambiguous
 calendar times or work around a DST ambiguity error. Use amount/unit for relative durations;
 months and years are calendar arithmetic performed by the server.
@@ -119,23 +116,24 @@ def describe_usage(response: types.GenerateContentResponse) -> str:
     )
 
 
-async def answer(client: genai.Client, wav: bytes, log: Callable[[str], None]) -> str:
+async def answer(client: genai.Client, request: bytes | str, log: Callable[[str], None], *, mime_type: str = "audio/wav") -> str:
     token = reminders.REQUEST_TIME.set(reminders.REQUEST_TIME.get() or datetime.now(timezone.utc))
     try:
-        return await _answer(client, wav, log)
+        return await _answer(client, request, log, mime_type=mime_type)
     finally:
         reminders.REQUEST_TIME.reset(token)
 
 
-async def _answer(client: genai.Client, wav: bytes, log: Callable[[str], None]) -> str:
-    """Carry out what the recording asks for and return the reply for the screen.
+async def _answer(client: genai.Client, request: bytes | str, log: Callable[[str], None], *, mime_type: str = "audio/wav") -> str:
+    """Carry out the request and return a textual reply.
 
     Errors from Gemini itself are left to the caller. A failing tool is not an
     error here: its result says so, and the model tells the user.
     """
     contents: list[types.Content] = [
         types.Content(
-            role="user", parts=[types.Part.from_bytes(data=wav, mime_type="audio/wav")]
+            role="user", parts=[types.Part.from_text(text=request) if isinstance(request, str)
+                                else types.Part.from_bytes(data=request, mime_type=mime_type)]
         )
     ]
     reference = reminders.REQUEST_TIME.get() or datetime.now(timezone.utc)

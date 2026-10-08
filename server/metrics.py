@@ -22,6 +22,10 @@ def initialize() -> None:
     path = Path(os.environ.get("DATABASE_PATH", "data/dashboard.sqlite3"))
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect()) as db, db:
+        import device_readings
+        device_readings.initialize(db)
+        import telegram_store
+        telegram_store.initialize(db)
         import reminders
         reminders.initialize(db)
         db.execute("""CREATE TABLE IF NOT EXISTS metrics (

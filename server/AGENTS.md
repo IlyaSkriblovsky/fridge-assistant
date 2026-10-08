@@ -21,6 +21,8 @@
 | `main.py` | FastAPI: `POST /audio`, `GET /sticky/dashboard`, намеренные сбои, запуск |
 | `dashboard.py` | Монохромный дашборд Sticky: рендер Pillow и однобитный PNG |
 | `metrics.py`, `jobs.py` | SQLite со снимками показателей и периодические задачи одного процесса |
+| `telegram_bot.py`, `telegram_store.py` | Необязательный Telegram polling, допуск, журнал updates и очередь ответов |
+| `device_readings.py`, `dashboard_service.py` | История показаний прибора и общий рендер для HTTP и Telegram |
 | `assistant.py` | Gemini: системная инструкция, описания функций, цикл вызовов |
 | `weather.py` | Прогноз Open-Meteo, снимки в SQLite, обновление раз в час |
 | `reminders.py` | Одноразовые напоминания в SQLite, календарь `REMINDERS_TIMEZONE`, снимки и подтверждения |

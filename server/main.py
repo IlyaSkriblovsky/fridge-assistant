@@ -32,6 +32,9 @@ from starlette.requests import ClientDisconnect
 
 import assistant
 import dashboard
+import dashboard_service
+import device_readings
+import telegram_bot
 import jobs
 import metrics
 import reminders
@@ -139,6 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError(
             f"Set {', '.join(missing)}: run with --env-file .env (see docs/server.md)"
         )
+    telegram_config = telegram_bot.configuration()
     weather.coordinates()  # Validate optional location before starting jobs.
     metrics.initialize()
     app.state.gemini = genai.Client()  # takes GEMINI_API_KEY from the environment
@@ -165,7 +169,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "weather", weather.refresh, weather.REFRESH_SECONDS
     ))
     try:
-        yield
+        async with telegram_bot.running(telegram_config, app.state.gemini):
+            yield
     finally:
         weather_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -235,9 +240,9 @@ def sticky_dashboard(
     humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
 ) -> Response:
     """Render a 1bpp PNG off the event loop."""
-    frame = dashboard.render(battery_pct, temperature_c, humidity_pct, shopping_list.snapshot(), weather.snapshot())
+    device_readings.save(battery_pct, temperature_c, humidity_pct)
     return Response(
-        dashboard.png(frame),
+        dashboard_service.render(battery_pct, temperature_c, humidity_pct),
         media_type="image/png",
         headers={
             "Dashboard-Format": "png",

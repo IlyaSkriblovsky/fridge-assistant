@@ -10,6 +10,7 @@ dependencies = [
     "gkeepapi>=0.17.1",
     "httpx>=0.28.1",
     "pillow>=11",
+    "python-telegram-bot>=22.8,<23",
 ]
 
 [dependency-groups]

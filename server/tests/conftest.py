@@ -20,6 +20,8 @@ import weather
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_ALLOWED_CHAT_IDS", raising=False)
     monkeypatch.setattr(reminders, "ZONE", ZoneInfo("Asia/Nicosia"))
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.delenv("WEATHER_LATITUDE", raising=False)
