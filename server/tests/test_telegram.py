@@ -29,7 +29,7 @@ def update(uid=1, text='молоко', chat_id=123, chat_type='private', voice=N
 @pytest.fixture
 def adapter(monkeypatch):
     monkeypatch.setattr(assistant, 'answer', AsyncMock(return_value='Готово'))
-    bot = SimpleNamespace(id=42, send_message=AsyncMock(), send_document=AsyncMock(),
+    bot = SimpleNamespace(id=42, send_message=AsyncMock(), send_photo=AsyncMock(), send_chat_action=AsyncMock(),
                           get_file=AsyncMock(return_value=SimpleNamespace(file_size=3, file_path='https://example.test/audio')))
     return tg.Adapter(tg.Config('dummy', frozenset({123})), object(), bot, None)
 
@@ -67,8 +67,9 @@ async def test_denied(adapter, caplog, chat_id, chat_type, text):
     assert f'chat_id={chat_id} chat_type={chat_type}' in caplog.text
     assert text not in caplog.text
     adapter.bot.get_file.assert_not_called()
+    adapter.bot.send_chat_action.assert_not_called()
     adapter.bot.send_message.assert_not_called()
-    adapter.bot.send_document.assert_not_called()
+    adapter.bot.send_photo.assert_not_called()
     assistant.answer.assert_not_called()
     assert store.pending(42) == []
 
@@ -203,8 +204,8 @@ async def test_dashboard(adapter, monkeypatch, known):
     expected, caption = dashboard_service.telegram_snapshot()
     await adapter.handle(update(text='/dashboard'), None)
     assistant.answer.assert_not_called()
-    kwargs = adapter.bot.send_document.call_args.kwargs
-    assert kwargs['document'] == expected
+    kwargs = adapter.bot.send_photo.call_args.kwargs
+    assert kwargs['photo'] == expected
     assert kwargs['caption'] == caption
     assert kwargs['reply_parameters'].message_id == 101
     image = Image.open(io.BytesIO(expected))
@@ -265,3 +266,64 @@ async def test_lifecycle(monkeypatch, fail_polling):
         async with tg.running(tg.Config('dummy', frozenset({123})), object()):
             assert events == ['initialize', 'start', 'poll']
         assert events == ['initialize', 'start', 'poll', 'poll-stop', 'stop', 'shutdown']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['success', 'error', 'cancel'])
+async def test_typing_refreshes_and_stops(adapter, monkeypatch, outcome):
+    monkeypatch.setattr(tg, 'TYPING_SECONDS', 0.001)
+    refreshed, release = asyncio.Event(), asyncio.Event()
+    typing_tasks = set()
+
+    async def status(**kwargs):
+        assert kwargs == {'chat_id': 123, 'action': 'typing'}
+        typing_tasks.add(asyncio.current_task())
+        if adapter.bot.send_chat_action.await_count >= 2:
+            refreshed.set()
+
+    async def answer(*args, **kwargs):
+        await release.wait()
+        if outcome == 'error':
+            raise RuntimeError('model failed')
+        return 'Готово'
+
+    adapter.bot.send_chat_action.side_effect = status
+    assistant.answer.side_effect = answer
+    task = asyncio.create_task(adapter.handle(update(), None))
+    try:
+        await asyncio.wait_for(refreshed.wait(), timeout=1)
+        assert not task.done()
+        if outcome == 'cancel':
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            await task
+            assert adapter.bot.send_message.await_count == 1
+        assert typing_tasks and all(t.done() for t in typing_tasks)
+        count = adapter.bot.send_chat_action.await_count
+        if outcome != 'cancel':
+            await adapter.handle(update(), None)
+            assert adapter.bot.send_chat_action.await_count == count
+    finally:
+        await tg.cancel(task)
+
+
+@pytest.mark.asyncio
+async def test_typing_failure_does_not_interrupt_answer(adapter, caplog):
+    attempted = asyncio.Event()
+
+    async def status(**kwargs):
+        attempted.set()
+        raise httpx.ConnectError('secret-token')
+
+    async def answer(*args, **kwargs):
+        await asyncio.wait_for(attempted.wait(), timeout=1)
+        return 'Готово'
+
+    adapter.bot.send_chat_action.side_effect = status
+    assistant.answer.side_effect = answer
+    await adapter.handle(update(), None)
+    assert adapter.bot.send_message.call_args.kwargs['text'] == 'Готово'
+    assert 'secret-token' not in caplog.text
