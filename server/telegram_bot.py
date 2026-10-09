@@ -18,6 +18,7 @@ import telegram_store as store
 logger = logging.getLogger(__name__)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 RETRY_SECONDS = 30
+TYPING_SECONDS = 4
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,23 @@ class Adapter:
         # Polling is sequential across all chats, including retries.
         self.lock = asyncio.Lock()
 
+    async def keep_typing(self, chat_id):
+        while True:
+            try:
+                await self.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception as exc:
+                # A cosmetic status must never prevent executing the request.
+                logger.warning("[telegram] typing status failed: %s", type(exc).__name__)
+            await asyncio.sleep(TYPING_SECONDS)
+
+    @asynccontextmanager
+    async def typing(self, chat_id):
+        task = asyncio.create_task(self.keep_typing(chat_id))
+        try:
+            yield
+        finally:
+            await cancel(task)
+
     async def voice_bytes(self, voice):
         if (voice.file_size or 0) > MAX_AUDIO_BYTES:
             raise AudioTooLarge
@@ -102,11 +120,12 @@ class Adapter:
                     elif command == "/start":
                         text = "Отправь текст или голосовое сообщение. /dashboard — текущий дашборд холодильника."
                     elif message.voice or message.text:
-                        payload = await self.voice_bytes(message.voice) if message.voice else message.text
-                        mime = (message.voice.mime_type or "audio/ogg") if message.voice else "audio/wav"
-                        model_started = True
-                        text = await assistant.answer(self.gemini, payload,
-                            lambda line: logger.info("[telegram] %s", line), mime_type=mime)
+                        async with self.typing(chat.id):
+                            payload = await self.voice_bytes(message.voice) if message.voice else message.text
+                            mime = (message.voice.mime_type or "audio/ogg") if message.voice else "audio/wav"
+                            model_started = True
+                            text = await assistant.answer(self.gemini, payload,
+                                lambda line: logger.info("[telegram] %s", line), mime_type=mime)
                     else:
                         text = "Отправь текст или голосовое сообщение."
                 except AudioTooLarge:
@@ -126,7 +145,7 @@ class Adapter:
             reply = ReplyParameters(message_id=row["message_id"], allow_sending_without_reply=True)
             try:
                 if row["document"] is not None:
-                    await self.bot.send_document(chat_id=row["chat_id"], document=bytes(row["document"]),
+                    await self.bot.send_photo(chat_id=row["chat_id"], photo=bytes(row["document"]),
                         filename="dashboard.png", caption=row["caption"], parse_mode=None, reply_parameters=reply)
                 else:
                     parts = list(split_text(row["text"] or assistant.NO_ANSWER))
