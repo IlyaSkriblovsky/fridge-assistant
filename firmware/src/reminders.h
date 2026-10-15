@@ -16,4 +16,4 @@ void startSync();
 void pollSync();
 void cancelSync();
 bool syncing();
-}
+} // namespace reminders

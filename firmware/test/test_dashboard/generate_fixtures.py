@@ -4,6 +4,7 @@ The server fixture exercises its actual encoder; the synthetic fixture covers
 every PNG row filter, split IDAT, incompressible data and asymmetric pixels.
 Checked-in bytes let native CI run without Python/Pillow/server dependencies.
 """
+
 from pathlib import Path
 import random
 import struct
@@ -23,7 +24,12 @@ frame = dashboard.render(73, 23.5, 42.0)
 
 
 def chunk(kind, data):
-    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (
+        struct.pack(">I", len(data))
+        + kind
+        + data
+        + struct.pack(">I", zlib.crc32(kind + data))
+    )
 
 
 def paeth(a, b, c):
@@ -48,10 +54,15 @@ for y, row in enumerate(rows):
 def png(data):
     compressed = zlib.compress(data)
     header = struct.pack(">IIBBBBB", 800, 480, 1, 0, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-            + b"".join(chunk(b"IDAT", compressed[i:i + 777])
-                       for i in range(0, len(compressed), 777))
-            + chunk(b"IEND", b""))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + b"".join(
+            chunk(b"IDAT", compressed[i : i + 777])
+            for i in range(0, len(compressed), 777)
+        )
+        + chunk(b"IEND", b"")
+    )
 
 
 (DEST / "filters.png").write_bytes(png(scan))

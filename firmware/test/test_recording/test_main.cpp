@@ -13,12 +13,10 @@ void tearDown() { audio.end(); }
 
 void header_is_streaming_mono_pcm_wav() {
   TEST_ASSERT_TRUE(audio.begin(16000, 1));
-  const uint8_t expected[] = {
-    'R','I','F','F', 255,255,255,255, 'W','A','V','E',
-    'f','m','t',' ', 16,0,0,0, 1,0, 1,0,
-    0x80,0x3e,0,0, 0,0x7d,0,0, 2,0,16,0,
-    'd','a','t','a', 255,255,255,255
-  };
+  const uint8_t expected[] = {'R', 'I', 'F',  'F',  255, 255, 255, 255,  'W', 'A', 'V',
+                              'E', 'f', 'm',  't',  ' ', 16,  0,   0,    0,   1,   0,
+                              1,   0,   0x80, 0x3e, 0,   0,   0,   0x7d, 0,   0,   2,
+                              0,   16,  0,    'd',  'a', 't', 'a', 255,  255, 255, 255};
   TEST_ASSERT_EQUAL_UINT(sizeof(expected), audio.wavBytes());
   TEST_ASSERT_EQUAL_MEMORY(expected, audio.wav(), sizeof(expected));
 }
@@ -79,7 +77,7 @@ void changed_rate_reallocates_and_rewrites_header() {
   TEST_ASSERT_TRUE(audio.begin(8000, 2)); // Same capacity, different format.
   TEST_ASSERT_EQUAL_UINT(2, testHeap::allocations);
   TEST_ASSERT_EQUAL_UINT(1, testHeap::frees);
-  const uint8_t rates[] = {0x40,0x1f,0,0, 0x80,0x3e,0,0};
+  const uint8_t rates[] = {0x40, 0x1f, 0, 0, 0x80, 0x3e, 0, 0};
   TEST_ASSERT_EQUAL_MEMORY(rates, audio.wav() + 24, sizeof(rates));
   TEST_ASSERT_EQUAL_UINT(0, audio.recordedSamples());
   audio.commit(8000);

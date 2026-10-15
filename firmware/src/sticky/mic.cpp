@@ -34,25 +34,29 @@ void releaseUsbJtagPins() {
 // and the extremes give the peak deviation once the mean is known. int64
 // accumulators, because 32768^2 per sample overflows int32 after two samples.
 class MicLevelMeter {
- public:
+public:
   void add(const int16_t* samples, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
       const int32_t s = samples[i];
       _sum += s;
       _sumSquares += static_cast<int64_t>(s) * s;
-      if (s < _smallest) _smallest = s;
-      if (s > _largest) _largest = s;
+      if (s < _smallest)
+        _smallest = s;
+      if (s > _largest)
+        _largest = s;
     }
     _count += count;
   }
 
   MicLevel result() const {
     MicLevel out{0.0f, StickyMic::kSilenceDbfs, 0.0f, _count};
-    if (_count == 0) return out;
+    if (_count == 0)
+      return out;
 
     const double mean = static_cast<double>(_sum) / _count;
     double variance = static_cast<double>(_sumSquares) / _count - mean * mean;
-    if (variance < 0.0) variance = 0.0;  // rounding can push a silent block below zero
+    if (variance < 0.0)
+      variance = 0.0; // rounding can push a silent block below zero
 
     const double rms = sqrt(variance);
     const double peakHigh = _largest - mean;
@@ -60,11 +64,12 @@ class MicLevelMeter {
 
     out.rms = static_cast<float>(rms);
     out.peak = static_cast<float>(peakHigh > peakLow ? peakHigh : peakLow);
-    if (rms > 0.0) out.dbfs = static_cast<float>(20.0 * log10(rms / 32768.0));
+    if (rms > 0.0)
+      out.dbfs = static_cast<float>(20.0 * log10(rms / 32768.0));
     return out;
   }
 
- private:
+private:
   int64_t _sum = 0;
   int64_t _sumSquares = 0;
   int32_t _smallest = INT16_MAX;
@@ -72,22 +77,22 @@ class MicLevelMeter {
   uint32_t _count = 0;
 };
 
-}  // namespace
+} // namespace
 
 bool StickyMic::begin(uint32_t sampleRate, uint32_t settleMs) {
-  if (_started) return true;
+  if (_started)
+    return true;
 
   _sampleRate = sampleRate;
 
   pinMode(kPinPowerEnable, OUTPUT);
   digitalWrite(kPinPowerEnable, HIGH);
-  delay(10);  // TPS22916 turn-on time plus mic power-up.
+  delay(10); // TPS22916 turn-on time plus mic power-up.
 
   releaseUsbJtagPins();
 
   _i2s.setPinsPdmRx(kPinClk, kPinData);
-  if (!_i2s.begin(I2S_MODE_PDM_RX, sampleRate, I2S_DATA_BIT_WIDTH_16BIT,
-                  I2S_SLOT_MODE_MONO)) {
+  if (!_i2s.begin(I2S_MODE_PDM_RX, sampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO)) {
     digitalWrite(kPinPowerEnable, LOW);
     _lastError = "I2S PDM-RX init failed";
     return false;
@@ -131,10 +136,12 @@ bool StickyMic::readLevel(MicLevel& out, uint32_t samples) {
   int16_t chunk[kChunkSamples];
   while (collected < samples) {
     uint32_t want = samples - collected;
-    if (want > kChunkSamples) want = kChunkSamples;
+    if (want > kChunkSamples)
+      want = kChunkSamples;
 
     const uint32_t got = readSamples(chunk, want);
-    if (got == 0) return false;
+    if (got == 0)
+      return false;
 
     meter.add(chunk, got);
     collected += got;
@@ -154,8 +161,7 @@ uint32_t StickyMic::readSamples(int16_t* dest, uint32_t maxSamples) {
     return 0;
   }
 
-  const size_t bytes =
-      _i2s.readBytes(reinterpret_cast<char*>(dest), maxSamples * sizeof(int16_t));
+  const size_t bytes = _i2s.readBytes(reinterpret_cast<char*>(dest), maxSamples * sizeof(int16_t));
   if (bytes == 0) {
     // readBytes() reports a failed read as nothing read at all, so there is no
     // partial result to salvage here.

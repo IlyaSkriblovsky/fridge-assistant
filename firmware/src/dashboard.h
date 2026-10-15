@@ -10,7 +10,7 @@
 // One bounded request on a worker. No I2C and no panel access here. Cancellation
 // does not join the worker on the voice capture path; its buffer stays owned here.
 class Dashboard {
- public:
+public:
   bool start(int battery, stickyClimate::Reading climate);
   void cancel();
   bool done() const { return _done.load(std::memory_order_acquire); }
@@ -24,9 +24,9 @@ class Dashboard {
   uint32_t decodeMs() const { return _decodeMs; }
   size_t downloadBytes() const { return _frame.size; }
   void poll();
-  void close();  // only after done(); keeps the pixel buffer alive for Display
+  void close(); // only after done(); keeps the pixel buffer alive for Display
 
- private:
+private:
   static esp_err_t event(esp_http_client_event_t* event);
   static void run(void* self);
   uint8_t* _pixels = nullptr;

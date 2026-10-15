@@ -8,14 +8,17 @@ namespace testHeap {
 inline bool failAllocation = false;
 inline unsigned allocations = 0;
 inline unsigned frees = 0;
-}
+} // namespace testHeap
 inline void* heap_caps_malloc(size_t bytes, int) {
-  if (testHeap::failAllocation) return nullptr;
+  if (testHeap::failAllocation)
+    return nullptr;
   void* result = std::malloc(bytes);
-  if (result) ++testHeap::allocations;
+  if (result)
+    ++testHeap::allocations;
   return result;
 }
 inline void heap_caps_free(void* pointer) {
-  if (pointer) ++testHeap::frees;
+  if (pointer)
+    ++testHeap::frees;
   std::free(pointer);
 }

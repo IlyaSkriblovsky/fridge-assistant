@@ -8,15 +8,18 @@ import pytest
 import jobs
 
 
-@pytest.mark.parametrize("stamp,seconds", [
-    ("2026-09-23T04:59:59", 1),
-    ("2026-09-23T05:00:00", 0),
-    ("2026-09-23T20:59:59", 0),
-    ("2026-09-23T21:00:00", 8 * 3600),
-    ("2026-09-23T23:00:00", 6 * 3600),
-    ("2026-03-28T21:00:00", 7 * 3600),
-    ("2026-10-24T21:00:00", 9 * 3600),
-])
+@pytest.mark.parametrize(
+    "stamp,seconds",
+    [
+        ("2026-09-23T04:59:59", 1),
+        ("2026-09-23T05:00:00", 0),
+        ("2026-09-23T20:59:59", 0),
+        ("2026-09-23T21:00:00", 8 * 3600),
+        ("2026-09-23T23:00:00", 6 * 3600),
+        ("2026-03-28T21:00:00", 7 * 3600),
+        ("2026-10-24T21:00:00", 9 * 3600),
+    ],
+)
 def test_night_delay(stamp, seconds):
     now = datetime.fromisoformat(stamp).replace(tzinfo=ZoneInfo("Asia/Nicosia"))
     assert jobs.night_delay(now) == seconds
@@ -34,7 +37,9 @@ async def test_night_start_waits_until_morning(monkeypatch):
         waits.append(delay)
         if len(waits) == 1:
             action.assert_not_called()
-            clock.now.return_value = datetime(2026, 9, 24, 6, tzinfo=ZoneInfo("Asia/Nicosia"))
+            clock.now.return_value = datetime(
+                2026, 9, 24, 6, tzinfo=ZoneInfo("Asia/Nicosia")
+            )
         else:
             raise asyncio.CancelledError
 

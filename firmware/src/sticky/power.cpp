@@ -15,14 +15,14 @@ bool downWake = false;
 // Seeed's own firmware. SD_EN is deliberately absent: sources disagree on
 // whether the Sticky has one at all (see docs/project-vision.md).
 constexpr gpio_num_t kParkLow[] = {
-    GPIO_NUM_47,  // EPD_EN, e-paper panel power
-    GPIO_NUM_42,  // TOUCH_EN
-    GPIO_NUM_41,  // TOUCH_RST
-    GPIO_NUM_48,  // BUZZER
-    GPIO_NUM_38,  // MIC power enable (TPS22916)
+    GPIO_NUM_47, // EPD_EN, e-paper panel power
+    GPIO_NUM_42, // TOUCH_EN
+    GPIO_NUM_41, // TOUCH_RST
+    GPIO_NUM_48, // BUZZER
+    GPIO_NUM_38, // MIC power enable (TPS22916)
 };
 
-}  // namespace
+} // namespace
 
 void stickyPower::holdLatch() {
   // Clear any pad holds a previous deep sleep left armed before driving the
@@ -40,7 +40,7 @@ void stickyPower::holdLatch() {
   // deep sleep wake the pads were held through the sleep, so the latch never
   // went low and the rail never dropped -- there is nothing to settle.
   if (!wokeFromDeepSleep()) {
-    delay(100);  // let the rail settle before anything else draws on it
+    delay(100); // let the rail settle before anything else draws on it
   }
 }
 
@@ -59,9 +59,9 @@ void stickyPower::enableUpWake() {
 void stickyPower::waitForWakeButtonsReleased() {
   uint32_t since = millis();
   while (millis() - since < config::kButtonDebounceMs) {
-    if (digitalRead(kPinAiButton) == LOW ||
-        (upWake && digitalRead(kPinUpButton) == LOW) ||
-        (downWake && digitalRead(kPinDownButton) == LOW)) since = millis();
+    if (digitalRead(kPinAiButton) == LOW || (upWake && digitalRead(kPinUpButton) == LOW) ||
+        (downWake && digitalRead(kPinDownButton) == LOW))
+      since = millis();
     delay(5);
   }
 }
@@ -117,42 +117,58 @@ void stickyPower::deepSleep(uint64_t timerWakeUs) {
   enterDeepSleep();
 }
 
-bool stickyPower::wokeFromDeepSleep() {
-  return esp_reset_reason() == ESP_RST_DEEPSLEEP;
-}
+bool stickyPower::wokeFromDeepSleep() { return esp_reset_reason() == ESP_RST_DEEPSLEEP; }
 
 const char* stickyPower::resetReasonName() { return resetReasonName(esp_reset_reason()); }
 
-const char* stickyPower::wakeupCauseName() {
-  return wakeupCauseName(esp_sleep_get_wakeup_cause());
-}
+const char* stickyPower::wakeupCauseName() { return wakeupCauseName(esp_sleep_get_wakeup_cause()); }
 
 const char* stickyPower::resetReasonName(esp_reset_reason_t reason) {
   switch (reason) {
-    case ESP_RST_POWERON: return "POWERON";
-    case ESP_RST_EXT: return "EXT";
-    case ESP_RST_SW: return "SW";
-    case ESP_RST_PANIC: return "PANIC";
-    case ESP_RST_INT_WDT: return "INT_WDT";
-    case ESP_RST_TASK_WDT: return "TASK_WDT";
-    case ESP_RST_WDT: return "WDT";
-    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-    case ESP_RST_BROWNOUT: return "BROWNOUT";
-    case ESP_RST_SDIO: return "SDIO";
-    default: return "UNKNOWN";
+  case ESP_RST_POWERON:
+    return "POWERON";
+  case ESP_RST_EXT:
+    return "EXT";
+  case ESP_RST_SW:
+    return "SW";
+  case ESP_RST_PANIC:
+    return "PANIC";
+  case ESP_RST_INT_WDT:
+    return "INT_WDT";
+  case ESP_RST_TASK_WDT:
+    return "TASK_WDT";
+  case ESP_RST_WDT:
+    return "WDT";
+  case ESP_RST_DEEPSLEEP:
+    return "DEEPSLEEP";
+  case ESP_RST_BROWNOUT:
+    return "BROWNOUT";
+  case ESP_RST_SDIO:
+    return "SDIO";
+  default:
+    return "UNKNOWN";
   }
 }
 
 const char* stickyPower::wakeupCauseName(esp_sleep_wakeup_cause_t cause) {
   switch (cause) {
-    case ESP_SLEEP_WAKEUP_UNDEFINED: return "none";
-    case ESP_SLEEP_WAKEUP_EXT0: return "ext0";
-    case ESP_SLEEP_WAKEUP_EXT1: return "ext1";
-    case ESP_SLEEP_WAKEUP_TIMER: return "timer";
-    case ESP_SLEEP_WAKEUP_TOUCHPAD: return "touch";
-    case ESP_SLEEP_WAKEUP_ULP: return "ulp";
-    case ESP_SLEEP_WAKEUP_GPIO: return "gpio";
-    case ESP_SLEEP_WAKEUP_UART: return "uart";
-    default: return "other";
+  case ESP_SLEEP_WAKEUP_UNDEFINED:
+    return "none";
+  case ESP_SLEEP_WAKEUP_EXT0:
+    return "ext0";
+  case ESP_SLEEP_WAKEUP_EXT1:
+    return "ext1";
+  case ESP_SLEEP_WAKEUP_TIMER:
+    return "timer";
+  case ESP_SLEEP_WAKEUP_TOUCHPAD:
+    return "touch";
+  case ESP_SLEEP_WAKEUP_ULP:
+    return "ulp";
+  case ESP_SLEEP_WAKEUP_GPIO:
+    return "gpio";
+  case ESP_SLEEP_WAKEUP_UART:
+    return "uart";
+  default:
+    return "other";
   }
 }

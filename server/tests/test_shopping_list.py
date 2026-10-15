@@ -42,16 +42,21 @@ def keep(monkeypatch):
 
 
 def test_add_syncs_and_handles_repeated_items(keep):
-    assert shopping.add(["Молоко", " \t", "молоко", "Хлеб"]) == {"items": [
-        {"item": "Молоко", "result": "added"},
-        {"item": "молоко", "result": "already_listed"},
-        {"item": "Хлеб", "result": "added"},
-    ]}
+    assert shopping.add(["Молоко", " \t", "молоко", "Хлеб"]) == {
+        "items": [
+            {"item": "Молоко", "result": "added"},
+            {"item": "молоко", "result": "already_listed"},
+            {"item": "Хлеб", "result": "added"},
+        ]
+    }
     keep.authenticate.assert_called_once_with("test", "test", sync=False)
     keep.get.assert_called_once_with("test")
     assert keep.sync.call_count == 2
     assert [call[0] for call in keep.mock_calls] == [
-        "authenticate", "sync", "get", "sync"
+        "authenticate",
+        "sync",
+        "get",
+        "sync",
     ]
 
 
@@ -72,7 +77,9 @@ def test_invalid_note(keep, kind):
     assert keep.sync.call_count == 1
 
 
-@pytest.mark.parametrize("error", [KeepException("broken"), APIException(500, "broken"), OSError("offline")])
+@pytest.mark.parametrize(
+    "error", [KeepException("broken"), APIException(500, "broken"), OSError("offline")]
+)
 @pytest.mark.parametrize("stage", ["authenticate", "initial_sync", "final_sync"])
 def test_service_errors(keep, error, stage):
     if stage == "authenticate":
@@ -82,12 +89,15 @@ def test_service_errors(keep, error, stage):
     assert shopping.add(["Хлеб"]) == {"error": f"Google Keep failed: {error}"}
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("  молоко   UHT ", "Молоко UHT"),
-    ("iPhone", "IPhone"),
-    ("2 л молока", "2 Л молока"),
-    ("«сыр»", "«Сыр»"),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("  молоко   UHT ", "Молоко UHT"),
+        ("iPhone", "IPhone"),
+        ("2 л молока", "2 Л молока"),
+        ("«сыр»", "«Сыр»"),
+    ],
+)
 def test_added_items_start_with_uppercase(keep, text, expected):
     shopping.add([text])
     assert keep.get.return_value.unchecked[0].text == expected

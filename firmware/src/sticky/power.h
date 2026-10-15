@@ -23,8 +23,8 @@
 
 namespace stickyPower {
 
-constexpr int kPinHold = 45;      // PWR_HOLD
-constexpr int kPinLock = 46;      // PWR_LOCK
+constexpr int kPinHold = 45; // PWR_HOLD
+constexpr int kPinLock = 46; // PWR_LOCK
 constexpr int kPinUpButton = 5;
 // Opt-in so measurement rigs retain their AI-only wake behavior.
 void enableUpWake();
@@ -33,7 +33,7 @@ void enableDownWake();
 // Wait indefinitely for a stable release; a held wake pin would loop on wake.
 void waitForWakeButtonsReleased();
 
-constexpr int kPinAiButton = 4;   // AI button, active low, a wake source
+constexpr int kPinAiButton = 4; // AI button, active low, a wake source
 
 // Drives the latch high. First thing in setup(), before anything else draws on
 // the rail; also clears any pad hold a previous deep sleep left armed, since
@@ -69,4 +69,4 @@ const char* wakeupCauseName(esp_sleep_wakeup_cause_t cause);
 const char* resetReasonName();
 const char* wakeupCauseName();
 
-}  // namespace stickyPower
+} // namespace stickyPower

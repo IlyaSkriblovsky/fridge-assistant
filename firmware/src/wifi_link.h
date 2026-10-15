@@ -77,12 +77,12 @@
 //    attempts rather than one -- which is the reason the fallback is decided on
 //    a clock rather than on a status code.
 class WifiLink {
- public:
+public:
   enum class State : uint8_t {
-    Idle,        // begin() has not been called, or end() has
-    Connecting,  // an attempt is in flight
-    Online,      // associated with an IP
-    Failed,      // out of budget, or the association dropped afterwards
+    Idle,       // begin() has not been called, or end() has
+    Connecting, // an attempt is in flight
+    Online,     // associated with an IP
+    Failed,     // out of budget, or the association dropped afterwards
   };
 
   static constexpr uint32_t kBssidBytes = 6;
@@ -95,8 +95,8 @@ class WifiLink {
     uint32_t gateway;
     uint32_t mask;
     uint32_t dns;
-    uint32_t seconds;  // the life the server offered, from the lwIP client
-    uint32_t ageS;     // how long ago it was granted, across however many sleeps
+    uint32_t seconds; // the life the server offered, from the lwIP client
+    uint32_t ageS;    // how long ago it was granted, across however many sleeps
   };
 
   // The lease the last successful connect left in RTC memory, for a log line
@@ -193,7 +193,7 @@ class WifiLink {
   const char* dns() const { return _dns; }
   bool usedCustomDns() const { return _usedCustomDns; }
 
- private:
+private:
   // Drops the cached AP, so the next begin() scans. Called when an attempt fails
   // outright -- an entry that has just cost a full timeout is worse than no
   // entry.
@@ -224,13 +224,13 @@ class WifiLink {
 
   const char* _ssid = nullptr;
   const char* _password = nullptr;
-  uint32_t _customDns = 0;  // begin()'s, or zero to keep the network's
+  uint32_t _customDns = 0; // begin()'s, or zero to keep the network's
 
   State _state = State::Idle;
   const char* _lastError = "";
 
   int64_t _startUs = 0;
-  uint32_t _settledMs = 0;  // elapsed at the moment the attempt stopped moving
+  uint32_t _settledMs = 0; // elapsed at the moment the attempt stopped moving
   uint32_t _attemptEndsAtMs = 0;
   uint32_t _retryAtMs = 0;
 

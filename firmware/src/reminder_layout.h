@@ -17,8 +17,7 @@ inline Layout measure(const char* text) {
     const int height = (lines - 1) * face->yAdvance + textBoxHeight(*face, 1);
     if (height <= kHeight || face == &fontFreeSans12) {
       const int width = lines == 1 ? textWidth(*face, text, 1) : kWidth;
-      return {face, lines, height, (800 - width - kIcon - kGap) / 2,
-              kTop + (kHeight - height) / 2};
+      return {face, lines, height, (800 - width - kIcon - kGap) / 2, kTop + (kHeight - height) / 2};
     }
   }
   return {};
@@ -31,10 +30,9 @@ inline void draw(Seeed_GFX& gfx, const char* text) {
   gfx.fillCircle(cx, cy, 24, TFT_WHITE);
   gfx.fillRect(cx - 1, cy - 17, 3, 19, TFT_BLACK);
   gfx.fillRect(cx, cy - 1, 15, 3, TFT_BLACK);
-  textDrawWrapped(gfx, *box.face, text, box.x + kIcon + kGap, box.y,
-                  1, kWidth, box.lines);
+  textDrawWrapped(gfx, *box.face, text, box.x + kIcon + kGap, box.y, 1, kWidth, box.lines);
   constexpr const char* hint = "нажмите любую кнопку";
-  textDraw(gfx, fontFreeSans12, hint,
-           (800 - textWidth(fontFreeSans12, hint, 1)) / 2, kFooterTop, 1);
+  textDraw(gfx, fontFreeSans12, hint, (800 - textWidth(fontFreeSans12, hint, 1)) / 2, kFooterTop,
+           1);
 }
-}
+} // namespace reminderLayout

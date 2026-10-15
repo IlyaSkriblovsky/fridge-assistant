@@ -42,4 +42,4 @@ constexpr const char* kBackendBaseUrl = "";
 //     python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 constexpr const char* kDeviceToken = "";
 
-}  // namespace secrets
+} // namespace secrets

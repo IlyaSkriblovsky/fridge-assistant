@@ -75,16 +75,61 @@ ADD_TO_SHOPPING_LIST = types.FunctionDeclaration(
 )
 
 CREATE_REMINDER = types.FunctionDeclaration(
-    name="create_reminder", description="Create a one-shot reminder. Extract duration, never calculate its date yourself. Use local_at only for an explicit calendar date and time in the timezone given with the request time.",
-    parameters_json_schema={"type": "object", "properties": {
-        "text": {"type": "string", "description": "Only the essential subject or action to remember, without reminder-request wording or its introductory prepositions; at most 240 UTF-8 bytes."},
-        "amount": {"type": "integer", "minimum": 1},
-        "unit": {"type": "string", "enum": ["seconds", "minutes", "hours", "days", "weeks", "months", "years"]},
-        "local_at": {"type": "string", "description": "Exact local YYYY-MM-DDTHH:MM:SS, without offset."}},
-        "required": ["text"], "additionalProperties": False})
-LIST_REMINDERS = types.FunctionDeclaration(name="list_reminders", description="List all active reminders, including overdue ones, with IDs and due times.", parameters_json_schema={"type": "object", "properties": {}})
-CANCEL_REMINDER = types.FunctionDeclaration(name="cancel_reminder", description="Cancel one reminder by ID obtained from list_reminders.", parameters_json_schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]})
-TOOLS = [types.Tool(function_declarations=[ADD_TO_SHOPPING_LIST, CREATE_REMINDER, LIST_REMINDERS, CANCEL_REMINDER])]
+    name="create_reminder",
+    description="Create a one-shot reminder. Extract duration, never calculate its date yourself. Use local_at only for an explicit calendar date and time in the timezone given with the request time.",
+    parameters_json_schema={
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Only the essential subject or action to remember, without reminder-request wording or its introductory prepositions; at most 240 UTF-8 bytes.",
+            },
+            "amount": {"type": "integer", "minimum": 1},
+            "unit": {
+                "type": "string",
+                "enum": [
+                    "seconds",
+                    "minutes",
+                    "hours",
+                    "days",
+                    "weeks",
+                    "months",
+                    "years",
+                ],
+            },
+            "local_at": {
+                "type": "string",
+                "description": "Exact local YYYY-MM-DDTHH:MM:SS, without offset.",
+            },
+        },
+        "required": ["text"],
+        "additionalProperties": False,
+    },
+)
+LIST_REMINDERS = types.FunctionDeclaration(
+    name="list_reminders",
+    description="List all active reminders, including overdue ones, with IDs and due times.",
+    parameters_json_schema={"type": "object", "properties": {}},
+)
+CANCEL_REMINDER = types.FunctionDeclaration(
+    name="cancel_reminder",
+    description="Cancel one reminder by ID obtained from list_reminders.",
+    parameters_json_schema={
+        "type": "object",
+        "properties": {"id": {"type": "integer"}},
+        "required": ["id"],
+    },
+)
+TOOLS = [
+    types.Tool(
+        function_declarations=[
+            ADD_TO_SHOPPING_LIST,
+            CREATE_REMINDER,
+            LIST_REMINDERS,
+            CANCEL_REMINDER,
+        ]
+    )
+]
 
 # Tools are synchronous and run in a worker thread each.
 HANDLERS: dict[str, Callable[..., dict[str, object]]] = {
@@ -116,15 +161,29 @@ def describe_usage(response: types.GenerateContentResponse) -> str:
     )
 
 
-async def answer(client: genai.Client, request: bytes | str, log: Callable[[str], None], *, mime_type: str = "audio/wav") -> str:
-    token = reminders.REQUEST_TIME.set(reminders.REQUEST_TIME.get() or datetime.now(timezone.utc))
+async def answer(
+    client: genai.Client,
+    request: bytes | str,
+    log: Callable[[str], None],
+    *,
+    mime_type: str = "audio/wav",
+) -> str:
+    token = reminders.REQUEST_TIME.set(
+        reminders.REQUEST_TIME.get() or datetime.now(timezone.utc)
+    )
     try:
         return await _answer(client, request, log, mime_type=mime_type)
     finally:
         reminders.REQUEST_TIME.reset(token)
 
 
-async def _answer(client: genai.Client, request: bytes | str, log: Callable[[str], None], *, mime_type: str = "audio/wav") -> str:
+async def _answer(
+    client: genai.Client,
+    request: bytes | str,
+    log: Callable[[str], None],
+    *,
+    mime_type: str = "audio/wav",
+) -> str:
     """Carry out the request and return a textual reply.
 
     Errors from Gemini itself are left to the caller. A failing tool is not an
@@ -132,12 +191,19 @@ async def _answer(client: genai.Client, request: bytes | str, log: Callable[[str
     """
     contents: list[types.Content] = [
         types.Content(
-            role="user", parts=[types.Part.from_text(text=request) if isinstance(request, str)
-                                else types.Part.from_bytes(data=request, mime_type=mime_type)]
+            role="user",
+            parts=[
+                types.Part.from_text(text=request)
+                if isinstance(request, str)
+                else types.Part.from_bytes(data=request, mime_type=mime_type)
+            ],
         )
     ]
     reference = reminders.REQUEST_TIME.get() or datetime.now(timezone.utc)
-    instruction = SYSTEM_INSTRUCTION + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} ({reminders.ZONE.key})."
+    instruction = (
+        SYSTEM_INSTRUCTION
+        + f"\nRequest time: {reference.astimezone(reminders.ZONE).isoformat()} ({reminders.ZONE.key})."
+    )
     # The request task owns this context; worker threads inherit the fixed anchor.
     config = types.GenerateContentConfig(system_instruction=instruction, tools=TOOLS)
 
@@ -166,8 +232,12 @@ async def _answer(client: genai.Client, request: bytes | str, log: Callable[[str
         for call in calls:
             started = time.monotonic()
             result = await call_tool(call)
-            log(f"-> {call.name}({call.args}) => {result}  {time.monotonic() - started:.2f} s")
-            results.append(types.Part.from_function_response(name=call.name, response=result))
+            log(
+                f"-> {call.name}({call.args}) => {result}  {time.monotonic() - started:.2f} s"
+            )
+            results.append(
+                types.Part.from_function_response(name=call.name, response=result)
+            )
         # Function results go back as a user turn: the Gemini API rejects "tool".
         contents.append(types.Content(role="user", parts=results))
 

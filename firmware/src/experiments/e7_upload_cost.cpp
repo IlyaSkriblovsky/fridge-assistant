@@ -103,37 +103,43 @@ constexpr uint32_t kMagic = 0xE7C0FFEE;
 
 enum Outcome : uint8_t {
   kOk = 0,
-  kConnectFailed,  // nothing accepted a connection, twice
-  kWriteFailed,    // the socket died with the body half sent
-  kNoAnswer,       // the body went out and nothing came back
-  kBadStatus,      // answered, and not with 200
+  kConnectFailed, // nothing accepted a connection, twice
+  kWriteFailed,   // the socket died with the body half sent
+  kNoAnswer,      // the body went out and nothing came back
+  kBadStatus,     // answered, and not with 200
 };
 
 const char* outcomeName(uint8_t outcome) {
   switch (outcome) {
-    case kOk: return "ok";
-    case kConnectFailed: return "no connect";
-    case kWriteFailed: return "write died";
-    case kNoAnswer: return "no answer";
-    case kBadStatus: return "bad status";
-    default: return "?";
+  case kOk:
+    return "ok";
+  case kConnectFailed:
+    return "no connect";
+  case kWriteFailed:
+    return "write died";
+  case kNoAnswer:
+    return "no answer";
+  case kBadStatus:
+    return "bad status";
+  default:
+    return "?";
   }
 }
 
 struct Row {
   uint8_t cycle;
-  uint8_t index;   // 1..kUploadsPerWake
-  bool sleepOff;   // this wake ran with WiFi.setSleep(false)
-  bool viaHttp;    // upload 4: the firmware's own VoiceRequest
+  uint8_t index; // 1..kUploadsPerWake
+  bool sleepOff; // this wake ran with WiFi.setSleep(false)
+  bool viaHttp;  // upload 4: the firmware's own VoiceRequest
   uint16_t connectMs;
-  uint16_t retryMs;  // a second connect, after the first gave up; 0 if not needed
+  uint16_t retryMs; // a second connect, after the first gave up; 0 if not needed
   uint16_t headerMs;
   uint16_t bodyMs;
-  uint16_t waitMs;  // the body written, to the first byte of the status line
+  uint16_t waitMs; // the body written, to the first byte of the status line
   uint16_t readMs;
   uint16_t totalMs;
-  uint16_t stallMs;    // the slowest single chunk of the body
-  uint16_t stallAtKb;  // and where it started
+  uint16_t stallMs;   // the slowest single chunk of the body
+  uint16_t stallAtKb; // and where it started
   uint16_t status;
   int8_t rssi;
   uint8_t outcome;
@@ -154,7 +160,8 @@ uint32_t g_chunkCount = 0;
 char g_host[48] = {0};
 uint16_t g_port = 80;
 
-constexpr const char* kRowFormat = "%3s %3s %-4s %2s %-6s %7s %6s %8s %7s %6s %8s %8s %10s %5s  %s\n";
+constexpr const char* kRowFormat =
+    "%3s %3s %-4s %2s %-6s %7s %6s %8s %7s %6s %8s %8s %10s %5s  %s\n";
 
 // The tone that stands in for a recording. The content does not matter to a
 // measurement of throughput -- what matters is that the payload is the size and
@@ -162,11 +169,12 @@ constexpr const char* kRowFormat = "%3s %3s %-4s %2s %-6s %7s %6s %8s %7s %6s %8
 // backend hears something that is obviously the rig and not a recording.
 void fillWithTone() {
   uint16_t phase = 0;
-  constexpr uint16_t kStep = 1802;  // 440 Hz at 16 kHz, in 1/65536ths of a turn
+  constexpr uint16_t kStep = 1802; // 440 Hz at 16 kHz, in 1/65536ths of a turn
 
   while (!audio.full()) {
     const uint32_t want = audio.nextChunkSamples();
-    if (want == 0) break;
+    if (want == 0)
+      break;
     int16_t* head = audio.writeHead();
     for (uint32_t i = 0; i < want; ++i) {
       const int32_t ramp = static_cast<int32_t>(phase) - 32768;
@@ -188,13 +196,17 @@ int readLine(NetworkClient& client, char* out, size_t size, uint32_t budgetMs) {
   for (;;) {
     const int c = client.read();
     if (c < 0) {
-      if (client.available() == 0 && !client.connected()) break;
-      if (static_cast<uint32_t>((esp_timer_get_time() - start) / 1000) >= budgetMs) return -1;
+      if (client.available() == 0 && !client.connected())
+        break;
+      if (static_cast<uint32_t>((esp_timer_get_time() - start) / 1000) >= budgetMs)
+        return -1;
       delay(1);
       continue;
     }
-    if (c == '\n') break;
-    if (c != '\r' && n + 1 < size) out[n++] = static_cast<char>(c);
+    if (c == '\n')
+      break;
+    if (c != '\r' && n + 1 < size)
+      out[n++] = static_cast<char>(c);
   }
   out[n] = '\0';
   return static_cast<int>(n);
@@ -209,14 +221,16 @@ size_t drainBody(NetworkClient& client, uint32_t budgetMs) {
   for (;;) {
     const int avail = client.available();
     if (avail > 0) {
-      const int got = client.read(buf, avail > static_cast<int>(sizeof(buf))
-                                           ? sizeof(buf)
-                                           : static_cast<size_t>(avail));
-      if (got > 0) total += static_cast<size_t>(got);
+      const int got = client.read(
+          buf, avail > static_cast<int>(sizeof(buf)) ? sizeof(buf) : static_cast<size_t>(avail));
+      if (got > 0)
+        total += static_cast<size_t>(got);
       continue;
     }
-    if (!client.connected()) break;
-    if (static_cast<uint32_t>((esp_timer_get_time() - start) / 1000) >= budgetMs) break;
+    if (!client.connected())
+      break;
+    if (static_cast<uint32_t>((esp_timer_get_time() - start) / 1000) >= budgetMs)
+      break;
     delay(1);
   }
   return total;
@@ -270,8 +284,8 @@ Row postBare(const uint8_t* body, size_t bytes) {
                static_cast<unsigned>(bytes));
 
   const int64_t tHead = esp_timer_get_time();
-  const size_t headSent = client.write(reinterpret_cast<const uint8_t*>(head),
-                                       static_cast<size_t>(headLen));
+  const size_t headSent =
+      client.write(reinterpret_cast<const uint8_t*>(head), static_cast<size_t>(headLen));
   row.headerMs = static_cast<uint16_t>((esp_timer_get_time() - tHead) / 1000);
   if (headSent != static_cast<size_t>(headLen)) {
     row.outcome = kWriteFailed;
@@ -290,7 +304,8 @@ Row postBare(const uint8_t* body, size_t bytes) {
     const int64_t now = esp_timer_get_time();
     const uint32_t chunkMs = static_cast<uint32_t>((now - previous) / 1000);
     previous = now;
-    if (g_chunkCount < kMaxChunks) g_chunkMs[g_chunkCount++] = static_cast<uint16_t>(chunkMs);
+    if (g_chunkCount < kMaxChunks)
+      g_chunkMs[g_chunkCount++] = static_cast<uint16_t>(chunkMs);
     if (chunkMs > row.stallMs) {
       row.stallMs = static_cast<uint16_t>(chunkMs);
       row.stallAtKb = static_cast<uint16_t>(sent / 1024);
@@ -322,7 +337,8 @@ Row postBare(const uint8_t* body, size_t bytes) {
   }
 
   unsigned status = 0;
-  if (sscanf(line, "HTTP/%*d.%*d %u", &status) == 1) row.status = static_cast<uint16_t>(status);
+  if (sscanf(line, "HTTP/%*d.%*d %u", &status) == 1)
+    row.status = static_cast<uint16_t>(status);
 
   const int64_t tRead = esp_timer_get_time();
   while (readLine(client, line, sizeof(line), config::kResponseTimeoutMs) > 0) {
@@ -355,11 +371,21 @@ Row postViaFirmware(const uint8_t* body, size_t bytes) {
   row.status = static_cast<uint16_t>(voiceRequest.status());
 
   switch (result) {
-    case VoiceRequest::Result::Ok: row.outcome = kOk; break;
-    case VoiceRequest::Result::NoServer: row.outcome = kConnectFailed; break;
-    case VoiceRequest::Result::ServerError: row.outcome = kBadStatus; break;
-    case VoiceRequest::Result::BadResponse: row.outcome = kBadStatus; break;
-    case VoiceRequest::Result::TimedOut: row.outcome = kNoAnswer; break;
+  case VoiceRequest::Result::Ok:
+    row.outcome = kOk;
+    break;
+  case VoiceRequest::Result::NoServer:
+    row.outcome = kConnectFailed;
+    break;
+  case VoiceRequest::Result::ServerError:
+    row.outcome = kBadStatus;
+    break;
+  case VoiceRequest::Result::BadResponse:
+    row.outcome = kBadStatus;
+    break;
+  case VoiceRequest::Result::TimedOut:
+    row.outcome = kNoAnswer;
+    break;
   }
   if (result != VoiceRequest::Result::Ok) {
     Serial1.printf("       VoiceRequest: %s\n", voiceRequest.lastError());
@@ -368,7 +394,8 @@ Row postViaFirmware(const uint8_t* body, size_t bytes) {
 }
 
 void printChunks(const Row& row) {
-  if (g_chunkCount == 0) return;
+  if (g_chunkCount == 0)
+    return;
 
   // Every chunk, every time. A stall is a shape rather than a maximum -- one
   // chunk at 1000 ms with the rest at 10 is a retransmission timeout, and
@@ -376,7 +403,8 @@ void printChunks(const Row& row) {
   // does not survive being reduced to a number.
   Serial1.printf("       %u KB in %u chunks, ms each:", static_cast<unsigned>(kChunkBytes / 1024),
                  static_cast<unsigned>(g_chunkCount));
-  for (uint32_t i = 0; i < g_chunkCount; ++i) Serial1.printf(" %u", g_chunkMs[i]);
+  for (uint32_t i = 0; i < g_chunkCount; ++i)
+    Serial1.printf(" %u", g_chunkMs[i]);
   Serial1.println();
   if (row.stallMs > 0) {
     Serial1.printf("       slowest chunk %u ms, at %u KB in\n", row.stallMs, row.stallAtKb);
@@ -384,9 +412,8 @@ void printChunks(const Row& row) {
 }
 
 void describe(const Row& row, size_t bytes) {
-  const uint32_t kbps = row.bodyMs > 0
-                            ? static_cast<uint32_t>((bytes / 1024) * 1000 / row.bodyMs)
-                            : 0;
+  const uint32_t kbps =
+      row.bodyMs > 0 ? static_cast<uint32_t>((bytes / 1024) * 1000 / row.bodyMs) : 0;
 
   if (row.viaHttp) {
     Serial1.printf("  up %u  VoiceRequest: %lu ms to the first byte, %lu ms in all -> %u (%s)\n",
@@ -396,15 +423,17 @@ void describe(const Row& row, size_t bytes) {
   }
 
   Serial1.printf("  up %u  connect %u ms", row.index, row.connectMs);
-  if (row.retryMs > 0) Serial1.printf(" (failed, retry %u ms)", row.retryMs);
+  if (row.retryMs > 0)
+    Serial1.printf(" (failed, retry %u ms)", row.retryMs);
   Serial1.printf(", header %u ms, body %u ms (%lu KB/s), wait %u ms, read %u ms"
                  " -> %u, %u ms in all (%s)\n",
-                 row.headerMs, row.bodyMs, static_cast<unsigned long>(kbps), row.waitMs,
-                 row.readMs, row.status, row.totalMs, outcomeName(row.outcome));
+                 row.headerMs, row.bodyMs, static_cast<unsigned long>(kbps), row.waitMs, row.readMs,
+                 row.status, row.totalMs, outcomeName(row.outcome));
 }
 
 void record(const Row& row) {
-  if (g_rows < kLogRows) g_log[g_rows] = row;
+  if (g_rows < kLogRows)
+    g_log[g_rows] = row;
   ++g_rows;
 }
 
@@ -464,7 +493,7 @@ void printTable(size_t bytes) {
   Serial1.println();
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   const int64_t tEntry = esp_timer_get_time();
@@ -517,7 +546,8 @@ void setup() {
   // esp_wifi_set_ps() needs the station to exist, which WiFi.mode() is what
   // creates -- and deep sleep puts it back to the IDF's default on every wake,
   // so there is nothing to undo on the wakes that leave it alone.
-  if (sleepOff) WiFi.setSleep(false);
+  if (sleepOff)
+    WiFi.setSleep(false);
 
   if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword, secrets::kDnsServer)) {
     Serial1.printf("FAILED: %s\n", wifi.lastError());
@@ -525,7 +555,8 @@ void setup() {
     stickyBuzzer::error();
     stickyPower::deepSleep();
   }
-  while (wifi.poll() == WifiLink::State::Connecting) delay(2);
+  while (wifi.poll() == WifiLink::State::Connecting)
+    delay(2);
 
   if (!wifi.online()) {
     Serial1.printf("  no address after %lu ms: %s\n", static_cast<unsigned long>(wifi.elapsedMs()),
@@ -544,7 +575,8 @@ void setup() {
                  static_cast<unsigned long>((esp_timer_get_time() - tEntry) / 1000));
 
   for (uint32_t i = 1; i <= kUploadsPerWake; ++i) {
-    if (i > 1) delay(kGapMs);
+    if (i > 1)
+      delay(kGapMs);
 
     const bool viaFirmware = (i == kUploadsPerWake);
     Row row = viaFirmware ? postViaFirmware(body, bytes) : postBare(body, bytes);
@@ -553,7 +585,8 @@ void setup() {
     row.sleepOff = sleepOff;
 
     describe(row, bytes);
-    if (!viaFirmware) printChunks(row);
+    if (!viaFirmware)
+      printChunks(row);
     record(row);
   }
 

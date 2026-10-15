@@ -14,7 +14,7 @@ namespace {
 // lock once it finds the slot empty -- so the bit and the slot never disagree.
 constexpr EventBits_t kIdleBit = BIT0;
 
-}  // namespace
+} // namespace
 
 Display::~Display() {
   if (_task != nullptr) {
@@ -24,28 +24,33 @@ Display::~Display() {
     waitIdle(UINT32_MAX);
     vTaskDelete(_task);
   }
-  if (_events != nullptr) vEventGroupDelete(_events);
-  if (_lock != nullptr) vSemaphoreDelete(_lock);
+  if (_events != nullptr)
+    vEventGroupDelete(_events);
+  if (_lock != nullptr)
+    vSemaphoreDelete(_lock);
 }
 
 bool Display::start() {
-  if (_task != nullptr) return true;
+  if (_task != nullptr)
+    return true;
 
   if (!_screen.begin()) {
     _lastError = _screen.lastError();
     return false;
   }
 
-  if (_lock == nullptr) _lock = xSemaphoreCreateMutex();
-  if (_events == nullptr) _events = xEventGroupCreate();
+  if (_lock == nullptr)
+    _lock = xSemaphoreCreateMutex();
+  if (_events == nullptr)
+    _events = xEventGroupCreate();
   if (_lock == nullptr || _events == nullptr) {
     _lastError = "no memory for the display task's lock";
     return false;
   }
   xEventGroupSetBits(_events, kIdleBit);
 
-  if (xTaskCreatePinnedToCore(trampoline, "display", kStackBytes, this, kPriority, &_task,
-                              kCore) != pdPASS) {
+  if (xTaskCreatePinnedToCore(trampoline, "display", kStackBytes, this, kPriority, &_task, kCore) !=
+      pdPASS) {
     _task = nullptr;
     _lastError = "display task could not be created";
     return false;
@@ -54,7 +59,8 @@ bool Display::start() {
 }
 
 void Display::clear() {
-  if (_task == nullptr) return;
+  if (_task == nullptr)
+    return;
 
   xSemaphoreTake(_lock, portMAX_DELAY);
   _clearPending = true;
@@ -67,13 +73,16 @@ void Display::clear() {
 }
 
 void Display::sensors() { post(Screen::Sensors, nullptr, nullptr); }
-void Display::dashboard(const uint8_t* pixels) { post(Screen::Dashboard, nullptr, nullptr, pixels); }
+void Display::dashboard(const uint8_t* pixels) {
+  post(Screen::Dashboard, nullptr, nullptr, pixels);
+}
 void Display::staleIndicator() { post(Screen::Stale, nullptr, nullptr); }
 
 void Display::listening() { post(Screen::Listening, nullptr, nullptr); }
 
 void Display::stopAnimation() {
-  if (_task == nullptr) return;
+  if (_task == nullptr)
+    return;
   xSemaphoreTake(_lock, portMAX_DELAY);
   _animationRequested = Screen::Count;
   xSemaphoreGive(_lock);
@@ -91,7 +100,8 @@ void Display::answer(const char* text) { post(Screen::Answer, text, nullptr); }
 void Display::error(const char* title, const char* detail) { post(Screen::Error, title, detail); }
 
 void Display::post(Screen screen, const char* text, const char* detail, const uint8_t* pixels) {
-  if (_task == nullptr) return;
+  if (_task == nullptr)
+    return;
 
   // Copied through textCopy() rather than raw, so that the slot's bound --
   // which is in bytes, because the buffer is -- falls between characters. A
@@ -107,10 +117,10 @@ void Display::post(Screen screen, const char* text, const char* detail, const ui
     _records[static_cast<uint8_t>(_slot.screen)].superseded = true;
   }
   _slot = next;
-  _animationRequested = screen == Screen::Listening && config::kListeningAnimation
-      ? Screen::ListeningFrame
-      : screen == Screen::Thinking && config::kThinkingAnimation
-          ? Screen::ThinkingFrame : Screen::Count;
+  _animationRequested =
+      screen == Screen::Listening && config::kListeningAnimation ? Screen::ListeningFrame
+      : screen == Screen::Thinking && config::kThinkingAnimation ? Screen::ThinkingFrame
+                                                                 : Screen::Count;
   Record& record = _records[static_cast<uint8_t>(screen)];
   record.postedUs = esp_timer_get_time();
   record.superseded = false;
@@ -121,7 +131,8 @@ void Display::post(Screen screen, const char* text, const char* detail, const ui
 }
 
 bool Display::waitIdle(uint32_t timeoutMs) {
-  if (_task == nullptr) return true;
+  if (_task == nullptr)
+    return true;
 
   const TickType_t ticks = timeoutMs == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs);
   // The bits are set and waited on inside the kernel's own critical sections,
@@ -131,7 +142,8 @@ bool Display::waitIdle(uint32_t timeoutMs) {
 }
 
 uint32_t Display::stackUnusedBytes() const {
-  if (_task == nullptr) return 0;
+  if (_task == nullptr)
+    return 0;
   // StackType_t is a byte on this port, so the high-water mark is in bytes.
   return static_cast<uint32_t>(uxTaskGetStackHighWaterMark(_task));
 }
@@ -182,7 +194,8 @@ void Display::run() {
         animationOnGlass = Screen::ThinkingFrame;
     }
     const uint32_t pauseMs = animationOnGlass == Screen::ThinkingFrame
-        ? config::kThinkingFramePauseMs : config::kListeningFramePauseMs;
+                                 ? config::kThinkingFramePauseMs
+                                 : config::kListeningFramePauseMs;
     nextFrameUs = esp_timer_get_time() + pauseMs * 1000LL;
   }
 }
@@ -199,50 +212,50 @@ void Display::draw(const Slot& slot) {
   }
 
   switch (slot.screen) {
-    case Screen::Clear:
-      _screen.clear();
-      break;
-    case Screen::Sensors:
-      break;
-    case Screen::Dashboard:
-      _screen.dashboard(slot.pixels);
-      break;
-    case Screen::Stale:
-      refused = !_screen.staleIndicator();
-      break;
-    case Screen::Listening:
-      _screen.listening();
-      break;
-    case Screen::ListeningFrame:
-      refused = !_screen.listeningFrame();
-      break;
-    case Screen::ThinkingFrame:
-      refused = !_screen.thinkingFrame();
-      break;
-    case Screen::Thinking:
-      // Refused leaves LISTENING on the glass until the answer lands, which is
-      // not worth failing a question over -- see StickyScreen::thinking().
-      refused = !_screen.thinking();
-      break;
-    case Screen::Reminder:
-      _screen.reminder(slot.text);
-      break;
-    case Screen::Answer:
-      // Full with a reason is a partial the controller refused. Full without
-      // one is the first screen of a boot, which has no full refresh behind it
-      // and takes one by design.
-      _screen.answer(slot.text);
-      refused = !_screen.lastWasPartial() && _screen.lastError()[0] != '\0';
-      break;
-    case Screen::Error:
-      _screen.error(slot.text, slot.detail);
-      refused = !_screen.lastWasPartial() && _screen.lastError()[0] != '\0';
-      break;
-    case Screen::Silent:
-      refused = !_screen.silentIndicator();
-      break;
-    case Screen::Count:
-      break;
+  case Screen::Clear:
+    _screen.clear();
+    break;
+  case Screen::Sensors:
+    break;
+  case Screen::Dashboard:
+    _screen.dashboard(slot.pixels);
+    break;
+  case Screen::Stale:
+    refused = !_screen.staleIndicator();
+    break;
+  case Screen::Listening:
+    _screen.listening();
+    break;
+  case Screen::ListeningFrame:
+    refused = !_screen.listeningFrame();
+    break;
+  case Screen::ThinkingFrame:
+    refused = !_screen.thinkingFrame();
+    break;
+  case Screen::Thinking:
+    // Refused leaves LISTENING on the glass until the answer lands, which is
+    // not worth failing a question over -- see StickyScreen::thinking().
+    refused = !_screen.thinking();
+    break;
+  case Screen::Reminder:
+    _screen.reminder(slot.text);
+    break;
+  case Screen::Answer:
+    // Full with a reason is a partial the controller refused. Full without
+    // one is the first screen of a boot, which has no full refresh behind it
+    // and takes one by design.
+    _screen.answer(slot.text);
+    refused = !_screen.lastWasPartial() && _screen.lastError()[0] != '\0';
+    break;
+  case Screen::Error:
+    _screen.error(slot.text, slot.detail);
+    refused = !_screen.lastWasPartial() && _screen.lastError()[0] != '\0';
+    break;
+  case Screen::Silent:
+    refused = !_screen.silentIndicator();
+    break;
+  case Screen::Count:
+    break;
   }
 
   record.endUs = esp_timer_get_time();

@@ -94,10 +94,23 @@ def parse(link, data):
 
 def new_flow():
     return {
-        "syn": None, "synack": None, "first": None, "last": None, "isn": None,
-        "bytes": 0, "segments": 0, "high": 0, "holes": [], "repeats": [],
-        "gaps": [], "rst": False, "zerowin": 0, "dupack": 0, "prev": None,
-        "acks": defaultdict(int), "synretx": 0,
+        "syn": None,
+        "synack": None,
+        "first": None,
+        "last": None,
+        "isn": None,
+        "bytes": 0,
+        "segments": 0,
+        "high": 0,
+        "holes": [],
+        "repeats": [],
+        "gaps": [],
+        "rst": False,
+        "zerowin": 0,
+        "dupack": 0,
+        "prev": None,
+        "acks": defaultdict(int),
+        "synretx": 0,
     }
 
 
@@ -168,16 +181,22 @@ def main(path, server_port=8000):
                     flow["dupack"] += 1
 
     print(f"{len(order)} connections to port {server_port}\n")
-    header = (f"{'#':>3} {'client':>8} {'SYN->ACK':>9} {'KB in':>7} {'segs':>5} "
-              f"{'body ms':>8} {'KB/s':>6} {'holes':>6} {'repeat':>7} {'gaps':>5} "
-              f"{'0win':>5} {'dupack':>7}  note")
+    header = (
+        f"{'#':>3} {'client':>8} {'SYN->ACK':>9} {'KB in':>7} {'segs':>5} "
+        f"{'body ms':>8} {'KB/s':>6} {'holes':>6} {'repeat':>7} {'gaps':>5} "
+        f"{'0win':>5} {'dupack':>7}  note"
+    )
     print(header)
     print("-" * len(header))
 
     totals = {"holes": 0, "repeats": 0, "conns": 0, "stalled": 0}
     for i, key in enumerate(order, 1):
         f = flows[key]
-        hand = f"{(f['synack'] - f['syn']) * 1000:.1f}" if f["syn"] and f["synack"] else "--"
+        hand = (
+            f"{(f['synack'] - f['syn']) * 1000:.1f}"
+            if f["syn"] and f["synack"]
+            else "--"
+        )
         if f["first"] and f["last"] and f["last"] > f["first"]:
             body = (f["last"] - f["first"]) * 1000.0
             rate, body_s = f"{f['bytes'] / 1024 / (body / 1000):.0f}", f"{body:.0f}"
@@ -195,21 +214,33 @@ def main(path, server_port=8000):
         totals["repeats"] += len(f["repeats"])
         if any(g[0] >= 400 for g in f["gaps"]):
             totals["stalled"] += 1
-        print(f"{i:>3} {key[1]:>8} {hand:>9} {f['bytes']/1024:>7.0f} {f['segments']:>5} "
-              f"{body_s:>8} {rate:>6} {len(f['holes']):>6} {len(f['repeats']):>7} "
-              f"{len(f['gaps']):>5} {f['zerowin']:>5} {f['dupack']:>7}  {', '.join(note)}")
+        print(
+            f"{i:>3} {key[1]:>8} {hand:>9} {f['bytes'] / 1024:>7.0f} {f['segments']:>5} "
+            f"{body_s:>8} {rate:>6} {len(f['holes']):>6} {len(f['repeats']):>7} "
+            f"{len(f['gaps']):>5} {f['zerowin']:>5} {f['dupack']:>7}  {', '.join(note)}"
+        )
 
-    print(f"\n{totals['stalled']}/{totals['conns']} connections stopped for 400 ms or more."
-          f" {totals['holes']} holes (lost on the way up),"
-          f" {totals['repeats']} repeats (arrived twice).\n")
+    print(
+        f"\n{totals['stalled']}/{totals['conns']} connections stopped for 400 ms or more."
+        f" {totals['holes']} holes (lost on the way up),"
+        f" {totals['repeats']} repeats (arrived twice).\n"
+    )
 
     for i, key in enumerate(order, 1):
         f = flows[key]
-        events = [(g[2], f"gap {g[0]:8.1f} ms, {g[1] // 1024:>3} KB in") for g in f["gaps"]
-                  if g[0] >= 400]
-        events += [(h[0], f"hole at {h[1] // 1024:>3} KB: {h[2]} bytes missing") for h in f["holes"]]
-        events += [(r[0], f"repeat at {r[1] // 1024:>3} KB ({r[2]} B) -- already had it")
-                   for r in f["repeats"]]
+        events = [
+            (g[2], f"gap {g[0]:8.1f} ms, {g[1] // 1024:>3} KB in")
+            for g in f["gaps"]
+            if g[0] >= 400
+        ]
+        events += [
+            (h[0], f"hole at {h[1] // 1024:>3} KB: {h[2]} bytes missing")
+            for h in f["holes"]
+        ]
+        events += [
+            (r[0], f"repeat at {r[1] // 1024:>3} KB ({r[2]} B) -- already had it")
+            for r in f["repeats"]
+        ]
         if not events:
             continue
         print(f"connection {i} (port {key[1]}):")
@@ -233,8 +264,11 @@ def detail(path, server_port, want):
         if p is None:
             continue
         src, sport, dst, dport, seq, ack, flags, window, payload = p
-        key = (src, sport) if dport == server_port else (
-            (dst, dport) if sport == server_port else None)
+        key = (
+            (src, sport)
+            if dport == server_port
+            else ((dst, dport) if sport == server_port else None)
+        )
         if key is None:
             continue
         if key not in conns:
@@ -247,7 +281,9 @@ def detail(path, server_port, want):
     t0 = pkts[0][0]
     isn_up = isn_dn = None
     print(f"connection {want} (port {key[1]}), {len(pkts)} packets\n")
-    print(f"{'ms':>9}  {'dir':^4} {'flags':<6} {'seq':>9} {'ack':>9} {'len':>5} {'win':>7}  note")
+    print(
+        f"{'ms':>9}  {'dir':^4} {'flags':<6} {'seq':>9} {'ack':>9} {'len':>5} {'win':>7}  note"
+    )
 
     prev_up = None
     for ts, up, seq, ack, flags, window, payload in pkts:
@@ -257,20 +293,33 @@ def detail(path, server_port, want):
             isn_dn = seq
         rel_seq = (seq - (isn_up if up else isn_dn)) & 0xFFFFFFFF
         rel_ack = (ack - ((isn_dn if up else isn_up) or 0)) & 0xFFFFFFFF
-        names = "".join(n for bit, n in ((0x02, "S"), (0x10, "A"), (0x01, "F"),
-                                         (0x04, "R"), (0x08, "P")) if flags & bit)
+        names = "".join(
+            n
+            for bit, n in (
+                (0x02, "S"),
+                (0x10, "A"),
+                (0x01, "F"),
+                (0x04, "R"),
+                (0x08, "P"),
+            )
+            if flags & bit
+        )
         note = ""
         if up and payload:
             if prev_up is not None and (ts - prev_up) * 1000 >= 400:
                 note = f"<- {(ts - prev_up) * 1000:.0f} ms of silence from the device"
             prev_up = ts
-        print(f"{(ts - t0) * 1000:9.1f}  {'up' if up else 'down':^4} {names:<6} {rel_seq:>9} "
-              f"{rel_ack if flags & 0x10 else 0:>9} {payload:>5} {window:>7}  {note}")
+        print(
+            f"{(ts - t0) * 1000:9.1f}  {'up' if up else 'down':^4} {names:<6} {rel_seq:>9} "
+            f"{rel_ack if flags & 0x10 else 0:>9} {payload:>5} {window:>7}  {note}"
+        )
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit(f"usage: {sys.argv[0]} <capture.pcap> [connection number] [server port]")
+        sys.exit(
+            f"usage: {sys.argv[0]} <capture.pcap> [connection number] [server port]"
+        )
     capture = sys.argv[1]
     which = int(sys.argv[2]) if len(sys.argv) > 2 else None
     port = int(sys.argv[3]) if len(sys.argv) > 3 else 8000

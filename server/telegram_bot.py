@@ -34,7 +34,9 @@ def configuration() -> Config | None:
     raw = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
     parts = [part.strip() for part in raw.split(",")]
     if any(not re.fullmatch(r"-?[0-9]+", part) for part in parts):
-        raise RuntimeError("TELEGRAM_ALLOWED_CHAT_IDS must contain comma-separated numeric Chat IDs")
+        raise RuntimeError(
+            "TELEGRAM_ALLOWED_CHAT_IDS must contain comma-separated numeric Chat IDs"
+        )
     return Config(token, frozenset(int(part) for part in parts))
 
 
@@ -58,7 +60,12 @@ class AudioTooLarge(Exception):
 
 class Adapter:
     def __init__(self, config, gemini, bot, downloads):
-        self.config, self.gemini, self.bot, self.downloads = config, gemini, bot, downloads
+        self.config, self.gemini, self.bot, self.downloads = (
+            config,
+            gemini,
+            bot,
+            downloads,
+        )
         # Polling is sequential across all chats, including retries.
         self.lock = asyncio.Lock()
 
@@ -68,7 +75,9 @@ class Adapter:
                 await self.bot.send_chat_action(chat_id=chat_id, action="typing")
             except Exception as exc:
                 # A cosmetic status must never prevent executing the request.
-                logger.warning("[telegram] typing status failed: %s", type(exc).__name__)
+                logger.warning(
+                    "[telegram] typing status failed: %s", type(exc).__name__
+                )
             await asyncio.sleep(TYPING_SECONDS)
 
     @asynccontextmanager
@@ -101,31 +110,53 @@ class Adapter:
         if chat is None:
             return
         if chat.type != "private" or chat.id not in self.config.allowed_chats:
-            logger.warning("[telegram] access denied: chat_id=%s chat_type=%s", chat.id, chat.type)
+            logger.warning(
+                "[telegram] access denied: chat_id=%s chat_type=%s", chat.id, chat.type
+            )
             return
         # Edited messages and channel posts never become new commands.
         message = update.message
         if message is None:
             return
         async with self.lock:
-            claimed = await asyncio.to_thread(store.claim, self.bot.id, update.update_id, chat.id, message.message_id)
+            claimed = await asyncio.to_thread(
+                store.claim, self.bot.id, update.update_id, chat.id, message.message_id
+            )
             if claimed:
                 text, document, caption = None, None, None
                 model_started = False
                 try:
-                    command = (message.text or "").split(maxsplit=1)[0] if message.text else ""
+                    command = (
+                        (message.text or "").split(maxsplit=1)[0]
+                        if message.text
+                        else ""
+                    )
                     command = command.split("@", 1)[0]
                     if command == "/dashboard":
-                        document, caption = await asyncio.to_thread(dashboard_service.telegram_snapshot)
+                        document, caption = await asyncio.to_thread(
+                            dashboard_service.telegram_snapshot
+                        )
                     elif command == "/start":
                         text = "Отправь текст или голосовое сообщение. /dashboard — текущий дашборд холодильника."
                     elif message.voice or message.text:
                         async with self.typing(chat.id):
-                            payload = await self.voice_bytes(message.voice) if message.voice else message.text
-                            mime = (message.voice.mime_type or "audio/ogg") if message.voice else "audio/wav"
+                            payload = (
+                                await self.voice_bytes(message.voice)
+                                if message.voice
+                                else message.text
+                            )
+                            mime = (
+                                (message.voice.mime_type or "audio/ogg")
+                                if message.voice
+                                else "audio/wav"
+                            )
                             model_started = True
-                            text = await assistant.answer(self.gemini, payload,
-                                lambda line: logger.info("[telegram] %s", line), mime_type=mime)
+                            text = await assistant.answer(
+                                self.gemini,
+                                payload,
+                                lambda line: logger.info("[telegram] %s", line),
+                                mime_type=mime,
+                            )
                     else:
                         text = "Отправь текст или голосовое сообщение."
                 except AudioTooLarge:
@@ -133,29 +164,54 @@ class Adapter:
                 except Exception as exc:
                     # Exception messages can contain the token-bearing download URL.
                     logger.warning("[telegram] request failed: %s", type(exc).__name__)
-                    text = store.UNCERTAIN if model_started else "Не получилось загрузить сообщение или дашборд. Попробуй ещё раз."
-                await asyncio.to_thread(store.ready, self.bot.id, update.update_id, text, document, caption)
+                    text = (
+                        store.UNCERTAIN
+                        if model_started
+                        else "Не получилось загрузить сообщение или дашборд. Попробуй ещё раз."
+                    )
+                await asyncio.to_thread(
+                    store.ready, self.bot.id, update.update_id, text, document, caption
+                )
             await self.deliver()
 
     async def deliver(self):
         blocked_chats = set()
         for row in await asyncio.to_thread(store.pending, self.bot.id):
-            if row["chat_id"] not in self.config.allowed_chats or row["chat_id"] in blocked_chats:
+            if (
+                row["chat_id"] not in self.config.allowed_chats
+                or row["chat_id"] in blocked_chats
+            ):
                 continue
-            reply = ReplyParameters(message_id=row["message_id"], allow_sending_without_reply=True)
+            reply = ReplyParameters(
+                message_id=row["message_id"], allow_sending_without_reply=True
+            )
             try:
                 if row["document"] is not None:
-                    await self.bot.send_photo(chat_id=row["chat_id"], photo=bytes(row["document"]),
-                        filename="dashboard.png", caption=row["caption"], parse_mode=None, reply_parameters=reply)
+                    await self.bot.send_photo(
+                        chat_id=row["chat_id"],
+                        photo=bytes(row["document"]),
+                        filename="dashboard.png",
+                        caption=row["caption"],
+                        parse_mode=None,
+                        reply_parameters=reply,
+                    )
                 else:
                     parts = list(split_text(row["text"] or assistant.NO_ANSWER))
                     for index in range(row["next_part"], len(parts)):
-                        await self.bot.send_message(chat_id=row["chat_id"], text=parts[index],
-                            parse_mode=None, reply_parameters=reply)
-                        await asyncio.to_thread(store.advance, self.bot.id, row["update_id"], index + 1)
+                        await self.bot.send_message(
+                            chat_id=row["chat_id"],
+                            text=parts[index],
+                            parse_mode=None,
+                            reply_parameters=reply,
+                        )
+                        await asyncio.to_thread(
+                            store.advance, self.bot.id, row["update_id"], index + 1
+                        )
                 await asyncio.to_thread(store.finish, self.bot.id, row["update_id"])
             except Exception as exc:
-                logger.warning("[telegram] reply delivery failed: %s", type(exc).__name__)
+                logger.warning(
+                    "[telegram] reply delivery failed: %s", type(exc).__name__
+                )
                 blocked_chats.add(row["chat_id"])
 
     async def retry(self):
@@ -169,7 +225,9 @@ class Adapter:
 
 
 async def report_error(update, context):
-    logger.warning("[telegram] polling/handler failed: %s", type(context.error).__name__)
+    logger.warning(
+        "[telegram] polling/handler failed: %s", type(context.error).__name__
+    )
 
 
 async def cancel(task):
@@ -184,7 +242,9 @@ async def running(config, gemini):
         yield
         return
     async with AsyncExitStack() as stack:
-        application = Application.builder().token(config.token).concurrent_updates(False).build()
+        application = (
+            Application.builder().token(config.token).concurrent_updates(False).build()
+        )
         await stack.enter_async_context(application)
         downloads = await stack.enter_async_context(httpx.AsyncClient(timeout=30))
         adapter = Adapter(config, gemini, application.bot, downloads)
@@ -193,8 +253,9 @@ async def running(config, gemini):
         application.add_error_handler(report_error)
         await application.start()
         stack.push_async_callback(application.stop)
-        await application.updater.start_polling(allowed_updates=["message", "channel_post"],
-                                               drop_pending_updates=False)
+        await application.updater.start_polling(
+            allowed_updates=["message", "channel_post"], drop_pending_updates=False
+        )
         stack.push_async_callback(application.updater.stop)
         retry = asyncio.create_task(adapter.retry())
         stack.push_async_callback(cancel, retry)

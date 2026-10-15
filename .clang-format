@@ -1,0 +1,7 @@
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 100
+PointerAlignment: Left
+ReferenceAlignment: Left
+# Include order can matter for Arduino and the host-side hardware stubs.
+SortIncludes: Never

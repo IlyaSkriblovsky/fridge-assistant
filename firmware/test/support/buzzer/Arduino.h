@@ -10,9 +10,9 @@
 #define HIGH 1
 #define ESP_ARDUINO_VERSION 0x030307
 class Print {
- public:
-  template<class T> void print(T) {}
-  template<class T> void println(T) {}
+public:
+  template <class T> void print(T) {}
+  template <class T> void println(T) {}
   void println() {}
 };
 inline long random(long low, long) { return low; }

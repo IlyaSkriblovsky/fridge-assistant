@@ -24,8 +24,7 @@ constexpr const char* kEllipsis = "\u2026";
 // which is what tells them from a space: a space has no bitmap either, but it
 // does advance.
 bool isHole(const GFXglyph* glyph) {
-  return pgm_read_byte(&glyph->xAdvance) == 0 &&
-         pgm_read_byte(&glyph->width) == 0 &&
+  return pgm_read_byte(&glyph->xAdvance) == 0 && pgm_read_byte(&glyph->width) == 0 &&
          pgm_read_byte(&glyph->height) == 0;
 }
 
@@ -33,20 +32,21 @@ bool isHole(const GFXglyph* glyph) {
 // keeps the search going rather than ending it: the generated ranges do not
 // overlap today, and this is what makes that a fact about the data rather
 // than something the lookup depends on.
-const GFXglyph* findGlyph(const TextFace& face, uint32_t codepoint,
-                          const GFXfont** font) {
-  if (codepoint > 0xFFFF) return nullptr;  // a GFXfont's range is uint16_t
+const GFXglyph* findGlyph(const TextFace& face, uint32_t codepoint, const GFXfont** font) {
+  if (codepoint > 0xFFFF)
+    return nullptr; // a GFXfont's range is uint16_t
 
   for (uint8_t i = 0; i < face.fontCount; ++i) {
     const GFXfont* candidate = face.fonts[i];
     const uint16_t first = pgm_read_word(&candidate->first);
     const uint16_t last = pgm_read_word(&candidate->last);
-    if (codepoint < first || codepoint > last) continue;
+    if (codepoint < first || codepoint > last)
+      continue;
 
-    const GFXglyph* glyphs =
-        static_cast<const GFXglyph*>(pgm_read_ptr(&candidate->glyph));
+    const GFXglyph* glyphs = static_cast<const GFXglyph*>(pgm_read_ptr(&candidate->glyph));
     const GFXglyph* glyph = &glyphs[codepoint - first];
-    if (isHole(glyph)) continue;
+    if (isHole(glyph))
+      continue;
 
     *font = candidate;
     return glyph;
@@ -68,7 +68,8 @@ struct Resolved {
 Resolved resolve(const TextFace& face, uint32_t codepoint) {
   Resolved out = {nullptr, nullptr, static_cast<uint16_t>(codepoint)};
   out.glyph = findGlyph(face, codepoint, &out.font);
-  if (out.glyph != nullptr) return out;
+  if (out.glyph != nullptr)
+    return out;
 
   out.codepoint = kFallback;
   out.glyph = findGlyph(face, kFallback, &out.font);
@@ -80,7 +81,8 @@ Resolved resolve(const TextFace& face, uint32_t codepoint) {
 // what keeps a line from being measured as one width and drawn as another.
 int32_t advanceOf(const TextFace& face, uint32_t codepoint, uint8_t size) {
   const Resolved resolved = resolve(face, codepoint);
-  if (resolved.glyph == nullptr) return 0;
+  if (resolved.glyph == nullptr)
+    return 0;
   return static_cast<int32_t>(pgm_read_byte(&resolved.glyph->xAdvance)) * size;
 }
 
@@ -101,7 +103,8 @@ int32_t widthOf(const TextFace& face, const Run& run, uint8_t size) {
   const char* const end = run.text + run.bytes;
   while (cursor < end) {
     const uint32_t codepoint = textNextCodepoint(&cursor);
-    if (codepoint == 0) break;
+    if (codepoint == 0)
+      break;
     width += advanceOf(face, codepoint, size);
   }
   return width;
@@ -109,17 +112,19 @@ int32_t widthOf(const TextFace& face, const Run& run, uint8_t size) {
 
 // Draws a run from its left edge along the baseline, and returns where the
 // next character would go. The caller has already called setTextSize().
-int32_t drawRun(Seeed_GFX& gfx, const TextFace& face, const Run& run, int32_t x,
-                int32_t baseline, uint8_t size) {
+int32_t drawRun(Seeed_GFX& gfx, const TextFace& face, const Run& run, int32_t x, int32_t baseline,
+                uint8_t size) {
   const GFXfont* current = nullptr;
   const char* cursor = run.text;
   const char* const end = run.text + run.bytes;
   while (cursor < end) {
     const uint32_t codepoint = textNextCodepoint(&cursor);
-    if (codepoint == 0) break;
+    if (codepoint == 0)
+      break;
 
     const Resolved resolved = resolve(face, codepoint);
-    if (resolved.glyph == nullptr) continue;
+    if (resolved.glyph == nullptr)
+      continue;
 
     if (resolved.font != current) {
       // setFreeFont() walks the whole range to measure it, so it is called
@@ -141,7 +146,8 @@ int32_t drawRun(Seeed_GFX& gfx, const TextFace& face, const Run& run, int32_t x,
 // Past the spaces at `p`. A line breaks at a space, and the space belongs to
 // the break rather than to the line on either side of it.
 const char* pastSpaces(const char* p) {
-  while (*p == ' ') ++p;
+  while (*p == ' ')
+    ++p;
   return p;
 }
 
@@ -149,7 +155,8 @@ const char* pastSpaces(const char* p) {
 // the ones a string can simply end in. A space is one byte and cannot be part
 // of a multi-byte character, so walking back over bytes is safe here.
 Run trimmed(const char* start, const char* end) {
-  while (end > start && end[-1] == ' ') --end;
+  while (end > start && end[-1] == ' ')
+    --end;
   return {start, static_cast<size_t>(end - start)};
 }
 
@@ -165,14 +172,15 @@ Run trimmed(const char* start, const char* end) {
 // A line too narrow for one character and the reserve together still gets its
 // character, so the ellipsis after it sits past the edge. That takes a box
 // about 60 px wide; the answer's is 720.
-bool nextLine(const TextFace& face, const char** cursor, uint8_t size,
-              int32_t maxWidth, int32_t reserve, Run* line) {
+bool nextLine(const TextFace& face, const char** cursor, uint8_t size, int32_t maxWidth,
+              int32_t reserve, Run* line) {
   const char* p = pastSpaces(*cursor);
-  if (*p == '\0') return false;
+  if (*p == '\0')
+    return false;
 
   const char* const start = p;
-  const char* fitEnd = nullptr;   // the last space that fit: where the line ends
-  const char* fitNext = nullptr;  // and where the line after it starts
+  const char* fitEnd = nullptr;  // the last space that fit: where the line ends
+  const char* fitNext = nullptr; // and where the line after it starts
   const int32_t limit = maxWidth - reserve;
   int32_t width = 0;
   bool afterSpace = false;
@@ -194,7 +202,8 @@ bool nextLine(const TextFace& face, const char** cursor, uint8_t size,
       // of spaces is one such place and not several: the line ends where the
       // first of them starts. The space's own width is counted because two
       // words with a space between them are wider than the two words.
-      if (!afterSpace) fitEnd = charStart;
+      if (!afterSpace)
+        fitEnd = charStart;
       afterSpace = true;
       fitNext = p;
       width += advanceOf(face, codepoint, size);
@@ -203,7 +212,8 @@ bool nextLine(const TextFace& face, const char** cursor, uint8_t size,
     afterSpace = false;
 
     width += advanceOf(face, codepoint, size);
-    if (width <= limit) continue;
+    if (width <= limit)
+      continue;
 
     if (fitEnd != nullptr) {
       *cursor = fitNext;
@@ -222,12 +232,13 @@ bool nextLine(const TextFace& face, const char** cursor, uint8_t size,
   }
 }
 
-}  // namespace
+} // namespace
 
 uint32_t textNextCodepoint(const char** cursor) {
   const uint8_t* p = reinterpret_cast<const uint8_t*>(*cursor);
   const uint8_t lead = *p;
-  if (lead == 0) return 0;
+  if (lead == 0)
+    return 0;
 
   uint8_t extra = 0;
   uint32_t codepoint = 0;
@@ -272,34 +283,36 @@ bool textHasGlyph(const TextFace& face, uint32_t codepoint) {
 }
 
 int32_t textWidth(const TextFace& face, const char* text, uint8_t size) {
-  if (text == nullptr) return 0;
+  if (text == nullptr)
+    return 0;
   return widthOf(face, wholeOf(text), size);
 }
 
-int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text,
-                 int32_t x, int32_t top, uint8_t size) {
-  if (text == nullptr) return x;
+int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text, int32_t x, int32_t top,
+                 uint8_t size) {
+  if (text == nullptr)
+    return x;
 
   gfx.setTextSize(size);
-  return drawRun(gfx, face, wholeOf(text), x,
-                 top + static_cast<int32_t>(face.ascent) * size, size);
+  return drawRun(gfx, face, wholeOf(text), x, top + static_cast<int32_t>(face.ascent) * size, size);
 }
 
-int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size,
-                      int32_t maxWidth) {
-  if (text == nullptr) return 0;
+int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size, int32_t maxWidth) {
+  if (text == nullptr)
+    return 0;
 
   int32_t lines = 0;
   const char* cursor = text;
   Run line = {nullptr, 0};
-  while (nextLine(face, &cursor, size, maxWidth, 0, &line)) ++lines;
+  while (nextLine(face, &cursor, size, maxWidth, 0, &line))
+    ++lines;
   return lines;
 }
 
-int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text,
-                        int32_t x, int32_t top, uint8_t size, int32_t maxWidth,
-                        int32_t maxLines) {
-  if (text == nullptr) return 0;
+int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text, int32_t x,
+                        int32_t top, uint8_t size, int32_t maxWidth, int32_t maxLines) {
+  if (text == nullptr)
+    return 0;
 
   gfx.setTextSize(size);
   const int32_t baseline = top + static_cast<int32_t>(face.ascent) * size;
@@ -333,7 +346,8 @@ int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text,
 }
 
 void textCopy(char* out, size_t size, const char* text) {
-  if (out == nullptr || size == 0) return;
+  if (out == nullptr || size == 0)
+    return;
 
   size_t used = 0;
   if (text != nullptr) {
@@ -341,7 +355,8 @@ void textCopy(char* out, size_t size, const char* text) {
     const char* start = cursor;
     while (textNextCodepoint(&cursor) != 0) {
       const size_t bytes = static_cast<size_t>(cursor - start);
-      if (used + bytes + 1 > size) break;
+      if (used + bytes + 1 > size)
+        break;
       memcpy(out + used, start, bytes);
       used += bytes;
       start = cursor;

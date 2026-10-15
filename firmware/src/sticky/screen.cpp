@@ -61,10 +61,11 @@ constexpr int32_t kWordBandMargin = 12;
 constexpr int32_t kErrorBarHeight = 130;
 constexpr int32_t kErrorDetailGap = 46;
 
-}  // namespace
+} // namespace
 
 bool StickyScreen::begin() {
-  if (_ready) return true;
+  if (_ready)
+    return true;
 
   if (!_display.begin<Board_reTerminal_Sticky, Config_Sticky_SSD1677_Fixed>()) {
     _lastError = _display.lastResult().message;
@@ -86,25 +87,25 @@ void StickyScreen::startFrame() {
   dashboardKnown = false;
   indicatorKnown = false;
   _display.fillScreen(TFT_WHITE);
-  _display.setTextColor(TFT_BLACK);  // one argument: no background fill
+  _display.setTextColor(TFT_BLACK); // one argument: no background fill
   _display.setTextSize(1);
   drawSilent(silentMode::enabled());
 }
 
-void StickyScreen::drawSilent(bool enabled) {
-  silentIcon::draw(_display, enabled);
-}
+void StickyScreen::drawSilent(bool enabled) { silentIcon::draw(_display, enabled); }
 
 void StickyScreen::rememberIndicator() {
   indicatorKnown = _display.lastResult().ok();
-  if (indicatorKnown) indicatorSilent = silentMode::enabled();
+  if (indicatorKnown)
+    indicatorSilent = silentMode::enabled();
 }
 
 bool StickyScreen::silentIndicator() {
-  if (!_ready) return false;
+  if (!_ready)
+    return false;
   const bool known = indicatorKnown;
   const bool previous = indicatorSilent;
-  indicatorKnown = false;  // a reset or timeout must not bless a half-drawn icon
+  indicatorKnown = false; // a reset or timeout must not bless a half-drawn icon
   if (!known) {
     _lastError = "previous indicator unknown; preserving the screen";
     return false;
@@ -117,16 +118,16 @@ bool StickyScreen::silentIndicator() {
     }
     // Reuse the panel's rotation, byte alignment and mirror code. The driver
     // captures its output into the shadow without driving the glass.
-    const auto prime = _display.refreshPartial(
-        silentIcon::kX, silentIcon::kY, silentIcon::kWidth, silentIcon::kHeight);
+    const auto prime = _display.refreshPartial(silentIcon::kX, silentIcon::kY, silentIcon::kWidth,
+                                               silentIcon::kHeight);
     driver->endShadowPrime();
     if (!prime.ok()) {
       _lastError = prime.message;
       return false;
     }
     drawSilent(silentMode::enabled());
-    const auto result = _display.refreshPartial(
-        silentIcon::kX, silentIcon::kY, silentIcon::kWidth, silentIcon::kHeight);
+    const auto result = _display.refreshPartial(silentIcon::kX, silentIcon::kY, silentIcon::kWidth,
+                                                silentIcon::kHeight);
     _lastWasPartial = result.ok();
     if (!result.ok()) {
       _lastError = result.message;
@@ -134,19 +135,21 @@ bool StickyScreen::silentIndicator() {
     }
   }
   rememberIndicator();
-  if (!indicatorKnown) _lastError = _display.lastResult().message;
+  if (!indicatorKnown)
+    _lastError = _display.lastResult().message;
   return indicatorKnown;
 }
 
-void StickyScreen::drawCentred(const TextFace& face, const char* text,
-                               int32_t centreX, int32_t middleY, uint8_t size) {
+void StickyScreen::drawCentred(const TextFace& face, const char* text, int32_t centreX,
+                               int32_t middleY, uint8_t size) {
   const int32_t width = textWidth(face, text, size);
   const int32_t height = textBoxHeight(face, size);
   textDraw(_display, face, text, centreX - width / 2, middleY - height / 2, size);
 }
 
 void StickyScreen::clear() {
-  if (!_ready) return;
+  if (!_ready)
+    return;
   indicatorKnown = false;
   dashboardKnown = false;
 
@@ -166,7 +169,8 @@ void StickyScreen::refreshWhole() {
     return;
   }
 
-  if (_drewFullFrame) _lastError = _display.lastResult().message;
+  if (_drewFullFrame)
+    _lastError = _display.lastResult().message;
   _display.refresh();
   _drewFullFrame = true;
   _lastWasPartial = false;
@@ -175,16 +179,16 @@ void StickyScreen::refreshWhole() {
 
 void StickyScreen::wordBand(int32_t& y, int32_t& height) {
   y = listeningWave::kY;
-  height = listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 +
-           kWordBandMargin - y;
+  height = listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 + kWordBandMargin - y;
 }
 
 void StickyScreen::dashboard(const uint8_t* pixels) {
-  if (!_ready || !pixels) return;
+  if (!_ready || !pixels)
+    return;
   indicatorKnown = dashboardKnown = false;
   _display.fillScreen(TFT_WHITE);
-  _display.drawBitmap(0, 0, pixels, dashboardProtocol::kWidth,
-                      dashboardProtocol::kHeight, TFT_BLACK, TFT_WHITE);
+  _display.drawBitmap(0, 0, pixels, dashboardProtocol::kWidth, dashboardProtocol::kHeight,
+                      TFT_BLACK, TFT_WHITE);
   drawSilent(silentMode::enabled());
   staleIcon::draw(_display, false);
   _display.refresh();
@@ -204,22 +208,30 @@ bool StickyScreen::staleIndicator() {
   dashboardKnown = false;
   auto* driver = static_cast<Driver_SSD1677_Sticky*>(_display.driverPtr());
   staleIcon::draw(_display, previous);
-  if (!driver->beginShadowPrime()) return false;
-  const auto prime = _display.refreshPartial(
-      staleIcon::kX, staleIcon::kY, staleIcon::kWidth, staleIcon::kHeight);
+  if (!driver->beginShadowPrime())
+    return false;
+  const auto prime =
+      _display.refreshPartial(staleIcon::kX, staleIcon::kY, staleIcon::kWidth, staleIcon::kHeight);
   driver->endShadowPrime();
-  if (!prime.ok()) { _lastError = prime.message; return false; }
+  if (!prime.ok()) {
+    _lastError = prime.message;
+    return false;
+  }
   staleIcon::draw(_display, true);
-  const auto result = _display.refreshPartial(
-      staleIcon::kX, staleIcon::kY, staleIcon::kWidth, staleIcon::kHeight);
+  const auto result =
+      _display.refreshPartial(staleIcon::kX, staleIcon::kY, staleIcon::kWidth, staleIcon::kHeight);
   _lastWasPartial = result.ok();
-  if (!result.ok()) { _lastError = result.message; return false; }
+  if (!result.ok()) {
+    _lastError = result.message;
+    return false;
+  }
   dashboardKnown = dashboardStale = true;
   return true;
 }
 
 void StickyScreen::listening() {
-  if (!_ready) return;
+  if (!_ready)
+    return;
 
   startFrame();
   _waveFrame = 0;
@@ -233,18 +245,20 @@ void StickyScreen::listening() {
 }
 
 bool StickyScreen::listeningFrame() {
-  if (!_ready || !_drewFullFrame) return false;
+  if (!_ready || !_drewFullFrame)
+    return false;
   _waveFrame = (_waveFrame + 1) % listeningWave::kFrames;
   listeningWave::draw(_display, _waveFrame);
-  const GfxResult result = _display.refreshPartial(
-      listeningWave::kX, listeningWave::kY, listeningWave::kWidth, listeningWave::kHeight);
+  const GfxResult result = _display.refreshPartial(listeningWave::kX, listeningWave::kY,
+                                                   listeningWave::kWidth, listeningWave::kHeight);
   _lastWasPartial = result.ok();
   _lastError = result.ok() ? "" : result.message;
   return result.ok();
 }
 
 bool StickyScreen::thinking() {
-  if (!_ready) return false;
+  if (!_ready)
+    return false;
 
   int32_t y = 0;
   int32_t height = 0;
@@ -270,25 +284,28 @@ bool StickyScreen::thinking() {
 }
 
 void StickyScreen::reminder(const char* text) {
-  if (!_ready) return;
+  if (!_ready)
+    return;
   startFrame();
   reminderLayout::draw(_display, text);
   refreshWhole();
 }
 
 bool StickyScreen::thinkingFrame() {
-  if (!_ready || !_drewFullFrame) return false;
+  if (!_ready || !_drewFullFrame)
+    return false;
   _dotsFrame = (_dotsFrame + 1) % thinkingDots::kFrames;
   thinkingDots::draw(_display, _dotsFrame);
-  const GfxResult result = _display.refreshPartial(
-      thinkingDots::kX, thinkingDots::kY, thinkingDots::kWidth, thinkingDots::kHeight);
+  const GfxResult result = _display.refreshPartial(thinkingDots::kX, thinkingDots::kY,
+                                                   thinkingDots::kWidth, thinkingDots::kHeight);
   _lastWasPartial = result.ok();
   _lastError = result.ok() ? "" : result.message;
   return result.ok();
 }
 
 void StickyScreen::answer(const char* text) {
-  if (!_ready) return;
+  if (!_ready)
+    return;
 
   startFrame();
 
@@ -314,7 +331,8 @@ void StickyScreen::answer(const char* text) {
 }
 
 void StickyScreen::error(const char* title, const char* detail) {
-  if (!_ready) return;
+  if (!_ready)
+    return;
 
   const int32_t barY = (_display.height() - kErrorBarHeight) / 2;
 

@@ -92,28 +92,28 @@ constexpr uint32_t kMagic = 0xE1F1A5E0;
 // What happened on one wake, from the top of setup() unless it says otherwise.
 // The stages are consecutive and add up to setup-to-chirp exactly.
 struct Row {
-  uint32_t bootUs;   // the wake event -> setup(), on the RTC counter
-  int32_t skewUs;    // E1's worked-out deadline against the programmed one
-  uint32_t latchUs;  // setup() -> holdLatch() returned
-  uint32_t logUs;    // holdLatch() returned -> StickyMic::begin() called
-  uint32_t micUs;    // StickyMic::begin(), settle discard included
-  uint32_t taskUs;   // StickyMic::begin() returned -> stickyBuzzer::ready() called
-  uint8_t wakeCause;    // esp_sleep_wakeup_cause_t
-  uint8_t resetReason;  // esp_reset_reason_t
+  uint32_t bootUs;     // the wake event -> setup(), on the RTC counter
+  int32_t skewUs;      // E1's worked-out deadline against the programmed one
+  uint32_t latchUs;    // setup() -> holdLatch() returned
+  uint32_t logUs;      // holdLatch() returned -> StickyMic::begin() called
+  uint32_t micUs;      // StickyMic::begin(), settle discard included
+  uint32_t taskUs;     // StickyMic::begin() returned -> stickyBuzzer::ready() called
+  uint8_t wakeCause;   // esp_sleep_wakeup_cause_t
+  uint8_t resetReason; // esp_reset_reason_t
   bool bootValid;
-  bool chirped;  // the question got as far as the ready chirp
+  bool chirped; // the question got as far as the ready chirp
 };
 
 // RTC slow memory: kept through deep sleep, lost on a reset through EN -- which
 // opening the serial port is, so every session starts from a clean log.
 constexpr uint32_t kLogRows = 40;
 RTC_DATA_ATTR uint32_t g_magic;
-RTC_DATA_ATTR uint32_t g_rows;        // recorded in all; ring index is % kLogRows
-RTC_DATA_ATTR uint32_t g_timedRows;   // of those, rows with a boot number
+RTC_DATA_ATTR uint32_t g_rows;      // recorded in all; ring index is % kLogRows
+RTC_DATA_ATTR uint32_t g_timedRows; // of those, rows with a boot number
 RTC_DATA_ATTR bool g_summaryPrinted;
-RTC_DATA_ATTR uint64_t g_sleepTicks;  // RTC counter as late as possible before sleeping
-RTC_DATA_ATTR uint32_t g_sleepCal;    // slow clock calibration used for that reading
-RTC_DATA_ATTR uint64_t g_sleepUs;     // programmed timer duration, 0 for a button sleep
+RTC_DATA_ATTR uint64_t g_sleepTicks; // RTC counter as late as possible before sleeping
+RTC_DATA_ATTR uint32_t g_sleepCal;   // slow clock calibration used for that reading
+RTC_DATA_ATTR uint64_t g_sleepUs;    // programmed timer duration, 0 for a button sleep
 RTC_DATA_ATTR Row g_log[kLogRows];
 
 // This wake. esp_timer is monotonic within a boot, which is all these need.
@@ -137,7 +137,8 @@ uint64_t programmedAlarm() {
 
 // Slow-clock ticks to microseconds, either sign.
 int32_t signedTicksUs(int64_t ticks, uint32_t cal) {
-  const uint64_t us = rtc_time_slowclk_to_us(static_cast<uint64_t>(ticks < 0 ? -ticks : ticks), cal);
+  const uint64_t us =
+      rtc_time_slowclk_to_us(static_cast<uint64_t>(ticks < 0 ? -ticks : ticks), cal);
   return ticks < 0 ? -static_cast<int32_t>(us) : static_cast<int32_t>(us);
 }
 
@@ -155,11 +156,14 @@ int32_t signedTicksUs(int64_t ticks, uint32_t cal) {
 // deadline was from the programmed one, so the old method can be judged against
 // the register on every row: old boot = boot + skew.
 bool bootTimeUs(uint64_t rtcAtEntry, uint32_t& bootUs, int32_t& skewUs) {
-  if (!stickyPower::wokeFromDeepSleep() || g_magic != kMagic || g_sleepUs == 0) return false;
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) return false;
+  if (!stickyPower::wokeFromDeepSleep() || g_magic != kMagic || g_sleepUs == 0)
+    return false;
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER)
+    return false;
 
   const uint64_t alarm = programmedAlarm();
-  if (rtcAtEntry <= alarm) return false;
+  if (rtcAtEntry <= alarm)
+    return false;
   const uint32_t cal = esp_clk_slowclk_cal_get();
   bootUs = static_cast<uint32_t>(rtc_time_slowclk_to_us(rtcAtEntry - alarm, cal));
 
@@ -194,8 +198,10 @@ void printImage() {
   for (uint32_t i = 0; i < meta.image.segment_count; ++i) {
     const uint32_t at = meta.segments[i].load_addr;
     const uint32_t len = meta.segments[i].data_len;
-    if (at >= SOC_IRAM_LOW && at < SOC_IRAM_HIGH) iram += len;
-    if (at >= SOC_DRAM_LOW && at < SOC_DRAM_HIGH) dram += len;
+    if (at >= SOC_IRAM_LOW && at < SOC_IRAM_HIGH)
+      iram += len;
+    if (at >= SOC_DRAM_LOW && at < SOC_DRAM_HIGH)
+      dram += len;
   }
   Serial1.printf("  image %lu bytes; a wake copies %lu of IRAM and %lu of DRAM\n",
                  static_cast<unsigned long>(meta.image_len), static_cast<unsigned long>(iram),
@@ -238,26 +244,25 @@ uint32_t setupUs(const Row& r) { return r.latchUs + r.logUs + r.micUs + r.taskUs
 constexpr const char* kRowFormat = "  %3s  %-5s %-9s %7s %7s %7s %7s %7s %7s %7s %7s\n";
 
 void printHeader() {
-  Serial1.printf(kRowFormat, "#", "wake", "reset", "boot", "skew", "latch", "log", "mic",
-                 "task", "setup", "total");
+  Serial1.printf(kRowFormat, "#", "wake", "reset", "boot", "skew", "latch", "log", "mic", "task",
+                 "setup", "total");
 }
 
 void printRow(uint32_t index, const Row& r) {
   char cIndex[8], cBoot[12], cSkew[12], cLatch[12], cLog[12], cMic[12], cTask[12];
   char cSetup[12], cTotal[12];
   snprintf(cIndex, sizeof(cIndex), "%lu", static_cast<unsigned long>(index));
-  Serial1.printf(
-      kRowFormat, cIndex,
-      stickyPower::wakeupCauseName(static_cast<esp_sleep_wakeup_cause_t>(r.wakeCause)),
-      stickyPower::resetReasonName(static_cast<esp_reset_reason_t>(r.resetReason)),
-      cell(cBoot, sizeof(cBoot), r.bootUs, r.bootValid),
-      signedCell(cSkew, sizeof(cSkew), r.skewUs, r.bootValid),
-      cell(cLatch, sizeof(cLatch), r.latchUs, r.chirped),
-      cell(cLog, sizeof(cLog), r.logUs, r.chirped),
-      cell(cMic, sizeof(cMic), r.micUs, r.chirped),
-      cell(cTask, sizeof(cTask), r.taskUs, r.chirped),
-      cell(cSetup, sizeof(cSetup), setupUs(r), r.chirped),
-      cell(cTotal, sizeof(cTotal), r.bootUs + setupUs(r), r.bootValid && r.chirped));
+  Serial1.printf(kRowFormat, cIndex,
+                 stickyPower::wakeupCauseName(static_cast<esp_sleep_wakeup_cause_t>(r.wakeCause)),
+                 stickyPower::resetReasonName(static_cast<esp_reset_reason_t>(r.resetReason)),
+                 cell(cBoot, sizeof(cBoot), r.bootUs, r.bootValid),
+                 signedCell(cSkew, sizeof(cSkew), r.skewUs, r.bootValid),
+                 cell(cLatch, sizeof(cLatch), r.latchUs, r.chirped),
+                 cell(cLog, sizeof(cLog), r.logUs, r.chirped),
+                 cell(cMic, sizeof(cMic), r.micUs, r.chirped),
+                 cell(cTask, sizeof(cTask), r.taskUs, r.chirped),
+                 cell(cSetup, sizeof(cSetup), setupUs(r), r.chirped),
+                 cell(cTotal, sizeof(cTotal), r.bootUs + setupUs(r), r.bootValid && r.chirped));
 }
 
 float median(float* values, uint32_t count) {
@@ -283,13 +288,17 @@ void summarise(const char* label, float (*pick)(const Row&)) {
   float hi = 0.0f;
   for (uint32_t i = g_rows - kept; i < g_rows; ++i) {
     const Row& r = g_log[i % kLogRows];
-    if (!r.bootValid || !r.chirped) continue;
+    if (!r.bootValid || !r.chirped)
+      continue;
     const float ms = pick(r);
-    if (count == 0 || ms < lo) lo = ms;
-    if (count == 0 || ms > hi) hi = ms;
+    if (count == 0 || ms < lo)
+      lo = ms;
+    if (count == 0 || ms > hi)
+      hi = ms;
     scratch[count++] = ms;
   }
-  if (count == 0) return;
+  if (count == 0)
+    return;
   Serial1.printf("    %-6s min %7.1f  median %7.1f  max %7.1f  (n=%lu)\n", label, lo,
                  median(scratch, count), hi, static_cast<unsigned long>(count));
 }
@@ -300,7 +309,8 @@ void printSummary() {
   Serial1.printf("E1 on the firmware: %lu wakes, %lu with a boot number, milliseconds\n",
                  static_cast<unsigned long>(g_rows), static_cast<unsigned long>(g_timedRows));
   printHeader();
-  for (uint32_t i = g_rows - kept; i < g_rows; ++i) printRow(i, g_log[i % kLogRows]);
+  for (uint32_t i = g_rows - kept; i < g_rows; ++i)
+    printRow(i, g_log[i % kLogRows]);
 
   Serial1.println();
   summarise("boot", [](const Row& r) { return r.bootUs / 1000.0f; });
@@ -325,7 +335,7 @@ void printSummary() {
   Serial1.println("Timer phase over. Every wake from here is the AI button, and a real question.");
 }
 
-}  // namespace
+} // namespace
 
 void __wrap__Z5setupv() {
   // Before anything, the firmware's first line included. The latch comes a few
@@ -354,7 +364,8 @@ void __wrap__Z5setupv() {
 
 void __wrap__ZN11stickyPower9holdLatchEv() {
   __real__ZN11stickyPower9holdLatchEv();
-  if (g_latchUs == 0) g_latchUs = esp_timer_get_time();
+  if (g_latchUs == 0)
+    g_latchUs = esp_timer_get_time();
 }
 
 bool __wrap__ZNK12StickyButton6isDownEv(const StickyButton* self) {
@@ -375,7 +386,8 @@ bool __wrap__ZN9StickyMic5beginEmm(StickyMic* self, uint32_t sampleRate, uint32_
 }
 
 void __wrap__ZN12stickyBuzzer5readyEv() {
-  if (g_chirpUs == 0) g_chirpUs = esp_timer_get_time();
+  if (g_chirpUs == 0)
+    g_chirpUs = esp_timer_get_time();
   __real__ZN12stickyBuzzer5readyEv();
 }
 
@@ -393,9 +405,11 @@ void __wrap__ZN11stickyPower9deepSleepEy(uint64_t timerWakeUs) {
   const uint32_t index = g_rows;
   g_log[index % kLogRows] = g_row;
   ++g_rows;
-  if (g_row.bootValid) ++g_timedRows;
+  if (g_row.bootValid)
+    ++g_timedRows;
 
-  if (g_newSession) printBanner();
+  if (g_newSession)
+    printBanner();
   Serial1.println();
   printHeader();
   printRow(index, g_row);

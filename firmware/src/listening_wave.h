@@ -29,4 +29,4 @@ inline void draw(Seeed_GFX& gfx, uint8_t frame) {
     }
   }
 }
-}  // namespace listeningWave
+} // namespace listeningWave

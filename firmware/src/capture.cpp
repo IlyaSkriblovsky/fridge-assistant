@@ -12,7 +12,8 @@ Capture::~Capture() {
     abort();
     wait();
   }
-  if (_done != nullptr) vSemaphoreDelete(_done);
+  if (_done != nullptr)
+    vSemaphoreDelete(_done);
 }
 
 bool Capture::start(StickyMic& mic, Recording& audio, StickyButton& button) {
@@ -43,8 +44,8 @@ bool Capture::start(StickyMic& mic, Recording& audio, StickyButton& button) {
   _longestAtChunk = 0;
   _slowChunks = 0;
 
-  if (xTaskCreatePinnedToCore(trampoline, "capture", kStackBytes, this, kPriority, &_task,
-                              kCore) != pdPASS) {
+  if (xTaskCreatePinnedToCore(trampoline, "capture", kStackBytes, this, kPriority, &_task, kCore) !=
+      pdPASS) {
     _task = nullptr;
     _lastError = "capture task could not be created";
     return false;
@@ -61,9 +62,12 @@ bool Capture::wait(uint32_t timeoutMs) {
 }
 
 bool Capture::join(TickType_t ticks) {
-  if (_joined) return true;
-  if (_done == nullptr) return true;  // never started: nothing to wait for
-  if (xSemaphoreTake(_done, ticks) != pdTRUE) return false;
+  if (_joined)
+    return true;
+  if (_done == nullptr)
+    return true; // never started: nothing to wait for
+  if (xSemaphoreTake(_done, ticks) != pdTRUE)
+    return false;
 
   // The give on the other side is a full barrier, so everything the task wrote
   // before it is visible here. From this line on the microphone, the buffer and
@@ -75,11 +79,16 @@ bool Capture::join(TickType_t ticks) {
 
 const char* Capture::stopReasonName() const {
   switch (_stopReason) {
-    case StopReason::Released: return "released";
-    case StopReason::Full: return "cap reached";
-    case StopReason::Aborted: return "aborted";
-    case StopReason::ReadFailed: return "read failed";
-    case StopReason::None: break;
+  case StopReason::Released:
+    return "released";
+  case StopReason::Full:
+    return "cap reached";
+  case StopReason::Aborted:
+    return "aborted";
+  case StopReason::ReadFailed:
+    return "read failed";
+  case StopReason::None:
+    break;
   }
   return "still running";
 }
@@ -108,7 +117,7 @@ void Capture::run() {
 
     const uint32_t want = _audio->nextChunkSamples();
     if (want == 0) {
-      _stopReason = StopReason::Full;  // the 30 s cap, which is a question like any other
+      _stopReason = StopReason::Full; // the 30 s cap, which is a question like any other
       break;
     }
 
@@ -129,7 +138,8 @@ void Capture::run() {
       _longestChunkUs = sinceLast;
       _longestAtChunk = _chunks;
     }
-    if (sinceLast > slowUs) ++_slowChunks;
+    if (sinceLast > slowUs)
+      ++_slowChunks;
     previousUs = now;
     ++_chunks;
 

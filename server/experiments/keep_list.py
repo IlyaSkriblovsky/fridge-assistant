@@ -136,7 +136,9 @@ def main() -> int:
         epilog="Setup and examples are in the script's docstring.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    token = commands.add_parser("token", help="exchange an oauth_token cookie for a master token")
+    token = commands.add_parser(
+        "token", help="exchange an oauth_token cookie for a master token"
+    )
     token.add_argument("email")
     commands.add_parser("lists", help="show every list note")
     show = commands.add_parser("show", help="show the items of one list")

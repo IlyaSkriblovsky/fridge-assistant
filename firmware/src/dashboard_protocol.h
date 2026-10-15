@@ -12,16 +12,21 @@ constexpr size_t kWidth = 800, kHeight = 480, kFrameBytes = kWidth * kHeight / 8
 constexpr size_t kMaxPngBytes = 64 * 1024;
 
 inline uint32_t interval(const char* text) {
-  if (!text || !*text) return config::kDashboardDefaultSeconds;
+  if (!text || !*text)
+    return config::kDashboardDefaultSeconds;
   uint32_t value = 0;
   for (; *text; ++text) {
-    if (*text < '0' || *text > '9') return config::kDashboardDefaultSeconds;
+    if (*text < '0' || *text > '9')
+      return config::kDashboardDefaultSeconds;
     const unsigned digit = *text - '0';
-    if (value > (UINT32_MAX - digit) / 10) return config::kDashboardDefaultSeconds;
+    if (value > (UINT32_MAX - digit) / 10)
+      return config::kDashboardDefaultSeconds;
     value = value * 10 + digit;
   }
-  if (!value) return config::kDashboardDefaultSeconds;
-  if (value < config::kDashboardMinSeconds) return config::kDashboardMinSeconds;
+  if (!value)
+    return config::kDashboardDefaultSeconds;
+  if (value < config::kDashboardMinSeconds)
+    return config::kDashboardMinSeconds;
   return value > config::kDashboardMaxSeconds ? config::kDashboardMaxSeconds : value;
 }
 
@@ -41,27 +46,32 @@ struct Frame {
 
   void header(const char* key, const char* value) {
     if (!strcasecmp(key, "Dashboard-Format")) {
-      if (format || strcmp(value, "png")) bad = true;
+      if (format || strcmp(value, "png"))
+        bad = true;
       format = true;
     } else if (!strcasecmp(key, "Content-Type")) {
-      if (type || strcasecmp(value, "image/png")) bad = true;
+      if (type || strcasecmp(value, "image/png"))
+        bad = true;
       type = true;
     } else if (!strcasecmp(key, "Content-Encoding")) {
-      if (strcasecmp(value, "identity")) bad = true;
+      if (strcasecmp(value, "identity"))
+        bad = true;
     } else if (!strcasecmp(key, "Next-Update-After")) {
       nextSeconds = interval(value);
     }
   }
   bool append(const void* bytes, size_t count) {
-    if (bad || !data || count > kMaxPngBytes - size) { bad = true; return false; }
+    if (bad || !data || count > kMaxPngBytes - size) {
+      bad = true;
+      return false;
+    }
     memcpy(data + size, bytes, count);
     size += count;
     return true;
   }
   bool valid(int status, int64_t declared, bool complete) const {
-    return !bad && format && type && status == 200 && complete &&
-           declared > 0 && declared <= static_cast<int64_t>(kMaxPngBytes) &&
-           size == static_cast<size_t>(declared);
+    return !bad && format && type && status == 200 && complete && declared > 0 &&
+           declared <= static_cast<int64_t>(kMaxPngBytes) && size == static_cast<size_t>(declared);
   }
 };
-}  // namespace dashboardProtocol
+} // namespace dashboardProtocol

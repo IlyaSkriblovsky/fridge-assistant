@@ -52,9 +52,9 @@
 struct TextFace {
   const GFXfont* const* fonts;
   uint8_t fontCount;
-  uint8_t ascent;    // top of the box to the baseline
-  uint8_t descent;   // baseline to the bottom of the box
-  uint8_t yAdvance;  // line to line, which is more than ascent + descent
+  uint8_t ascent;   // top of the box to the baseline
+  uint8_t descent;  // baseline to the bottom of the box
+  uint8_t yAdvance; // line to line, which is more than ascent + descent
 };
 
 // The box a single line of this face occupies at this size. Every placement
@@ -84,8 +84,8 @@ int32_t textWidth(const TextFace& face, const char* text, uint8_t size);
 
 // Draws the string with the top-left of its box at (x, top). Returns where
 // the next character would go, which is x plus the width.
-int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text,
-                 int32_t x, int32_t top, uint8_t size);
+int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text, int32_t x, int32_t top,
+                 uint8_t size);
 
 // The two below break a string into lines that fit `maxWidth`, which is what
 // D2 turned into: an answer is a sentence or two from a model now, and one
@@ -101,8 +101,7 @@ int32_t textDraw(Seeed_GFX& gfx, const TextFace& face, const char* text,
 // How many lines the string takes, which a caller needs before it can place
 // the first one: a block of text is centred as a block. Zero for an empty
 // string, so that nothing is what nothing is laid out as.
-int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size,
-                      int32_t maxWidth);
+int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size, int32_t maxWidth);
 
 // Draws the string as lines, the first line's box top-left at (x, top) and
 // each line after it one yAdvance lower. Returns how many were drawn.
@@ -113,9 +112,8 @@ int32_t textWrapLines(const TextFace& face, const char* text, uint8_t size,
 // look like the whole of it, which is the one thing a screen with no scrollbar
 // must not do -- and pagination, which is where D2 goes next, has to know the
 // answer did not fit anyway.
-int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text,
-                        int32_t x, int32_t top, uint8_t size, int32_t maxWidth,
-                        int32_t maxLines);
+int32_t textDrawWrapped(Seeed_GFX& gfx, const TextFace& face, const char* text, int32_t x,
+                        int32_t top, uint8_t size, int32_t maxWidth, int32_t maxLines);
 
 // Copies a UTF-8 string into a buffer of `size` bytes, truncating on a
 // character boundary rather than in the middle of one. `text` may be null,

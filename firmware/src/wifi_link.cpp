@@ -8,7 +8,7 @@
 #include <esp_timer.h>
 #include <lwip/dhcp.h>
 #include <lwip/netif.h>
-#include <lwip/prot/dhcp.h>  // the DHCP_STATE_* names; lwip/dhcp.h has only the struct
+#include <lwip/prot/dhcp.h> // the DHCP_STATE_* names; lwip/dhcp.h has only the struct
 #include <soc/rtc.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ constexpr uint32_t kCacheMagic = 0x571FCA01;
 
 struct ApCache {
   uint32_t magic;
-  uint32_t ssid;  // hash of the SSID the entry belongs to
+  uint32_t ssid; // hash of the SSID the entry belongs to
   uint8_t bssid[WifiLink::kBssidBytes];
   uint8_t channel;
 };
@@ -43,8 +43,8 @@ struct LeaseCache {
   uint32_t gateway;
   uint32_t mask;
   uint32_t dns;
-  uint32_t seconds;  // the life the server offered
-  uint64_t ticks;    // the RTC counter when it was granted
+  uint32_t seconds; // the life the server offered
+  uint64_t ticks;   // the RTC counter when it was granted
 };
 
 RTC_DATA_ATTR ApCache g_ap;
@@ -62,9 +62,10 @@ volatile int64_t g_gotIpUs = 0;
 void onWifiEvent(arduino_event_id_t event) {
   const int64_t now = esp_timer_get_time();
   if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
-    if (g_linkUs == 0) g_linkUs = now;  // the first association of this wake
+    if (g_linkUs == 0)
+      g_linkUs = now; // the first association of this wake
   } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
-    g_gotIpUs = now;  // ... and the latest address, which a renewal replaces
+    g_gotIpUs = now; // ... and the latest address, which a renewal replaces
   }
 }
 
@@ -81,8 +82,7 @@ uint32_t hashOf(const char* text) {
 }
 
 bool apCacheHolds(uint32_t ssid) {
-  return g_ap.magic == kCacheMagic && g_ap.ssid == ssid && g_ap.channel >= 1 &&
-         g_ap.channel <= 14;
+  return g_ap.magic == kCacheMagic && g_ap.ssid == ssid && g_ap.channel >= 1 && g_ap.channel <= 14;
 }
 
 // How long an attempt that is not using the cached AP gets before it is started
@@ -108,9 +108,11 @@ constexpr uint32_t kRetryDelayMs = 300;
 // arduino-esp32.
 const struct dhcp* stationDhcp() {
   esp_netif_t* handle = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (handle == nullptr) return nullptr;
+  if (handle == nullptr)
+    return nullptr;
   struct netif* impl = static_cast<struct netif*>(esp_netif_get_netif_impl(handle));
-  if (impl == nullptr) return nullptr;
+  if (impl == nullptr)
+    return nullptr;
   return netif_dhcp_data(impl);
 }
 
@@ -120,15 +122,18 @@ const struct dhcp* stationDhcp() {
 // lease is counted in hours and the slow clock's drift does not reach that far.
 uint32_t secondsSince(uint64_t ticks) {
   const uint64_t now = rtc_time_get();
-  if (now <= ticks) return 0;
-  return static_cast<uint32_t>(
-      rtc_time_slowclk_to_us(now - ticks, esp_clk_slowclk_cal_get()) / 1000000ULL);
+  if (now <= ticks)
+    return 0;
+  return static_cast<uint32_t>(rtc_time_slowclk_to_us(now - ticks, esp_clk_slowclk_cal_get()) /
+                               1000000ULL);
 }
 
 // Whether there is an entry about this network at all, and how old it is.
 bool leaseHolds(uint32_t ssid, uint32_t& ageS) {
-  if (g_lease.magic != kCacheMagic || g_lease.ssid != ssid) return false;
-  if (g_lease.ip == 0 || g_lease.seconds == 0) return false;
+  if (g_lease.magic != kCacheMagic || g_lease.ssid != ssid)
+    return false;
+  if (g_lease.ip == 0 || g_lease.seconds == 0)
+    return false;
 
   ageS = secondsSince(g_lease.ticks);
   return true;
@@ -143,12 +148,13 @@ bool leaseHolds(uint32_t ssid, uint32_t& ageS) {
 // the server wrote rather than inside an interval invented here.
 bool leaseIsYoung(uint32_t ageS) { return ageS < g_lease.seconds / 2; }
 
-}  // namespace
+} // namespace
 
 void WifiLink::forgetAp() { g_ap.magic = 0; }
 
 bool WifiLink::cachedLease(Lease& lease) {
-  if (g_lease.magic != kCacheMagic || g_lease.ip == 0) return false;
+  if (g_lease.magic != kCacheMagic || g_lease.ip == 0)
+    return false;
   lease.ip = g_lease.ip;
   lease.gateway = g_lease.gateway;
   lease.mask = g_lease.mask;
@@ -234,7 +240,8 @@ bool WifiLink::begin(const char* ssid, const char* password, const char* dns) {
   if (leaseHolds(ssidHash, ageS) && leaseIsYoung(ageS)) {
     _usedLease = WiFi.config(IPAddress(g_lease.ip), IPAddress(g_lease.gateway),
                              IPAddress(g_lease.mask), IPAddress(g_lease.dns));
-    if (_usedLease) _leaseSeconds = g_lease.seconds;
+    if (_usedLease)
+      _leaseSeconds = g_lease.seconds;
   }
 
   startAttempt(apCacheHolds(ssidHash));
@@ -243,25 +250,26 @@ bool WifiLink::begin(const char* ssid, const char* password, const char* dns) {
 
 WifiLink::State WifiLink::poll() {
   switch (_state) {
-    case State::Idle:
-    case State::Failed:
-      return _state;
+  case State::Idle:
+  case State::Failed:
+    return _state;
 
-    case State::Online:
-      // An association that goes away before the answer has been fetched is a
-      // failure like any other, and the orchestrator has to hear about it while
-      // the recording is still running.
-      if (WiFi.status() != WL_CONNECTED) {
-        _state = State::Failed;
-        _lastError = "association dropped";
-      }
-      return _state;
+  case State::Online:
+    // An association that goes away before the answer has been fetched is a
+    // failure like any other, and the orchestrator has to hear about it while
+    // the recording is still running.
+    if (WiFi.status() != WL_CONNECTED) {
+      _state = State::Failed;
+      _lastError = "association dropped";
+    }
+    return _state;
 
-    case State::Connecting:
-      break;
+  case State::Connecting:
+    break;
   }
 
-  if (_renewing) return pollRenew();
+  if (_renewing)
+    return pollRenew();
 
   const wl_status_t status = WiFi.status();
   const uint32_t ms = elapsedMs();
@@ -297,7 +305,8 @@ WifiLink::State WifiLink::poll() {
 }
 
 void WifiLink::renewAddress() {
-  if (_state != State::Online || _renewing) return;
+  if (_state != State::Online || _renewing)
+    return;
 
   // The entry goes first, so that a wake which ends badly from here -- no
   // address, a backend that is down anyway, a battery that runs out -- still
@@ -359,23 +368,27 @@ WifiLink::State WifiLink::pollRenew() {
 }
 
 void WifiLink::end() {
-  WiFi.disconnect(true, false, 0);  // stop the station, keep the config
+  WiFi.disconnect(true, false, 0); // stop the station, keep the config
   _state = State::Idle;
 }
 
 uint32_t WifiLink::elapsedMs() const {
-  if (_state == State::Idle) return 0;
-  if (_settledMs != 0) return _settledMs;
+  if (_state == State::Idle)
+    return 0;
+  if (_settledMs != 0)
+    return _settledMs;
   return static_cast<uint32_t>((esp_timer_get_time() - _startUs) / 1000);
 }
 
 uint32_t WifiLink::linkMs() const {
-  if (g_linkUs == 0 || _startUs == 0) return 0;
+  if (g_linkUs == 0 || _startUs == 0)
+    return 0;
   return static_cast<uint32_t>((g_linkUs - _startUs) / 1000);
 }
 
 uint32_t WifiLink::onlineMs() const {
-  if (g_gotIpUs == 0 || _startUs == 0) return 0;
+  if (g_gotIpUs == 0 || _startUs == 0)
+    return 0;
   return static_cast<uint32_t>((g_gotIpUs - _startUs) / 1000);
 }
 
@@ -384,7 +397,8 @@ void WifiLink::startAttempt(bool useCachedAp) {
   // esp_wifi_connect() refuses the new attempt -- and after the first failure
   // there is always something in flight, because WiFiSTA retries once on its
   // own whatever setAutoReconnect() was told.
-  if (_attempts > 0) WiFi.disconnect(false, false, 0);
+  if (_attempts > 0)
+    WiFi.disconnect(false, false, 0);
 
   const uint32_t ms = elapsedMs();
   _usedCachedAp = useCachedAp;
@@ -398,9 +412,8 @@ void WifiLink::startAttempt(bool useCachedAp) {
   // before the call is news, or a wrong password would have this restarting
   // every kRetryDelayMs for the whole budget.
   const wl_status_t before = WiFi.status();
-  const wl_status_t started = useCachedAp
-                                  ? WiFi.begin(_ssid, _password, g_ap.channel, g_ap.bssid)
-                                  : WiFi.begin(_ssid, _password);
+  const wl_status_t started = useCachedAp ? WiFi.begin(_ssid, _password, g_ap.channel, g_ap.bssid)
+                                          : WiFi.begin(_ssid, _password);
   _beginFailed = (started == WL_CONNECT_FAILED && before != WL_CONNECT_FAILED);
 }
 
@@ -427,7 +440,8 @@ void WifiLink::recordSuccess() {
   // the server said when it granted it, and rewriting the timestamp would make
   // an entry that can never age out -- it would be a day old and claim to be
   // fresh on every question.
-  if (_usedLease) return;
+  if (_usedLease)
+    return;
 
   // The life of the lease is the server's own number, read from the client that
   // has just finished. Without it there is nothing to age the entry against, so
@@ -436,7 +450,8 @@ void WifiLink::recordSuccess() {
   // else's address the lease cache is built not to make.
   const struct dhcp* client = stationDhcp();
   _leaseSeconds = client != nullptr ? client->offered_t0_lease : 0;
-  if (_ipv4 == 0 || _leaseSeconds == 0) return;
+  if (_ipv4 == 0 || _leaseSeconds == 0)
+    return;
 
   g_lease.magic = kCacheMagic;
   g_lease.ssid = g_ap.ssid;

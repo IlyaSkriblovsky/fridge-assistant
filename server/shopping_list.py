@@ -57,7 +57,9 @@ def refresh() -> None:
 
 def load() -> tuple[gkeepapi.Keep, List]:
     keep = gkeepapi.Keep()
-    keep.authenticate(os.environ["KEEP_EMAIL"], os.environ["KEEP_MASTER_TOKEN"], sync=False)
+    keep.authenticate(
+        os.environ["KEEP_EMAIL"], os.environ["KEEP_MASTER_TOKEN"], sync=False
+    )
     keep.sync()
     note = keep.get(os.environ["KEEP_NOTE_ID"])
     if not isinstance(note, List) or note.trashed:
@@ -88,7 +90,7 @@ def capitalize_item(text: str) -> str:
     text = " ".join(text.split())
     for index, char in enumerate(text):
         if char.isalpha():
-            return text[:index] + char.upper() + text[index + 1:]
+            return text[:index] + char.upper() + text[index + 1 :]
     return text
 
 
