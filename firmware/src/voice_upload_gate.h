@@ -6,13 +6,16 @@ struct VoiceUploadGate {
   bool committed = false;
   bool interrupted = false;
   bool interrupt() {
-    if (committed) return false;
+    if (committed)
+      return false;
     interrupted = true;
     return true;
   }
   bool commit(bool due) {
-    if (due) interrupt();
-    if (interrupted) return false;
+    if (due)
+      interrupt();
+    if (interrupted)
+      return false;
     committed = true;
     return true;
   }

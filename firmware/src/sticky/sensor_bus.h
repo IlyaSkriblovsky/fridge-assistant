@@ -12,4 +12,4 @@ inline bool begin() {
   }
   return ready;
 }
-}
+} // namespace stickySensorBus

@@ -35,7 +35,7 @@
 // The side buttons on GPIO5 and GPIO6 are not used.
 
 class StickyButton {
- public:
+public:
   // The pad ext1 wakes on and the pad read here are the same one, so the number
   // lives in one place.
   static constexpr int kPin = stickyPower::kPinAiButton;
@@ -70,9 +70,9 @@ class StickyButton {
   // The raw level, with no debouncing -- true while the contact is closed.
   bool isDown() const;
 
- private:
+private:
   int64_t _pressStartUs = 0;
-  int64_t _highSinceUs = 0;  // when the line first went high, 0 while it is low
+  int64_t _highSinceUs = 0; // when the line first went high, 0 while it is low
   int64_t _heldUs = 0;
   bool _released = false;
   bool _pastMinimumHold = false;

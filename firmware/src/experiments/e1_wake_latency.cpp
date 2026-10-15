@@ -75,7 +75,7 @@ constexpr uint32_t kDumpHoldMs = 3000;
 // 128 samples is an 8 ms block at 16 kHz: short enough to place the first
 // sample and to resolve the settle curve, long enough for a stable RMS.
 constexpr uint32_t kBlockSamples = 128;
-constexpr uint32_t kCurveBlocks = 48;  // ~384 ms of audio, well past the settle
+constexpr uint32_t kCurveBlocks = 48; // ~384 ms of audio, well past the settle
 
 // A block counts as settled once it is within this of the noise floor and stays
 // there for the rest of the curve.
@@ -85,20 +85,19 @@ constexpr uint32_t kMagic = 0xE1C0FFEE;
 
 // Header and rows go through the same format string, so the columns line up.
 // Every field is a string: a stage that does not apply prints a dash.
-constexpr const char* kRowFormat =
-    "%3s  %-5s %-9s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n";
+constexpr const char* kRowFormat = "%3s  %-5s %-9s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s\n";
 
 struct Cycle {
   uint32_t bootUs;
-  int32_t skewUs;  // the worked-out deadline against the programmed one
+  int32_t skewUs; // the worked-out deadline against the programmed one
   uint32_t latchUs;
   uint32_t micUs;
   uint32_t blockUs;
   uint32_t settleUs;
   float firstDbfs;
   float floorDbfs;
-  uint8_t wakeCause;    // esp_sleep_wakeup_cause_t, as recorded on that wake
-  uint8_t resetReason;  // esp_reset_reason_t, likewise
+  uint8_t wakeCause;   // esp_sleep_wakeup_cause_t, as recorded on that wake
+  uint8_t resetReason; // esp_reset_reason_t, likewise
   bool bootValid;
   bool settleValid;
   bool micOk;
@@ -110,11 +109,11 @@ struct Cycle {
 // is itself the result.
 constexpr uint32_t kLogCycles = 64;
 RTC_DATA_ATTR uint32_t g_magic;
-RTC_DATA_ATTR uint32_t g_logCount;  // total recorded; ring index is % kLogCycles
+RTC_DATA_ATTR uint32_t g_logCount; // total recorded; ring index is % kLogCycles
 RTC_DATA_ATTR uint32_t g_buttonWakes;
-RTC_DATA_ATTR uint64_t g_sleepTicks;  // RTC counter as late as possible before sleeping
-RTC_DATA_ATTR uint32_t g_sleepCal;    // slow clock calibration used for that reading
-RTC_DATA_ATTR uint64_t g_sleepUs;     // programmed timer duration, 0 for a button sleep
+RTC_DATA_ATTR uint64_t g_sleepTicks; // RTC counter as late as possible before sleeping
+RTC_DATA_ATTR uint32_t g_sleepCal;   // slow clock calibration used for that reading
+RTC_DATA_ATTR uint64_t g_sleepUs;    // programmed timer duration, 0 for a button sleep
 RTC_DATA_ATTR Cycle g_log[kLogCycles];
 
 StickyMic mic;
@@ -126,7 +125,8 @@ uint32_t g_curveCount;
 // Blocking on purpose, and it leaves the pad low so the parking in
 // prepareDeepSleep() holds it there.
 void chirp() {
-  if (!ledcAttach(kPinBuzzer, kChirpHz, 10)) return;
+  if (!ledcAttach(kPinBuzzer, kChirpHz, 10))
+    return;
   ledcWriteTone(kPinBuzzer, kChirpHz);
   delay(kChirpMs);
   ledcWriteTone(kPinBuzzer, 0);
@@ -149,18 +149,20 @@ float median(float* values, uint32_t count) {
 }
 
 void summarise(const char* label, const uint32_t* values, uint32_t count) {
-  if (count == 0) return;
+  if (count == 0)
+    return;
   static float scratch[kTimerCycles];
   uint32_t lo = values[0];
   uint32_t hi = values[0];
   for (uint32_t i = 0; i < count; ++i) {
     scratch[i] = values[i] / 1000.0f;
-    if (values[i] < lo) lo = values[i];
-    if (values[i] > hi) hi = values[i];
+    if (values[i] < lo)
+      lo = values[i];
+    if (values[i] > hi)
+      hi = values[i];
   }
-  Serial1.printf("  %-10s min %7.1f  median %7.1f  max %7.1f  (n=%lu)\n", label,
-                 lo / 1000.0f, median(scratch, count), hi / 1000.0f,
-                 static_cast<unsigned long>(count));
+  Serial1.printf("  %-10s min %7.1f  median %7.1f  max %7.1f  (n=%lu)\n", label, lo / 1000.0f,
+                 median(scratch, count), hi / 1000.0f, static_cast<unsigned long>(count));
 }
 
 // The boot half of the measurement. esp_timer is useless for this: it restarts
@@ -191,17 +193,19 @@ bool bootTimeUs(uint64_t rtcAtEntry, uint32_t& out, int32_t& skewUs) {
   if (!stickyPower::wokeFromDeepSleep() || g_magic != kMagic || g_sleepUs == 0) {
     return false;
   }
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) return false;
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER)
+    return false;
 
   const uint64_t alarm = programmedAlarm();
-  if (rtcAtEntry <= alarm) return false;
+  if (rtcAtEntry <= alarm)
+    return false;
   const uint32_t cal = esp_clk_slowclk_cal_get();
   out = static_cast<uint32_t>(rtc_time_slowclk_to_us(rtcAtEntry - alarm, cal));
 
   const uint64_t workedOut = g_sleepTicks + rtc_time_us_to_slowclk(g_sleepUs, g_sleepCal);
   const int64_t skewTicks = static_cast<int64_t>(alarm) - static_cast<int64_t>(workedOut);
-  const uint64_t skewAbs = rtc_time_slowclk_to_us(
-      static_cast<uint64_t>(skewTicks < 0 ? -skewTicks : skewTicks), cal);
+  const uint64_t skewAbs =
+      rtc_time_slowclk_to_us(static_cast<uint64_t>(skewTicks < 0 ? -skewTicks : skewTicks), cal);
   skewUs = skewTicks < 0 ? -static_cast<int32_t>(skewAbs) : static_cast<int32_t>(skewAbs);
   return true;
 }
@@ -257,8 +261,7 @@ void printCycle(uint32_t index, const Cycle& c) {
       cell(cBlock, sizeof(cBlock), c.blockUs / 1000.0f, c.micOk),
       cell(cSettle, sizeof(cSettle), c.settleUs / 1000.0f, c.settleValid),
       cell(cDead, sizeof(cDead), dead / 1000.0f, c.bootValid && c.micOk),
-      cell(cTotal, sizeof(cTotal), (dead + c.settleUs) / 1000.0f,
-           c.bootValid && c.settleValid),
+      cell(cTotal, sizeof(cTotal), (dead + c.settleUs) / 1000.0f, c.bootValid && c.settleValid),
       cell(cFirst, sizeof(cFirst), c.firstDbfs, c.micOk),
       cell(cFloor, sizeof(cFloor), c.floorDbfs, c.micOk));
 }
@@ -288,8 +291,7 @@ void printLog() {
   }
   const uint32_t kept = g_logCount < kLogCycles ? g_logCount : kLogCycles;
   Serial1.printf("\n%lu cycles recorded, %lu still in the ring\n",
-                 static_cast<unsigned long>(g_logCount),
-                 static_cast<unsigned long>(kept));
+                 static_cast<unsigned long>(g_logCount), static_cast<unsigned long>(kept));
   printHeader();
   for (uint32_t i = g_logCount - kept; i < g_logCount; ++i) {
     printCycle(i, g_log[i % kLogCycles]);
@@ -303,12 +305,12 @@ void printSummary() {
   uint32_t count = 0;
 
   Serial1.println();
-  Serial1.printf("Summary over %lu cycles, milliseconds\n",
-                 static_cast<unsigned long>(cycles));
+  Serial1.printf("Summary over %lu cycles, milliseconds\n", static_cast<unsigned long>(cycles));
 
   count = 0;
   for (uint32_t i = 0; i < cycles; ++i) {
-    if (g_log[i].bootValid) scratch[count++] = g_log[i].bootUs;
+    if (g_log[i].bootValid)
+      scratch[count++] = g_log[i].bootUs;
   }
   summarise("boot", scratch, count);
 
@@ -318,10 +320,13 @@ void printSummary() {
     float lo = 0.0f;
     float hi = 0.0f;
     for (uint32_t i = 0; i < cycles; ++i) {
-      if (!g_log[i].bootValid) continue;
+      if (!g_log[i].bootValid)
+        continue;
       const float ms = g_log[i].skewUs / 1000.0f;
-      if (n == 0 || ms < lo) lo = ms;
-      if (n == 0 || ms > hi) hi = ms;
+      if (n == 0 || ms < lo)
+        lo = ms;
+      if (n == 0 || ms > hi)
+        hi = ms;
       skews[n++] = ms;
     }
     if (n > 0) {
@@ -331,27 +336,32 @@ void printSummary() {
   }
 
   count = 0;
-  for (uint32_t i = 0; i < cycles; ++i) scratch[count++] = g_log[i].latchUs;
+  for (uint32_t i = 0; i < cycles; ++i)
+    scratch[count++] = g_log[i].latchUs;
   summarise("latch", scratch, count);
 
   count = 0;
-  for (uint32_t i = 0; i < cycles; ++i) scratch[count++] = g_log[i].micUs;
+  for (uint32_t i = 0; i < cycles; ++i)
+    scratch[count++] = g_log[i].micUs;
   summarise("mic", scratch, count);
 
   count = 0;
-  for (uint32_t i = 0; i < cycles; ++i) scratch[count++] = g_log[i].blockUs;
+  for (uint32_t i = 0; i < cycles; ++i)
+    scratch[count++] = g_log[i].blockUs;
   summarise("block", scratch, count);
 
   count = 0;
   for (uint32_t i = 0; i < cycles; ++i) {
-    if (g_log[i].settleValid) scratch[count++] = g_log[i].settleUs;
+    if (g_log[i].settleValid)
+      scratch[count++] = g_log[i].settleUs;
   }
   summarise("settle", scratch, count);
 
   count = 0;
   for (uint32_t i = 0; i < cycles; ++i) {
     const Cycle& c = g_log[i];
-    if (!c.bootValid || !c.micOk) continue;
+    if (!c.bootValid || !c.micOk)
+      continue;
     scratch[count++] = c.bootUs + c.latchUs + c.micUs + c.blockUs;
   }
   summarise("dead", scratch, count);
@@ -359,7 +369,8 @@ void printSummary() {
   count = 0;
   for (uint32_t i = 0; i < cycles; ++i) {
     const Cycle& c = g_log[i];
-    if (!c.bootValid || !c.settleValid) continue;
+    if (!c.bootValid || !c.settleValid)
+      continue;
     scratch[count++] = c.bootUs + c.latchUs + c.micUs + c.blockUs + c.settleUs;
   }
   summarise("total", scratch, count);
@@ -413,7 +424,7 @@ uint32_t reportHold(int64_t tEntry) {
   }
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   // esp_timer is monotonic within a boot, which is all the stage deltas below
@@ -436,7 +447,8 @@ void setup() {
   if (cycle.micOk) {
     MicLevel level;
     for (uint32_t i = 0; i < kCurveBlocks; ++i) {
-      if (!mic.readLevel(level, kBlockSamples)) break;
+      if (!mic.readLevel(level, kBlockSamples))
+        break;
       g_curveTs[i] = esp_timer_get_time();
       g_curveDbfs[i] = level.dbfs;
       ++g_curveCount;
@@ -455,7 +467,8 @@ void setup() {
     // block after the last excursion out of the band around it.
     const uint32_t tail = g_curveCount >= 8 ? 8 : g_curveCount;
     static float scratch[kCurveBlocks];
-    for (uint32_t i = 0; i < tail; ++i) scratch[i] = g_curveDbfs[g_curveCount - tail + i];
+    for (uint32_t i = 0; i < tail; ++i)
+      scratch[i] = g_curveDbfs[g_curveCount - tail + i];
     cycle.floorDbfs = median(scratch, tail);
 
     uint32_t settled = 0;
@@ -469,9 +482,8 @@ void setup() {
     // ran out -- someone talking over it, most likely. Reporting zero there
     // would read as "settled immediately", which is the opposite.
     cycle.settleValid = settled < g_curveCount;
-    cycle.settleUs = cycle.settleValid
-                         ? static_cast<uint32_t>(g_curveTs[settled] - g_curveTs[0])
-                         : 0;
+    cycle.settleUs =
+        cycle.settleValid ? static_cast<uint32_t>(g_curveTs[settled] - g_curveTs[0]) : 0;
   }
 
   // Audible proof of life for the battery run. After every measurement is taken
@@ -510,17 +522,20 @@ void setup() {
       static_cast<esp_sleep_wakeup_cause_t>(cycle.wakeCause) == ESP_SLEEP_WAKEUP_EXT1;
   const bool timerPhase = g_logCount <= kTimerCycles;
 
-  if (index <= 1 || (buttonWake && g_buttonWakes == 0)) printCurve();
+  if (index <= 1 || (buttonWake && g_buttonWakes == 0))
+    printCurve();
 
   // A press is answered wherever it lands: the timer phase sleeps with ext1
   // armed too.
   if (buttonWake) {
     ++g_buttonWakes;
-    if (reportHold(tEntry) >= kDumpHoldMs) printLog();
+    if (reportHold(tEntry) >= kDumpHoldMs)
+      printLog();
   }
 
   if (timerPhase) {
-    if (g_logCount < kTimerCycles) sleepAgain(kTimerSleepUs);
+    if (g_logCount < kTimerCycles)
+      sleepAgain(kTimerSleepUs);
     printSummary();
   }
   sleepAgain(0);

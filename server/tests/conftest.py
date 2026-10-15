@@ -46,9 +46,11 @@ def offline(monkeypatch, tmp_path):
 
 @pytest.fixture
 def gemini(monkeypatch):
-    client = SimpleNamespace(aio=SimpleNamespace(
-        models=SimpleNamespace(generate_content=AsyncMock()), aclose=AsyncMock()
-    ))
+    client = SimpleNamespace(
+        aio=SimpleNamespace(
+            models=SimpleNamespace(generate_content=AsyncMock()), aclose=AsyncMock()
+        )
+    )
     factory = Mock(return_value=client)
     monkeypatch.setattr(main.genai, "Client", factory)
     return client
@@ -58,7 +60,8 @@ def gemini(monkeypatch):
 async def client(gemini):
     async with main.lifespan(main.app):
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=main.app), base_url="http://test",
+            transport=httpx.ASGITransport(app=main.app),
+            base_url="http://test",
             headers={"Authorization": "Bearer test"},
         ) as client:
             yield client

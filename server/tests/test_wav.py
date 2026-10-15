@@ -3,7 +3,9 @@ import pytest
 import main
 
 
-@pytest.mark.parametrize("riff,data", [(True, True), (True, False), (False, True), (False, False)])
+@pytest.mark.parametrize(
+    "riff,data", [(True, True), (True, False), (False, True), (False, False)]
+)
 def test_settle_only_unknown_lengths(wav, riff, data):
     streamed = bytearray(wav)
     if riff:
@@ -26,7 +28,9 @@ def test_extra_odd_chunk(wav):
     assert streamed[36:48] == b"JUNK\x03\x00\x00\x00abc\x00"
 
 
-@pytest.mark.parametrize("value", [b"", b"RIFF", b"x" * 44, b"RIFF\x00\x00\x00\x00WAVEabc"])
+@pytest.mark.parametrize(
+    "value", [b"", b"RIFF", b"x" * 44, b"RIFF\x00\x00\x00\x00WAVEabc"]
+)
 def test_invalid_or_truncated_header(value):
     data = bytearray(value)
     assert main.settle_wav_lengths(data) is False

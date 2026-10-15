@@ -4,5 +4,5 @@
 namespace silentMode {
 bool load();
 bool enabled();
-bool toggle();  // false leaves the previous value in effect
-}
+bool toggle(); // false leaves the previous value in effect
+} // namespace silentMode

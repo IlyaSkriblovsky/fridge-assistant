@@ -21,24 +21,27 @@ struct FakeEpaperBus {
   }
   void writeCommand(uint8_t value) { command = value; }
   void writeData(uint8_t value) {
-    if (command != 0x24 && command != 0x26) return;
+    if (command != 0x24 && command != 0x26)
+      return;
     auto& ram = command == 0x24 ? newRam : oldRam;
     ram.at(y * 100 + x) = value;
     ++imageBytes;
     if (++x > x1) {
       x = x0;
-      if (++y > y1) y = y0;
+      if (++y > y1)
+        y = y0;
     }
   }
   void writeData(const uint8_t* data, size_t length) {
-    while (length--) writeData(*data++);
+    while (length--)
+      writeData(*data++);
   }
 };
 
 // Only the base-driver surface used by sticky/epaper.h. All inversion, shadow
 // bookkeeping and controller seeding are provided by the production subclass.
 class Driver_SSD1677 {
- public:
+public:
   Driver_SSD1677(uint16_t, uint16_t, int8_t) {}
   virtual ~Driver_SSD1677() = default;
   virtual const char* name() const { return "stub"; }

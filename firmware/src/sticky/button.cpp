@@ -22,12 +22,11 @@ void StickyButton::begin(int64_t pressStartUs) {
   pinMode(kPin, INPUT_PULLUP);
 }
 
-bool StickyButton::isDown() const {
-  return gpio_get_level(static_cast<gpio_num_t>(kPin)) == 0;
-}
+bool StickyButton::isDown() const { return gpio_get_level(static_cast<gpio_num_t>(kPin)) == 0; }
 
 bool StickyButton::poll() {
-  if (_released) return true;
+  if (_released)
+    return true;
 
   if (isDown()) {
     // Any low restarts the window, so a bounce mid-release does not end the
@@ -35,9 +34,8 @@ bool StickyButton::poll() {
     // register read per call -- and a clock read as well, until the minimum
     // hold has been seen.
     _highSinceUs = 0;
-    if (!_pastMinimumHold &&
-        esp_timer_get_time() - _pressStartUs >=
-            static_cast<int64_t>(config::kButtonMinHoldMs) * 1000) {
+    if (!_pastMinimumHold && esp_timer_get_time() - _pressStartUs >=
+                                 static_cast<int64_t>(config::kButtonMinHoldMs) * 1000) {
       _pastMinimumHold = true;
     }
     return false;

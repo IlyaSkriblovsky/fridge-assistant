@@ -44,7 +44,7 @@ class StickyMic;
 // Nothing in the task prints. Serial1 is the orchestrator's, and a line of log
 // at 115200 is a millisecond that the reads do not have to spare.
 class Capture {
- public:
+public:
   // Core 1 is where Arduino's loopTask runs and where there is nothing else:
   // the WiFi and lwIP tasks are pinned to core 0, and that split is what makes
   // "recording while associating" cost nothing at all rather than cost
@@ -63,11 +63,11 @@ class Capture {
   // Why the recording ended. Released and Full are both normal questions --
   // the vision counts the cap as a question that was simply long enough.
   enum class StopReason : uint8_t {
-    None,        // still running, or never started
-    Released,    // the button came back up and stayed up
-    Full,        // the 30 s cap
-    Aborted,     // the orchestrator called abort(): WiFi or the backend went away
-    ReadFailed,  // the microphone stopped delivering
+    None,       // still running, or never started
+    Released,   // the button came back up and stayed up
+    Full,       // the 30 s cap
+    Aborted,    // the orchestrator called abort(): WiFi or the backend went away
+    ReadFailed, // the microphone stopped delivering
   };
 
   ~Capture();
@@ -132,7 +132,7 @@ class Capture {
   // the orchestrator did.
   uint32_t slowChunks() const { return _slowChunks; }
 
- private:
+private:
   static void trampoline(void* self);
   void run();
   bool join(TickType_t ticks);

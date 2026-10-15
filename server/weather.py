@@ -56,9 +56,16 @@ def parse(payload: dict) -> list[Day]:
         low, high = daily["temperature_2m_min"][i], daily["temperature_2m_max"][i]
         chance = daily["precipitation_probability_max"][i]
         code = daily["weather_code"][i]
-        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (low, high)) or low > high:
+        if (
+            not all(
+                isinstance(v, (int, float)) and math.isfinite(v) for v in (low, high)
+            )
+            or low > high
+        ):
             raise ValueError("Invalid weather temperatures")
-        if chance is not None and (not isinstance(chance, int) or not 0 <= chance <= 100):
+        if chance is not None and (
+            not isinstance(chance, int) or not 0 <= chance <= 100
+        ):
             raise ValueError("Invalid precipitation probability")
         if not isinstance(code, int):
             raise ValueError("Invalid weather code")
@@ -72,24 +79,34 @@ def refresh() -> None:
     location = coordinates()
     if location is None:
         return
-    response = httpx.get("https://api.open-meteo.com/v1/forecast", params={
-        "latitude": location[0], "longitude": location[1], "timezone": TIMEZONE,
-        "forecast_days": 3,
-        "daily": "temperature_2m_min,temperature_2m_max,precipitation_probability_max,weather_code",
-    }, timeout=15)
+    response = httpx.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": location[0],
+            "longitude": location[1],
+            "timezone": TIMEZONE,
+            "forecast_days": 3,
+            "daily": "temperature_2m_min,temperature_2m_max,precipitation_probability_max,weather_code",
+        },
+        timeout=15,
+    )
     response.raise_for_status()
     days = parse(response.json())
     with closing(metrics.connect()) as db, db:
-        db.execute("""INSERT INTO forecasts VALUES (?, ?, ?)
+        db.execute(
+            """INSERT INTO forecasts VALUES (?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at""",
-            (key(), json.dumps([asdict(day) for day in days]), time.time()))
+            (key(), json.dumps([asdict(day) for day in days]), time.time()),
+        )
 
 
 def snapshot() -> Forecast | None:
     if coordinates() is None:
         return None
     with closing(metrics.connect()) as db:
-        row = db.execute("SELECT payload, updated_at FROM forecasts WHERE key=?", (key(),)).fetchone()
+        row = db.execute(
+            "SELECT payload, updated_at FROM forecasts WHERE key=?", (key(),)
+        ).fetchone()
     return Forecast([Day(**day) for day in json.loads(row[0])], row[1]) if row else None
 
 

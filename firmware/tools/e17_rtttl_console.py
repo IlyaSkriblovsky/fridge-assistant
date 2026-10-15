@@ -4,6 +4,7 @@
 # dependencies = ["pyserial>=3.5,<4"]
 # ///
 """E17: interactive RTTTL audition; uv run tools/e17_rtttl_console.py [port]."""
+
 import argparse
 import threading
 from datetime import datetime
@@ -16,9 +17,13 @@ from serial.tools import list_ports
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", nargs="?")
-    parser.add_argument("--log", type=Path, help="Save timestamped commands and device replies")
+    parser.add_argument(
+        "--log", type=Path, help="Save timestamped commands and device replies"
+    )
     args = parser.parse_args()
-    ports = [p.device for p in list_ports.comports() if p.vid == 0x1A86 and p.pid == 0x55D3]
+    ports = [
+        p.device for p in list_ports.comports() if p.vid == 0x1A86 and p.pid == 0x55D3
+    ]
     port = args.port
     if not port:
         if len(ports) != 1:
@@ -31,11 +36,15 @@ def main():
     def record(direction, text):
         if log:
             with log_lock:
-                log.write(f"{datetime.now().astimezone().isoformat()} {direction} {text}\n")
+                log.write(
+                    f"{datetime.now().astimezone().isoformat()} {direction} {text}\n"
+                )
 
     try:
         # Set control lines before opening; opening may still reset this board.
-        with serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2) as device:
+        with serial.Serial(
+            port=None, baudrate=115200, timeout=0.2, write_timeout=2
+        ) as device:
             device.dtr = False
             device.rts = False
             device.port = port
@@ -55,9 +64,11 @@ def main():
 
             reader = threading.Thread(target=receive, daemon=True)
             reader.start()
-            print(f"Connected to {port}. Paste RTTTL then Enter.\n"
-                  ":repeat :stop :up :down :reset :help; :quit exits.\n"
-                  "Wait for E17 READY (or send :help if already running).")
+            print(
+                f"Connected to {port}. Paste RTTTL then Enter.\n"
+                ":repeat :stop :up :down :reset :help; :quit exits.\n"
+                "Wait for E17 READY (or send :help if already running)."
+            )
             try:
                 while not done.is_set():
                     line = input("RTTTL> ").strip()

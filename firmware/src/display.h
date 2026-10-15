@@ -38,7 +38,7 @@
 // Nothing here prints; Serial1 is the orchestrator's. What the panel did is
 // kept per screen, on this task's clock, and read back once the task is idle.
 class Display {
- public:
+public:
   // Core 0, beside the WiFi and lwIP tasks, which outrank it by a mile and
   // sleep most of the time. Core 1 is capture's, and the orchestrator's: the
   // orchestrator streams the upload while the button is held, and the start of
@@ -63,20 +63,33 @@ class Display {
   static constexpr uint32_t kStackBytes = 8192;
 
   // Every screen, and the pre-clear -- which is the record's index as well.
-  enum class Screen : uint8_t { Clear, Listening, Thinking, Answer, Error, Silent,
-                                Sensors, Dashboard, Stale, Reminder, ListeningFrame, ThinkingFrame, Count };
+  enum class Screen : uint8_t {
+    Clear,
+    Listening,
+    Thinking,
+    Answer,
+    Error,
+    Silent,
+    Sensors,
+    Dashboard,
+    Stale,
+    Reminder,
+    ListeningFrame,
+    ThinkingFrame,
+    Count
+  };
 
   // What became of one screen. Times are esp_timer_get_time(), so they share an
   // axis with everything the orchestrator measures.
   struct Record {
-    int64_t postedUs = 0;     // when it was posted; zero if it never was
-    int64_t startUs = 0;      // when the task took it; zero if it never did
-    int64_t endUs = 0;        // when its refresh returned
-    bool superseded = false;  // replaced while it waited, and never drawn
-    bool partial = false;     // StickyScreen::lastWasPartial() after it
+    int64_t postedUs = 0;    // when it was posted; zero if it never was
+    int64_t startUs = 0;     // when the task took it; zero if it never did
+    int64_t endUs = 0;       // when its refresh returned
+    bool superseded = false; // replaced while it waited, and never drawn
+    bool partial = false;    // StickyScreen::lastWasPartial() after it
     stickyClimate::Reading climate;
-    int batteryPercent = -1;  // gauge reading, or unavailable/not sampled
-    const char* error = "";   // why the controller refused a partial, if it did
+    int batteryPercent = -1; // gauge reading, or unavailable/not sampled
+    const char* error = "";  // why the controller refused a partial, if it did
   };
 
   ~Display();
@@ -129,9 +142,7 @@ class Display {
 
   // What the panel did with each screen. Only meaningful once waitIdle() has
   // returned true: until then the task may still be writing it.
-  const Record& record(Screen screen) const {
-    return _records[static_cast<uint8_t>(screen)];
-  }
+  const Record& record(Screen screen) const { return _records[static_cast<uint8_t>(screen)]; }
 
   // The least free stack the task has had, in bytes. For the log, to check
   // kStackBytes against.
@@ -139,11 +150,11 @@ class Display {
 
   const char* lastError() const { return _lastError; }
 
- private:
+private:
   // What is waiting for the panel: at most one screen, and the text it carries,
   // already made drawable.
   struct Slot {
-    Screen screen = Screen::Count;  // Count: nothing waiting
+    Screen screen = Screen::Count; // Count: nothing waiting
     char text[StickyScreen::kMaxTextChars] = {0};
     char detail[StickyScreen::kMaxDetailChars] = {0};
     const uint8_t* pixels = nullptr;
@@ -157,12 +168,12 @@ class Display {
   StickyScreen _screen;
 
   TaskHandle_t _task = nullptr;
-  SemaphoreHandle_t _lock = nullptr;  // guards the slot, the flag and the idle bit
+  SemaphoreHandle_t _lock = nullptr; // guards the slot, the flag and the idle bit
   EventGroupHandle_t _events = nullptr;
 
   Slot _slot;
   bool _clearPending = false;
-  Screen _animationRequested = Screen::Count;  // guarded by _lock
+  Screen _animationRequested = Screen::Count; // guarded by _lock
 
   Record _records[static_cast<uint8_t>(Screen::Count)];
   const char* _lastError = "";

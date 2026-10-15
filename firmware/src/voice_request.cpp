@@ -24,7 +24,7 @@ uint32_t millisSince(int64_t fromUs) {
   return static_cast<uint32_t>((esp_timer_get_time() - fromUs) / 1000);
 }
 
-}  // namespace
+} // namespace
 
 VoiceRequest::VoiceRequest(const char* baseUrl, const char* token)
     : _baseUrl(baseUrl), _token(token),
@@ -33,7 +33,8 @@ VoiceRequest::VoiceRequest(const char* baseUrl, const char* token)
 VoiceRequest::~VoiceRequest() {
   disarmCancellation();
   close();
-  if (_deadlineTimer) esp_timer_delete(_deadlineTimer);
+  if (_deadlineTimer)
+    esp_timer_delete(_deadlineTimer);
   vSemaphoreDelete(_deadlineLock);
 }
 
@@ -45,20 +46,23 @@ bool VoiceRequest::armCancellation(int64_t deadlineUs, void (*onCancel)()) {
   _deadlineUs = deadlineUs;
   _onCancel = onCancel;
   xSemaphoreGive(_deadlineLock);
-  if (!deadlineUs) return true;
+  if (!deadlineUs)
+    return true;
   if (!_deadlineTimer) {
     esp_timer_create_args_t args{};
     args.callback = deadlineReached;
     args.arg = this;
     args.name = "voice-cancel";
-    if (esp_timer_create(&args, &_deadlineTimer) != ESP_OK) return false;
+    if (esp_timer_create(&args, &_deadlineTimer) != ESP_OK)
+      return false;
   }
   const int64_t left = deadlineUs - esp_timer_get_time();
   return esp_timer_start_once(_deadlineTimer, left > 0 ? left : 1) == ESP_OK;
 }
 
 void VoiceRequest::disarmCancellation() {
-  if (_deadlineTimer) esp_timer_stop(_deadlineTimer);
+  if (_deadlineTimer)
+    esp_timer_stop(_deadlineTimer);
   xSemaphoreTake(_deadlineLock, portMAX_DELAY);
   _gate.committed = true;
   _deadlineUs = 0;
@@ -72,10 +76,13 @@ void VoiceRequest::deadlineReached(void* context) {
 
 bool VoiceRequest::cancelIfDue() {
   xSemaphoreTake(_deadlineLock, portMAX_DELAY);
-  if (!_interrupted && _deadlineUs > 0 && esp_timer_get_time() >= _deadlineUs && _gate.interrupt()) {
+  if (!_interrupted && _deadlineUs > 0 && esp_timer_get_time() >= _deadlineUs &&
+      _gate.interrupt()) {
     _interrupted = true;
-    if (_onCancel) _onCancel();
-    if (_deadlineSocket >= 0) shutdown(_deadlineSocket, SHUT_RDWR);
+    if (_onCancel)
+      _onCancel();
+    if (_deadlineSocket >= 0)
+      shutdown(_deadlineSocket, SHUT_RDWR);
   }
   const bool interrupted = _interrupted.load();
   xSemaphoreGive(_deadlineLock);
@@ -134,7 +141,8 @@ bool VoiceRequest::open(const char* url) {
   cfg.timeout_ms = static_cast<int>(config::kBackendConnectTimeoutMs);
   if (_deadlineUs && !_gate.committed) {
     const int64_t remaining = (_deadlineUs - esp_timer_get_time()) / 1000;
-    if (remaining < cfg.timeout_ms) cfg.timeout_ms = remaining > 0 ? remaining : 1;
+    if (remaining < cfg.timeout_ms)
+      cfg.timeout_ms = remaining > 0 ? remaining : 1;
   }
   cfg.disable_auto_redirect = true;
 
@@ -178,8 +186,7 @@ bool VoiceRequest::open(const char* url) {
       return false;
     }
     finish(Result::NoServer, "%s after %lu ms (%s, errno %d)", esp_err_to_name(opened),
-           static_cast<unsigned long>(millisSince(_openUs)), esp_err_to_name(verdict),
-           socketErrno);
+           static_cast<unsigned long>(millisSince(_openUs)), esp_err_to_name(verdict), socketErrno);
     return false;
   }
 
@@ -194,25 +201,33 @@ bool VoiceRequest::open(const char* url) {
   // by switching it off. Failing to is not worth failing the question for.
   const int fd = esp_http_client_get_socket(_client);
   const int noDelay = 1;
-  if (fd >= 0) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
+  if (fd >= 0)
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
 
   xSemaphoreTake(_deadlineLock, portMAX_DELAY);
   _deadlineSocket = fd;
   const bool interrupted = _interrupted.load();
   xSemaphoreGive(_deadlineLock);
-  if (interrupted) { close(); return false; }
+  if (interrupted) {
+    close();
+    return false;
+  }
   _connectedUs = esp_timer_get_time();
   return true;
 }
 
 bool VoiceRequest::write(const uint8_t* data, size_t bytes) {
   if (!streaming()) {
-    if (_result == Result::Ok) finish(Result::NoServer, "write() with no request open");
+    if (_result == Result::Ok)
+      finish(Result::NoServer, "write() with no request open");
     return false;
   }
 
   while (bytes > 0) {
-    if (cancelIfDue()) { close(); return false; }
+    if (cancelIfDue()) {
+      close();
+      return false;
+    }
     const size_t samples = bytes < kFrameBytes ? bytes : kFrameBytes;
 
     // <size in hex>\r\n<samples>\r\n, in one buffer and one write.
@@ -222,7 +237,8 @@ bool VoiceRequest::write(const uint8_t* data, size_t bytes) {
     _frame[head + samples] = '\r';
     _frame[head + samples + 1] = '\n';
 
-    if (!send(_frame, head + samples + 2)) return false;
+    if (!send(_frame, head + samples + 2))
+      return false;
 
     _sentBytes += samples;
     ++_frames;
@@ -234,21 +250,27 @@ bool VoiceRequest::write(const uint8_t* data, size_t bytes) {
 
 bool VoiceRequest::end() {
   if (!streaming()) {
-    if (_result == Result::Ok) finish(Result::NoServer, "end() with no request open");
+    if (_result == Result::Ok)
+      finish(Result::NoServer, "end() with no request open");
     return false;
   }
   // This check is the commit boundary: once the terminal write starts we
   // never claim cancellation, even if its result is uncertain.
   xSemaphoreTake(_deadlineLock, portMAX_DELAY);
-  const bool interrupted = !_gate.commit(_interrupted.load() ||
-      (_deadlineUs && esp_timer_get_time() >= _deadlineUs));
+  const bool interrupted =
+      !_gate.commit(_interrupted.load() || (_deadlineUs && esp_timer_get_time() >= _deadlineUs));
   if (interrupted && !_interrupted) {
     _interrupted = true;
-    if (_onCancel) _onCancel();
+    if (_onCancel)
+      _onCancel();
   }
   xSemaphoreGive(_deadlineLock);
-  if (interrupted) { close(); return false; }
-  if (!send(reinterpret_cast<const uint8_t*>(kLastChunk), sizeof(kLastChunk) - 1)) return false;
+  if (interrupted) {
+    close();
+    return false;
+  }
+  if (!send(reinterpret_cast<const uint8_t*>(kLastChunk), sizeof(kLastChunk) - 1))
+    return false;
 
   _ended = true;
   _endUs = esp_timer_get_time();
@@ -265,7 +287,8 @@ bool VoiceRequest::send(const uint8_t* data, size_t bytes) {
     _longestWriteUs = tookUs;
     _longestWriteAtUs = startUs;
   }
-  if (written == static_cast<int>(bytes)) return true;
+  if (written == static_cast<int>(bytes))
+    return true;
 
   // Anything short is a failure, whatever went out before it: the library
   // returns 0 for a poll that ran out of the stall budget even when part of the
@@ -284,7 +307,8 @@ bool VoiceRequest::send(const uint8_t* data, size_t bytes) {
 
 VoiceRequest::Result VoiceRequest::receive() {
   if (_client == nullptr || !_ended) {
-    if (_result != Result::Ok) return _result;
+    if (_result != Result::Ok)
+      return _result;
     return finish(Result::NoServer, "receive() with no finished request");
   }
 
@@ -313,9 +337,10 @@ VoiceRequest::Result VoiceRequest::receive() {
   if (_status == 401) {
     return finish(Result::ServerError, "HTTP 401: %s",
                   _token[0] == '\0' ? "there is no token in src/secrets.h to send"
-                                     : "the backend does not take this token");
+                                    : "the backend does not take this token");
   }
-  if (_status != 200) return finish(Result::ServerError, "HTTP %d", _status);
+  if (_status != 200)
+    return finish(Result::ServerError, "HTTP %d", _status);
 
   if (declared > static_cast<int64_t>(kMaxReplyBytes)) {
     return finish(Result::BadResponse, "a %lld-byte reply is not an answer",
@@ -336,7 +361,8 @@ VoiceRequest::Result VoiceRequest::receive() {
       return finish(Result::NoServer, "the connection failed %u bytes into the reply",
                     static_cast<unsigned>(got));
     }
-    if (n == 0) break;
+    if (n == 0)
+      break;
     got += static_cast<size_t>(n);
   }
   _replyBytes = got;
@@ -361,12 +387,14 @@ VoiceRequest::Result VoiceRequest::receive() {
   // src/text.cpp can take it from there.
   JsonDocument doc;
   const DeserializationError parsed = deserializeJson(doc, _reply, got);
-  if (parsed) return finish(Result::BadResponse, "%s", parsed.c_str());
+  if (parsed)
+    return finish(Result::BadResponse, "%s", parsed.c_str());
 
   // Null when the field is missing and null when it is there but is not a
   // string, which the vision's table counts as the same failure.
   const char* text = doc["response"].as<const char*>();
-  if (text == nullptr) return finish(Result::BadResponse, "no \"response\" string in the reply");
+  if (text == nullptr)
+    return finish(Result::BadResponse, "no \"response\" string in the reply");
 
   const int64_t exchangeMs = (esp_timer_get_time() - _endUs) / 1000;
   const int64_t generatedMs = doc["reminders"]["server_time_ms"] | int64_t(0);
@@ -381,7 +409,8 @@ VoiceRequest::Result VoiceRequest::receive() {
 }
 
 void VoiceRequest::close() {
-  if (_client == nullptr) return;
+  if (_client == nullptr)
+    return;
   xSemaphoreTake(_deadlineLock, portMAX_DELAY);
   _deadlineSocket = -1;
   xSemaphoreGive(_deadlineLock);

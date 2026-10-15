@@ -35,16 +35,13 @@ struct Note {
 // worth failing a question over.
 void play(const Note* notes, size_t count);
 
-template <size_t N>
-inline void play(const Note (&notes)[N]) {
-  play(notes, N);
-}
+template <size_t N> inline void play(const Note (&notes)[N]) { play(notes, N); }
 
 // The four patterns from the vision's table. Durations below.
-void ready();   // microphone is live: two very short notes, low then high
-void taken();   // the question is on its way: one short note, between the two
-void answer();  // the answer is on screen: two short notes, high then low
-void error();   // one longer note, lower than either of the pairs
+void ready();  // microphone is live: two very short notes, low then high
+void taken();  // the question is on its way: one short note, between the two
+void answer(); // the answer is on screen: two short notes, high then low
+void error();  // one longer note, lower than either of the pairs
 
 // Plays config::kNotificationRtttl once, including its encoded pauses/repeats.
 // Blocks until complete, bypasses silent mode and parks the pin as play() does.
@@ -54,7 +51,7 @@ void notification();
 // E17's responsive player; song must be validated, remain alive and unchanged
 // until completion/stop, and shift must be in [-3,3]. Bypasses silent mode.
 bool startRtttl(const char* song, int octaveShift = 0);
-bool pollRtttl();  // false when finished; detaches and parks the pin
+bool pollRtttl(); // false when finished; detaches and parks the pin
 void stopRtttl();
 
-}  // namespace stickyBuzzer
+} // namespace stickyBuzzer

@@ -73,6 +73,7 @@ def write_wav(path, samples):
 def player():
     if sys.platform == "win32":
         import winsound
+
         return lambda path: winsound.PlaySound(str(path), winsound.SND_FILENAME)
     for executable, flags in [
         ("afplay", []),
@@ -100,10 +101,15 @@ def save(path, result):
 
 def run_test(result, rng, present, ask, persist):
     """Interactive ranking; playback failure can never become a vote."""
+
     def trial(stage, a, b):
         record = {
-            "trial": len(result["trials"]) + 1, "stage": stage,
-            "a": a, "b": b, "presentations": 0, "choice": None,
+            "trial": len(result["trials"]) + 1,
+            "stage": stage,
+            "a": a,
+            "b": b,
+            "presentations": 0,
+            "choice": None,
         }
         result["trials"].append(record)
         persist()
@@ -113,7 +119,11 @@ def run_test(result, rng, present, ask, persist):
             record["presentations"] += 1
             persist()
             while True:
-                answer = ask("A/B — выбор, R или Enter — повтор, Q — выйти: ").strip().lower()
+                answer = (
+                    ask("A/B — выбор, R или Enter — повтор, Q — выйти: ")
+                    .strip()
+                    .lower()
+                )
                 if answer in ("a", "b", "r", "", "q"):
                     break
                 print("Введи A, B, R или Q.")
@@ -157,18 +167,25 @@ def run_test(result, rng, present, ask, persist):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, help="Seed for reproducible pair order")
-    parser.add_argument("--volume", type=float, default=0.2,
-                        help="Digital level, 0 < value <= 1 (default: 0.2)")
+    parser.add_argument(
+        "--volume",
+        type=float,
+        default=0.2,
+        help="Digital level, 0 < value <= 1 (default: 0.2)",
+    )
     parser.add_argument("--output", type=Path, help="New JSON result file")
-    parser.add_argument("--export-wav", type=Path,
-                        help="Export six WAV files and exit without playback")
+    parser.add_argument(
+        "--export-wav", type=Path, help="Export six WAV files and exit without playback"
+    )
     args = parser.parse_args(argv)
     if not math.isfinite(args.volume) or not 0 < args.volume <= 1:
         parser.error("--volume must be greater than 0 and at most 1")
     if args.export_wav and args.output:
         parser.error("--output and --export-wav are separate modes")
 
-    audio = {name: synthesize(offsets, args.volume) for name, offsets in PATTERNS.items()}
+    audio = {
+        name: synthesize(offsets, args.volume) for name, offsets in PATTERNS.items()
+    }
     if args.export_wav:
         args.export_wav.mkdir(parents=True, exist_ok=True)
         paths = {name: args.export_wav / f"{name}.wav" for name in PATTERNS}
@@ -189,13 +206,22 @@ def main(argv=None):
     with output.open("x", encoding="utf-8"):
         pass
     result = {
-        "experiment": "E16-computer", "status": "running",
-        "started_utc": now.isoformat(), "seed": seed,
-        "platform": sys.platform, "python": sys.version,
-        "patterns": PATTERNS, "base_hz": [3550, 4150],
-        "sample_rate": RATE, "synthesis": "band-limited-square-v1",
-        "volume": args.volume, "note_ms": 40, "notes_per_element": 8,
-        "element_gap_ms": 50, "pair_gap_ms": 900, "trials": [],
+        "experiment": "E16-computer",
+        "status": "running",
+        "started_utc": now.isoformat(),
+        "seed": seed,
+        "platform": sys.platform,
+        "python": sys.version,
+        "patterns": PATTERNS,
+        "base_hz": [3550, 4150],
+        "sample_rate": RATE,
+        "synthesis": "band-limited-square-v1",
+        "volume": args.volume,
+        "note_ms": 40,
+        "notes_per_element": 8,
+        "element_gap_ms": 50,
+        "pair_gap_ms": 900,
+        "trials": [],
     }
     persist = lambda: save(output, result)
     persist()
@@ -230,7 +256,9 @@ def main(argv=None):
     for name in sorted(result["scores"], key=result["scores"].get, reverse=True):
         print(f"  {name}: {result['scores'][name]}/5 — {PATTERNS[name]}")
     if result["cutoff_tie"]:
-        print("При равенстве баллов участник финала выбран случайно; учтём это при оценке.")
+        print(
+            "При равенстве баллов участник финала выбран случайно; учтём это при оценке."
+        )
     print(f"Финал: {result['final_scores']}")
     print(f"Победитель: {result['winner']} — {PATTERNS[result['winner']]}")
     print(f"Журнал: {output}")

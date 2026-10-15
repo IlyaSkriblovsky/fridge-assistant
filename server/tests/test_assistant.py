@@ -11,9 +11,11 @@ pytestmark = pytest.mark.asyncio
 
 
 def response(*parts):
-    return types.GenerateContentResponse(candidates=[types.Candidate(
-        content=types.Content(role="model", parts=list(parts))
-    )])
+    return types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(content=types.Content(role="model", parts=list(parts)))
+        ]
+    )
 
 
 async def test_text_and_audio_payload(gemini, wav):
@@ -29,13 +31,16 @@ async def test_text_and_audio_payload(gemini, wav):
     assert kwargs["config"].tools == assistant.TOOLS
 
 
-@pytest.mark.parametrize("result", [
-    types.GenerateContentResponse(),
-    types.GenerateContentResponse(candidates=[]),
-    types.GenerateContentResponse(candidates=[types.Candidate()]),
-    response(types.Part(text=" \n")),
-    response(),
-])
+@pytest.mark.parametrize(
+    "result",
+    [
+        types.GenerateContentResponse(),
+        types.GenerateContentResponse(candidates=[]),
+        types.GenerateContentResponse(candidates=[types.Candidate()]),
+        response(types.Part(text=" \n")),
+        response(),
+    ],
+)
 async def test_missing_answer(gemini, result):
     gemini.aio.models.generate_content.return_value = result
     assert await assistant.answer(gemini, b"wav", Mock()) == assistant.NO_ANSWER
@@ -45,11 +50,17 @@ async def test_missing_answer(gemini, result):
 async def test_tool_round_preserves_model_content(gemini, monkeypatch, count):
     handler = Mock(side_effect=lambda items: {"items": items})
     monkeypatch.setattr(assistant, "HANDLERS", {"add_to_shopping_list": handler})
-    model_reply = response(*[
-        types.Part(function_call=types.FunctionCall(
-            name="add_to_shopping_list", args={"items": [str(i)]}
-        ), thought_signature=b"opaque-signature") for i in range(count)
-    ])
+    model_reply = response(
+        *[
+            types.Part(
+                function_call=types.FunctionCall(
+                    name="add_to_shopping_list", args={"items": [str(i)]}
+                ),
+                thought_signature=b"opaque-signature",
+            )
+            for i in range(count)
+        ]
+    )
     requests = []
     replies = iter([model_reply, response(types.Part(text="Готово"))])
 
@@ -72,11 +83,15 @@ async def test_tool_round_preserves_model_content(gemini, monkeypatch, count):
 
 
 async def test_tool_errors(monkeypatch):
-    monkeypatch.setattr(assistant, "HANDLERS", {"known": lambda items: {"items": items}})
+    monkeypatch.setattr(
+        assistant, "HANDLERS", {"known": lambda items: {"items": items}}
+    )
     assert await assistant.call_tool(types.FunctionCall(name="missing")) == {
         "error": "unknown tool 'missing'"
     }
-    result = await assistant.call_tool(types.FunctionCall(name="known", args={"wrong": 1}))
+    result = await assistant.call_tool(
+        types.FunctionCall(name="known", args={"wrong": 1})
+    )
     assert "error" in result
     assert "wrong" in result["error"]
 
@@ -91,10 +106,14 @@ async def test_round_limit(gemini, monkeypatch):
     assert gemini.aio.models.generate_content.await_count == assistant.MAX_ROUNDS
     assert handler.call_count == assistant.MAX_ROUNDS
     contents = gemini.aio.models.generate_content.call_args.kwargs["contents"]
-    assert contents[-1].parts[0].function_response.response == {"error": "Keep unavailable"}
+    assert contents[-1].parts[0].function_response.response == {
+        "error": "Keep unavailable"
+    }
 
 
-@pytest.mark.parametrize("error", [errors.APIError(429, {}), httpx.ConnectError("offline")])
+@pytest.mark.parametrize(
+    "error", [errors.APIError(429, {}), httpx.ConnectError("offline")]
+)
 async def test_service_errors_propagate(gemini, error):
     gemini.aio.models.generate_content.side_effect = error
     with pytest.raises(type(error)) as caught:
@@ -102,11 +121,15 @@ async def test_service_errors_propagate(gemini, error):
     assert caught.value is error
 
 
-@pytest.mark.parametrize('payload,mime', [('текст запроса', 'audio/wav'), (b'ogg-opus', 'audio/ogg')])
+@pytest.mark.parametrize(
+    "payload,mime", [("текст запроса", "audio/wav"), (b"ogg-opus", "audio/ogg")]
+)
 async def test_shared_text_or_audio_input(gemini, payload, mime):
-    gemini.aio.models.generate_content.return_value = response(types.Part(text='Готово'))
-    assert await assistant.answer(gemini, payload, Mock(), mime_type=mime) == 'Готово'
-    part = gemini.aio.models.generate_content.call_args.kwargs['contents'][0].parts[0]
+    gemini.aio.models.generate_content.return_value = response(
+        types.Part(text="Готово")
+    )
+    assert await assistant.answer(gemini, payload, Mock(), mime_type=mime) == "Готово"
+    part = gemini.aio.models.generate_content.call_args.kwargs["contents"][0].parts[0]
     if isinstance(payload, str):
         assert part.text == payload and part.inline_data is None
     else:

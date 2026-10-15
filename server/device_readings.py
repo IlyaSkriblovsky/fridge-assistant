@@ -28,11 +28,17 @@ def initialize(db):
 
 def save(battery_pct=None, temperature_c=None, humidity_pct=None):
     now = time.time()
-    rows = [(key, value, now) for key, value in
-            zip(METRICS, (battery_pct, temperature_c, humidity_pct)) if value is not None]
+    rows = [
+        (key, value, now)
+        for key, value in zip(METRICS, (battery_pct, temperature_c, humidity_pct))
+        if value is not None
+    ]
     if rows:
         with closing(metrics.connect()) as db, db:
-            db.executemany("INSERT INTO device_readings(metric, value, received_at) VALUES (?, ?, ?)", rows)
+            db.executemany(
+                "INSERT INTO device_readings(metric, value, received_at) VALUES (?, ?, ?)",
+                rows,
+            )
 
 
 def latest() -> dict[str, Reading]:
@@ -40,8 +46,11 @@ def latest() -> dict[str, Reading]:
         db.execute("BEGIN")
         result = {}
         for key in METRICS:
-            row = db.execute("""SELECT value, received_at FROM device_readings
-                WHERE metric=? ORDER BY received_at DESC, id DESC LIMIT 1""", (key,)).fetchone()
+            row = db.execute(
+                """SELECT value, received_at FROM device_readings
+                WHERE metric=? ORDER BY received_at DESC, id DESC LIMIT 1""",
+                (key,),
+            ).fetchone()
             if row:
                 result[key] = Reading(*row)
         return result

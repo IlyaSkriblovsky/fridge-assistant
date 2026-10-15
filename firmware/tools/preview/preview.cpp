@@ -28,8 +28,8 @@ constexpr int32_t kWordBandMargin = 12;
 constexpr int32_t kErrorBarHeight = 130;
 constexpr int32_t kErrorDetailGap = 46;
 
-void drawCentred(Seeed_GFX& gfx, const TextFace& face, const char* text,
-                 int32_t centreX, int32_t middleY, uint8_t size) {
+void drawCentred(Seeed_GFX& gfx, const TextFace& face, const char* text, int32_t centreX,
+                 int32_t middleY, uint8_t size) {
   const int32_t width = textWidth(face, text, size);
   const int32_t height = textBoxHeight(face, size);
   textDraw(gfx, face, text, centreX - width / 2, middleY - height / 2, size);
@@ -46,7 +46,8 @@ int32_t drawAnswer(Seeed_GFX& gfx, const char* text, int32_t* wanted) {
   const int32_t maxLines = (boxHeight - lineBox) / lineHeight + 1;
   *wanted = textWrapLines(kAnswerFace, text, 1, boxWidth);
   const int32_t lines = *wanted < maxLines ? *wanted : maxLines;
-  if (lines <= 0) return 0;
+  if (lines <= 0)
+    return 0;
 
   const int32_t top = (gfx.height() - ((lines - 1) * lineHeight + lineBox)) / 2;
   return textDrawWrapped(gfx, kAnswerFace, text, kAnswerMarginX, top, 1, boxWidth, maxLines);
@@ -96,8 +97,8 @@ void paste(Seeed_GFX& sheet, const Seeed_GFX& panel, int32_t y) {
 // that the wrapping can be seen to stay inside it.
 void screens(Seeed_GFX& sheet) {
   const int32_t bandY = listeningWave::kY;
-  const int32_t band = listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 +
-                       kWordBandMargin - bandY;
+  const int32_t band =
+      listeningWave::kLabelY + textBoxHeight(kWordFace, 1) / 2 + kWordBandMargin - bandY;
 
   for (int screen = 0; screen < kScreenCount; ++screen) {
     Seeed_GFX panel(800, 480);
@@ -106,42 +107,41 @@ void screens(Seeed_GFX& sheet) {
     panel.setTextColor(TFT_BLACK);
     panel.setTextSize(1);
     switch (screen) {
-      case 0:
-        listeningWave::draw(panel, 0);
-        drawCentred(panel, kWordFace, "LISTENING", 400, listeningWave::kLabelY, 1);
-        save(panel, "listening.pgm");
-        break;
-      case 1:
-        thinkingDots::draw(panel, 0);
-        drawCentred(panel, kWordFace, "THINKING", 400, listeningWave::kLabelY, 1);
-        save(panel, "thinking.pgm");
-        break;
-      case 2:
-      case 3:
-      case 4: {
-        panel.fillRect(kAnswerMarginX - 1, kAnswerMarginY - 1,
-                       800 - 2 * kAnswerMarginX + 2, 1, TFT_BLACK);
-        panel.fillRect(kAnswerMarginX - 1, 480 - kAnswerMarginY,
-                       800 - 2 * kAnswerMarginX + 2, 1, TFT_BLACK);
-        int32_t wanted = 0;
-        const int32_t drawn = drawAnswer(panel, kAnswers[screen - 2], &wanted);
-        printf("answer %d: %d lines drawn, %d wanted, %zu bytes\n", screen - 2,
-               (int)drawn, (int)wanted, strlen(kAnswers[screen - 2]));
-        break;
-      }
-      default: {
-        const int32_t barY = (480 - kErrorBarHeight) / 2;
-        panel.fillRect(0, barY, 800, kErrorBarHeight, TFT_BLACK);
-        panel.setTextColor(TFT_WHITE);
-        drawCentred(panel, kWordFace, "NO SERVER", 400, barY + kErrorBarHeight / 2, 1);
-        silentIcon::draw(panel, screen % 2 == 0);
-    panel.setTextColor(TFT_BLACK);
-        const char* detail = "HTTP 503";
-        textDraw(panel, kDetailFace, detail,
-                 (800 - textWidth(kDetailFace, detail, 1)) / 2,
-                 barY + kErrorBarHeight + kErrorDetailGap, 1);
-        break;
-      }
+    case 0:
+      listeningWave::draw(panel, 0);
+      drawCentred(panel, kWordFace, "LISTENING", 400, listeningWave::kLabelY, 1);
+      save(panel, "listening.pgm");
+      break;
+    case 1:
+      thinkingDots::draw(panel, 0);
+      drawCentred(panel, kWordFace, "THINKING", 400, listeningWave::kLabelY, 1);
+      save(panel, "thinking.pgm");
+      break;
+    case 2:
+    case 3:
+    case 4: {
+      panel.fillRect(kAnswerMarginX - 1, kAnswerMarginY - 1, 800 - 2 * kAnswerMarginX + 2, 1,
+                     TFT_BLACK);
+      panel.fillRect(kAnswerMarginX - 1, 480 - kAnswerMarginY, 800 - 2 * kAnswerMarginX + 2, 1,
+                     TFT_BLACK);
+      int32_t wanted = 0;
+      const int32_t drawn = drawAnswer(panel, kAnswers[screen - 2], &wanted);
+      printf("answer %d: %d lines drawn, %d wanted, %zu bytes\n", screen - 2, (int)drawn,
+             (int)wanted, strlen(kAnswers[screen - 2]));
+      break;
+    }
+    default: {
+      const int32_t barY = (480 - kErrorBarHeight) / 2;
+      panel.fillRect(0, barY, 800, kErrorBarHeight, TFT_BLACK);
+      panel.setTextColor(TFT_WHITE);
+      drawCentred(panel, kWordFace, "NO SERVER", 400, barY + kErrorBarHeight / 2, 1);
+      silentIcon::draw(panel, screen % 2 == 0);
+      panel.setTextColor(TFT_BLACK);
+      const char* detail = "HTTP 503";
+      textDraw(panel, kDetailFace, detail, (800 - textWidth(kDetailFace, detail, 1)) / 2,
+               barY + kErrorBarHeight + kErrorDetailGap, 1);
+      break;
+    }
     }
     paste(sheet, panel, screen * 480);
   }
@@ -154,14 +154,16 @@ void screens(Seeed_GFX& sheet) {
     panel.fillScreen(TFT_WHITE);
     panel.setTextColor(TFT_BLACK);
     const bool listening = strcmp(word, "LISTENING") == 0 || strcmp(word, "THINKING") == 0;
-    drawCentred(panel, kWordFace, word, 400,
-                listening ? listeningWave::kLabelY : 240, listening ? 1 : kWordSize);
+    drawCentred(panel, kWordFace, word, 400, listening ? listeningWave::kLabelY : 240,
+                listening ? 1 : kWordSize);
     int top = 480, bottom = -1;
     for (int y = 0; y < 480; ++y) {
       for (int x = 0; x < 800; ++x) {
         if (!panel.px[y * 800 + x]) {
-          if (y < top) top = y;
-          if (y > bottom) bottom = y;
+          if (y < top)
+            top = y;
+          if (y > bottom)
+            bottom = y;
         }
       }
     }
@@ -216,8 +218,7 @@ void glyphs() {
 void capacity() {
   const int32_t boxWidth = 800 - 2 * kAnswerMarginX;
   const int32_t boxHeight = 480 - 2 * kAnswerMarginY;
-  const int32_t maxLines =
-      (boxHeight - textBoxHeight(kAnswerFace, 1)) / kAnswerFace.yAdvance + 1;
+  const int32_t maxLines = (boxHeight - textBoxHeight(kAnswerFace, 1)) / kAnswerFace.yAdvance + 1;
   printf("answer box: %d x %d, %d lines\n", (int)boxWidth, (int)boxHeight, (int)maxLines);
 
   // The narrowest Cyrillic letter, a realistic sentence, and the widest Latin
@@ -228,7 +229,8 @@ void capacity() {
     size_t fitted = 0;
     while (text.size() < 4096) {
       text += unit;
-      if (textWrapLines(kAnswerFace, text.c_str(), 1, boxWidth) > maxLines) break;
+      if (textWrapLines(kAnswerFace, text.c_str(), 1, boxWidth) > maxLines)
+        break;
       fitted = text.size();
     }
     printf("  %-8.8s fills the panel at %zu bytes\n", unit, fitted);
@@ -246,7 +248,7 @@ void copying() {
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   Seeed_GFX sheet(800, 480 * kScreenCount);

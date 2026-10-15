@@ -21,8 +21,11 @@ def night_delay(now: datetime) -> float:
 
 
 async def periodic(
-    name: str, action: Callable[[], object], interval: float,
-    *, daytime_only: bool = False,
+    name: str,
+    action: Callable[[], object],
+    interval: float,
+    *,
+    daytime_only: bool = False,
 ) -> None:
     """Run in the allowed window, then wait; never overlap a job with itself."""
     while True:
@@ -34,5 +37,7 @@ async def periodic(
         try:
             await asyncio.to_thread(action)
         except Exception:
-            logger.exception("Background job %s failed; retaining the last snapshot", name)
+            logger.exception(
+                "Background job %s failed; retaining the last snapshot", name
+            )
         await asyncio.sleep(interval)

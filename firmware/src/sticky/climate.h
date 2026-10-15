@@ -8,4 +8,4 @@ struct Reading {
 };
 // SHT40; display task only, sharing the sensor bus with the battery gauge.
 Reading read();
-}
+} // namespace stickyClimate

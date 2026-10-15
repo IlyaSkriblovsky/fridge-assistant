@@ -62,15 +62,15 @@ struct esp_http_client;
 // OUT). Anything finer belongs in the log, which is what lastError() is for --
 // the same division WifiLink draws between NO WIFI and its own strings.
 class VoiceRequest {
- public:
+public:
   // How a call ended. The orchestrator turns these into the vision's screens;
   // nothing here knows what they are called.
   enum class Result : uint8_t {
-    Ok,           // so far, or answer() holds the text
-    NoServer,     // nothing accepted a connection, or one died mid-request
-    ServerError,  // answered, but not with 200 -- status() has the code
-    BadResponse,  // 200, and a body that is not {"response": "..."}
-    TimedOut,     // connected, then silence for the whole budget
+    Ok,          // so far, or answer() holds the text
+    NoServer,    // nothing accepted a connection, or one died mid-request
+    ServerError, // answered, but not with 200 -- status() has the code
+    BadResponse, // 200, and a body that is not {"response": "..."}
+    TimedOut,    // connected, then silence for the whole budget
   };
 
   // The answer is kept in place rather than on the heap, so that nothing
@@ -216,7 +216,7 @@ class VoiceRequest {
   // instead; this is the string that says which of the ways it was.
   const char* lastError() const { return _error; }
 
- private:
+private:
   // The configured endpoint, written in one place so nothing else concatenates
   // it.
   void endpoint(char* out, size_t size) const;

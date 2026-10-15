@@ -76,8 +76,21 @@ GROUPS: list[tuple[str, list[int]]] = [
     # Russian, plus the two the alphabet range leaves out.
     ("Cyrillic", [0x401] + list(range(0x410, 0x450)) + [0x451]),
     # Dashes, quotes, bullet and ellipsis.
-    ("Marks", [0x2013, 0x2014, 0x2018, 0x2019, 0x201A,
-               0x201C, 0x201D, 0x201E, 0x2022, 0x2026]),
+    (
+        "Marks",
+        [
+            0x2013,
+            0x2014,
+            0x2018,
+            0x2019,
+            0x201A,
+            0x201C,
+            0x201D,
+            0x201E,
+            0x2022,
+            0x2026,
+        ],
+    ),
     # The numero sign, which Russian uses and Latin-1 has no equivalent for.
     ("Numero", [0x2116]),
 ]
@@ -100,11 +113,20 @@ MAX_BITMAP_BYTES = 0xFFFF
 
 
 class Glyph:
-    __slots__ = ("codepoint", "offset", "width", "height",
-                 "x_advance", "x_offset", "y_offset", "present")
+    __slots__ = (
+        "codepoint",
+        "offset",
+        "width",
+        "height",
+        "x_advance",
+        "x_offset",
+        "y_offset",
+        "present",
+    )
 
-    def __init__(self, codepoint, offset, width, height,
-                 x_advance, x_offset, y_offset, present):
+    def __init__(
+        self, codepoint, offset, width, height, x_advance, x_offset, y_offset, present
+    ):
         self.codepoint = codepoint
         self.offset = offset
         self.width = width
@@ -115,7 +137,9 @@ class Glyph:
         self.present = present
 
 
-def render_group(face: freetype.Face, codepoints: list[int]) -> tuple[bytearray, list[Glyph], list[int]]:
+def render_group(
+    face: freetype.Face, codepoints: list[int]
+) -> tuple[bytearray, list[Glyph], list[int]]:
     """Rasterises one group into fontconvert's packed bitmap and glyph table."""
     first, last = codepoints[0], codepoints[-1]
     wanted = set(codepoints)
@@ -142,12 +166,16 @@ def render_group(face: freetype.Face, codepoints: list[int]) -> tuple[bytearray,
             glyphs.append(Glyph(codepoint, offset, 0, 0, 0, 0, 0, False))
             continue
 
-        face.load_char(codepoint, freetype.FT_LOAD_TARGET_MONO | freetype.FT_LOAD_RENDER)
+        face.load_char(
+            codepoint, freetype.FT_LOAD_TARGET_MONO | freetype.FT_LOAD_RENDER
+        )
         slot = face.glyph
         bitmap = slot.bitmap
         rows = [
-            [(bitmap.buffer[y * bitmap.pitch + (x >> 3)] >> (7 - (x & 7))) & 1
-             for x in range(bitmap.width)]
+            [
+                (bitmap.buffer[y * bitmap.pitch + (x >> 3)] >> (7 - (x & 7))) & 1
+                for x in range(bitmap.width)
+            ]
             for y in range(bitmap.rows)
         ]
 
@@ -155,7 +183,9 @@ def render_group(face: freetype.Face, codepoints: list[int]) -> tuple[bytearray,
             # A glyph that rasterises to no ink at all -- a space. It carries
             # no bitmap, but it still advances, which is what tells it from a
             # hole. fontconvert writes the same thing.
-            glyphs.append(Glyph(codepoint, offset, 0, 0, slot.advance.x >> 6, 0, 1, True))
+            glyphs.append(
+                Glyph(codepoint, offset, 0, 0, slot.advance.x >> 6, 0, 1, True)
+            )
             continue
 
         for row in rows:
@@ -166,9 +196,18 @@ def render_group(face: freetype.Face, codepoints: list[int]) -> tuple[bytearray,
                     bitmaps.append(acc)
                     acc = nbits = 0
 
-        glyphs.append(Glyph(codepoint, offset, bitmap.width, bitmap.rows,
-                            slot.advance.x >> 6, slot.bitmap_left,
-                            1 - slot.bitmap_top, True))
+        glyphs.append(
+            Glyph(
+                codepoint,
+                offset,
+                bitmap.width,
+                bitmap.rows,
+                slot.advance.x >> 6,
+                slot.bitmap_left,
+                1 - slot.bitmap_top,
+                True,
+            )
+        )
 
     flush()
     return bitmaps, glyphs, missing
@@ -177,29 +216,40 @@ def render_group(face: freetype.Face, codepoints: list[int]) -> tuple[bytearray,
 def c_array(values, per_line: int, formatter) -> str:
     lines = []
     for start in range(0, len(values), per_line):
-        chunk = values[start:start + per_line]
+        chunk = values[start : start + per_line]
         lines.append("    " + " ".join(formatter(v) for v in chunk))
     return "\n".join(lines)
 
 
-def emit_face(ttf_path: Path, size: int, identifier: str, stem: str,
-              out_dir: Path) -> dict:
+def emit_face(
+    ttf_path: Path, size: int, identifier: str, stem: str, out_dir: Path
+) -> dict:
     face = freetype.Face(str(ttf_path))
     face.set_char_size(size * 64, 0, DPI, 0)
     y_advance = face.size.height >> 6
 
     groups = []
-    report = {"identifier": identifier, "ttf": ttf_path.name, "size": size,
-              "y_advance": y_advance, "bitmap_bytes": 0, "slots": 0,
-              "glyphs": 0, "missing": [], "groups": []}
+    report = {
+        "identifier": identifier,
+        "ttf": ttf_path.name,
+        "size": size,
+        "y_advance": y_advance,
+        "bitmap_bytes": 0,
+        "slots": 0,
+        "glyphs": 0,
+        "missing": [],
+        "groups": [],
+    }
 
     ascent = descent = 0
     for name, codepoints in GROUPS:
         bitmaps, glyphs, missing = render_group(face, codepoints)
         if len(bitmaps) > MAX_BITMAP_BYTES:
-            sys.exit(f"{identifier}/{name}: {len(bitmaps)} bytes of bitmap "
-                     f"exceeds the {MAX_BITMAP_BYTES} byte pgm_read_word "
-                     f"ceiling in drawCharGfx")
+            sys.exit(
+                f"{identifier}/{name}: {len(bitmaps)} bytes of bitmap "
+                f"exceeds the {MAX_BITMAP_BYTES} byte pgm_read_word "
+                f"ceiling in drawCharGfx"
+            )
         groups.append((name, codepoints[0], codepoints[-1], bitmaps, glyphs))
         report["bitmap_bytes"] += len(bitmaps)
         report["slots"] += len(glyphs)
@@ -240,9 +290,15 @@ def emit_face(ttf_path: Path, size: int, identifier: str, stem: str,
             f"const GFXglyph k{name}Glyphs[] PROGMEM = {{",
         ]
         for glyph in glyphs:
-            label = (f"U+{glyph.codepoint:04X}"
-                     + (f" '{chr(glyph.codepoint)}'" if 0x21 <= glyph.codepoint < 0x7F else "")
-                     + ("" if glyph.present else " (absent)"))
+            label = (
+                f"U+{glyph.codepoint:04X}"
+                + (
+                    f" '{chr(glyph.codepoint)}'"
+                    if 0x21 <= glyph.codepoint < 0x7F
+                    else ""
+                )
+                + ("" if glyph.present else " (absent)")
+            )
             body.append(
                 f"    {{ {glyph.offset:6d}, {glyph.width:3d}, {glyph.height:3d}, "
                 f"{glyph.x_advance:3d}, {glyph.x_offset:4d}, {glyph.y_offset:4d} }},"
@@ -298,11 +354,18 @@ def emit_header(out_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ttf-dir", required=True, type=Path,
-                        help="the unpacked freefont-ttf directory")
-    parser.add_argument("--out", type=Path,
-                        default=Path(__file__).resolve().parent.parent / "src" / "fonts",
-                        help="where the generated sources go")
+    parser.add_argument(
+        "--ttf-dir",
+        required=True,
+        type=Path,
+        help="the unpacked freefont-ttf directory",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "src" / "fonts",
+        help="where the generated sources go",
+    )
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -312,15 +375,19 @@ def main() -> None:
     for ttf, size, identifier, stem in FACES:
         report = emit_face(args.ttf_dir / ttf, size, identifier, stem, args.out)
         total += report["bitmap_bytes"] + report["slots"] * 8
-        print(f"{identifier}: {report['glyphs']} glyphs in {report['slots']} slots, "
-              f"{report['bitmap_bytes']} B bitmap + {report['slots'] * 8} B glyphs, "
-              f"ascent {report['ascent']} descent {report['descent']} "
-              f"yAdvance {report['y_advance']}")
+        print(
+            f"{identifier}: {report['glyphs']} glyphs in {report['slots']} slots, "
+            f"{report['bitmap_bytes']} B bitmap + {report['slots'] * 8} B glyphs, "
+            f"ascent {report['ascent']} descent {report['descent']} "
+            f"yAdvance {report['y_advance']}"
+        )
         for name, slots, nbytes in report["groups"]:
             print(f"    {name:<12} {slots:4d} slots {nbytes:6d} B")
         if report["missing"]:
-            print("    absent from the face: "
-                  + " ".join(f"U+{c:04X}" for c in report["missing"]))
+            print(
+                "    absent from the face: "
+                + " ".join(f"U+{c:04X}" for c in report["missing"])
+            )
     print(f"total {total} B ({total / 1024:.1f} KiB) of flash")
 
 

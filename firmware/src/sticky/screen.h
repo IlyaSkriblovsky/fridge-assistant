@@ -66,7 +66,7 @@
 // cold start wants a white frame before the first real screen is the
 // orchestrator's call, and clear() is what it calls.
 class StickyScreen {
- public:
+public:
   // The longest string any screen draws, in bytes, and the longest detail
   // under an error title.
   //
@@ -146,7 +146,7 @@ class StickyScreen {
   // the library.
   const char* lastError() const { return _lastError; }
 
- private:
+private:
   // Every screen starts from the same state: white, black text, size 1. Set
   // rather than assumed, so no screen can inherit the last one's colour.
   void startFrame();
@@ -156,8 +156,8 @@ class StickyScreen {
   // Draws `text` with its box centred on the point, which is the placement
   // MC_DATUM used to give. Done here rather than through a datum because
   // Seeed_GFX2 would measure the string with the textWidth() described above.
-  void drawCentred(const TextFace& face, const char* text, int32_t centreX,
-                   int32_t middleY, uint8_t size);
+  void drawCentred(const TextFace& face, const char* text, int32_t centreX, int32_t middleY,
+                   uint8_t size);
 
   // Union of the listening and thinking compositions.
   void wordBand(int32_t& y, int32_t& height);
@@ -171,7 +171,7 @@ class StickyScreen {
 
   Seeed_GFX _display;
   bool _ready = false;
-  bool _drewFullFrame = false;  // a full refresh has run this boot
+  bool _drewFullFrame = false; // a full refresh has run this boot
   bool _lastWasPartial = false;
   uint8_t _waveFrame = 0;
   uint8_t _dotsFrame = 0;

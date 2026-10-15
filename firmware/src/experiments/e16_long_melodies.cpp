@@ -36,12 +36,9 @@ struct Pattern {
   int8_t offsets[kElementCount];
 };
 constexpr Pattern kPatterns[] = {
-    {"repeated-call", {0, 2, 0, 2, 0, 2, 0, 2}},
-    {"rising-answer", {0, 2, 0, 2, 1, 3, 1, 3}},
-    {"wave", {0, 2, 4, 2, 0, -2, 0, 2}},
-    {"turn-and-answer", {0, -1, 2, 1, 0, 2, 1, 3}},
-    {"stepped-fanfare", {0, 0, 2, 0, 2, 2, 4, 2}},
-    {"return-home", {0, 2, 4, 2, 3, 1, 2, 0}},
+    {"repeated-call", {0, 2, 0, 2, 0, 2, 0, 2}},   {"rising-answer", {0, 2, 0, 2, 1, 3, 1, 3}},
+    {"wave", {0, 2, 4, 2, 0, -2, 0, 2}},           {"turn-and-answer", {0, -1, 2, 1, 0, 2, 1, 3}},
+    {"stepped-fanfare", {0, 0, 2, 0, 2, 2, 4, 2}}, {"return-home", {0, 2, 4, 2, 3, 1, 2, 0}},
 };
 constexpr uint8_t kPatternCount = sizeof(kPatterns) / sizeof(kPatterns[0]);
 uint16_t pitches[kPatternCount][kElementCount][2]{};
@@ -89,7 +86,8 @@ void audioError() {
 }
 
 bool playPattern(uint8_t index) {
-  if (!buzzerAttached || audioFailed) return false;
+  if (!buzzerAttached || audioFailed)
+    return false;
   for (uint8_t element = 0; element < kElementCount; ++element) {
     for (uint8_t note = 0; note < 8; ++note) {
       const uint16_t hz = pitches[index][element][note & 1U];
@@ -104,7 +102,8 @@ bool playPattern(uint8_t index) {
       audioError();
       return false;
     }
-    if (element + 1 < kElementCount) delay(50);
+    if (element + 1 < kElementCount)
+      delay(50);
   }
   return true;
 }
@@ -115,8 +114,8 @@ void waitForRelease() {
   uint32_t since = millis();
   while (millis() - since < kDebounceMs) {
     if (digitalRead(stickyPower::kPinUpButton) == LOW ||
-        digitalRead(stickyPower::kPinAiButton) == LOW ||
-        digitalRead(kPinDownButton) == LOW) since = millis();
+        digitalRead(stickyPower::kPinAiButton) == LOW || digitalRead(kPinDownButton) == LOW)
+      since = millis();
     delay(5);
   }
 }
@@ -124,9 +123,11 @@ void waitForRelease() {
 void playPair() {
   readyToChoose = false;
   delay(250);
-  if (!playPattern(first)) return;
+  if (!playPattern(first))
+    return;
   delay(kPairGapMs);
-  if (!playPattern(second)) return;
+  if (!playPattern(second))
+    return;
   waitForRelease();
   readyToChoose = true;
   Serial1.println("Choose A/B, or AI to replay.");
@@ -144,8 +145,7 @@ void shufflePairs() {
 void printScores() {
   Serial1.println("Round-robin scores:");
   for (uint8_t i = 0; i < kPatternCount; ++i) {
-    Serial1.printf("  %-14s %u/%u\n", kPatterns[i].name, scores[i],
-                   kPatternCount - 1);
+    Serial1.printf("  %-14s %u/%u\n", kPatterns[i].name, scores[i], kPatternCount - 1);
   }
 }
 
@@ -156,8 +156,7 @@ void finish() {
   Serial1.println();
   Serial1.println("E16 complete");
   Serial1.printf("  winner: %s\n", kPatterns[winner].name);
-  Serial1.printf("  final: %s %u, %s %u\n",
-                 kPatterns[finalist[0]].name, finalWins[0],
+  Serial1.printf("  final: %s %u, %s %u\n", kPatterns[finalist[0]].name, finalWins[0],
                  kPatterns[finalist[1]].name, finalWins[1]);
   Serial1.println("  reset to run again");
 
@@ -174,7 +173,8 @@ void beginFinal() {
   // Randomize tie priority, then stable-sort by score. Print all scores
   // so a cutoff tie is visible rather than mistaken for a unique ranking.
   uint8_t rank[kPatternCount];
-  for (uint8_t i = 0; i < kPatternCount; ++i) rank[i] = i;
+  for (uint8_t i = 0; i < kPatternCount; ++i)
+    rank[i] = i;
   for (uint8_t i = kPatternCount; i > 1; --i) {
     const uint8_t j = randomWord() % i;
     const uint8_t temporary = rank[i - 1];
@@ -225,47 +225,51 @@ void prepareTrial() {
     return;
   }
 
-  if (phase == Phase::Final ? ((finalTrial & 1U) != finalReverse)
-                            : ((randomWord() & 1U) != 0)) {
+  if (phase == Phase::Final ? ((finalTrial & 1U) != finalReverse) : ((randomWord() & 1U) != 0)) {
     const uint8_t temporary = first;
     first = second;
     second = temporary;
   }
   ++trialNumber;
   if (phase == Phase::RoundRobin) {
-    Serial1.printf("\ntrial %u, round robin %u/%u: playing A then B\n",
-                   trialNumber, pairIndex + 1, kRoundRobinTrials);
+    Serial1.printf("\ntrial %u, round robin %u/%u: playing A then B\n", trialNumber, pairIndex + 1,
+                   kRoundRobinTrials);
   } else {
-    Serial1.printf("\ntrial %u, final %u/%u: playing A then B\n",
-                   trialNumber, finalTrial + 1, kFinalTrials);
+    Serial1.printf("\ntrial %u, final %u/%u: playing A then B\n", trialNumber, finalTrial + 1,
+                   kFinalTrials);
   }
   playPair();
 }
 
 void choose(bool choseFirst) {
-  if (!readyToChoose || phase == Phase::Done) return;
+  if (!readyToChoose || phase == Phase::Done)
+    return;
   readyToChoose = false;
   const uint8_t chosen = choseFirst ? first : second;
-  Serial1.printf("  A = %s, B = %s; chose %s\n",
-                 kPatterns[first].name, kPatterns[second].name,
+  Serial1.printf("  A = %s, B = %s; chose %s\n", kPatterns[first].name, kPatterns[second].name,
                  choseFirst ? "A" : "B");
 
   if (phase == Phase::RoundRobin) {
     ++scores[chosen];
     ++pairIndex;
   } else {
-    if (chosen == finalist[0]) ++finalWins[0];
-    else ++finalWins[1];
+    if (chosen == finalist[0])
+      ++finalWins[0];
+    else
+      ++finalWins[1];
     ++finalTrial;
   }
   prepareTrial();
 }
 
 bool pressed(int pin) {
-  if (digitalRead(pin) != LOW) return false;
+  if (digitalRead(pin) != LOW)
+    return false;
   delay(kDebounceMs);
-  if (digitalRead(pin) != LOW) return false;
-  while (digitalRead(pin) == LOW) delay(5);
+  if (digitalRead(pin) != LOW)
+    return false;
+  while (digitalRead(pin) == LOW)
+    delay(5);
   waitForRelease();
   return true;
 }
@@ -273,7 +277,8 @@ bool pressed(int pin) {
 void beginExperiment() {
   uint8_t index = 0;
   for (uint8_t a = 0; a < kPatternCount; ++a) {
-    for (uint8_t b = a + 1; b < kPatternCount; ++b) pairs[index++] = {a, b};
+    for (uint8_t b = a + 1; b < kPatternCount; ++b)
+      pairs[index++] = {a, b};
   }
   shufflePairs();
   started = true;
@@ -281,7 +286,7 @@ void beginExperiment() {
   prepareTrial();
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   stickyPower::holdLatch();
@@ -303,20 +308,23 @@ void setup() {
     }
   }
   randomState = esp_random();
-  if (randomState == 0) randomState = 1;
+  if (randomState == 0)
+    randomState = 1;
   const uint32_t seed = randomState;
   gpio_hold_dis(static_cast<gpio_num_t>(stickyBuzzer::kPin));
   buzzerAttached = ledcAttach(stickyBuzzer::kPin, 3900, kResolutionBits);
-  if (buzzerAttached && !ledcWrite(stickyBuzzer::kPin, 0)) audioError();
+  if (buzzerAttached && !ledcWrite(stickyBuzzer::kPin, 0))
+    audioError();
 
   Serial1.println();
-  Serial1.printf("E16 notification melody rig -- seed %lu\n",
-                 static_cast<unsigned long>(seed));
+  Serial1.printf("E16 notification melody rig -- seed %lu\n", static_cast<unsigned long>(seed));
   Serial1.println("Up chooses A; AI starts/replays; Down chooses B.");
   Serial1.println("Choose the melody you would prefer as an energetic notification.");
   Serial1.println("Do not watch this log while choosing.");
-  if (!buzzerAttached) Serial1.println("ERROR: could not attach LEDC to the buzzer");
-  else if (!audioFailed) Serial1.println("Press AI when ready.");
+  if (!buzzerAttached)
+    Serial1.println("ERROR: could not attach LEDC to the buzzer");
+  else if (!audioFailed)
+    Serial1.println("Press AI when ready.");
   waitForRelease();
 }
 
@@ -326,15 +334,18 @@ void loop() {
     return;
   }
   if (pressed(stickyPower::kPinUpButton)) {
-    if (started) choose(true);
+    if (started)
+      choose(true);
   } else if (pressed(stickyPower::kPinAiButton)) {
-    if (!started) beginExperiment();
+    if (!started)
+      beginExperiment();
     else if (readyToChoose) {
       Serial1.printf("replay trial %u\n", trialNumber);
       playPair();
     }
   } else if (pressed(kPinDownButton)) {
-    if (started) choose(false);
+    if (started)
+      choose(false);
   }
   delay(5);
 }

@@ -50,7 +50,8 @@ void unsupported_and_encoded_frames_are_rejected() {
 }
 
 void intervals_fall_back_or_clamp_without_overflow() {
-  for (const char* value : {"", "0", "-1", "1.5", " 60", "60x", "4294967296", "999999999999999999999"})
+  for (const char* value :
+       {"", "0", "-1", "1.5", " 60", "60x", "4294967296", "999999999999999999999"})
     TEST_ASSERT_EQUAL_UINT32(3600, interval(value));
   TEST_ASSERT_EQUAL_UINT32(3600, interval(nullptr));
   TEST_ASSERT_EQUAL_UINT32(60, interval("1"));
@@ -101,7 +102,10 @@ void crc(std::vector<uint8_t>& png, size_t offset) {
   const size_t count = uint32_t(png[offset]) << 24 | uint32_t(png[offset + 1]) << 16 |
                        uint32_t(png[offset + 2]) << 8 | png[offset + 3];
   uint32_t value = mz_crc32(0, png.data() + offset + 4, count + 4);
-  for (int i = 3; i >= 0; --i) { png[offset + 8 + count + i] = value; value >>= 8; }
+  for (int i = 3; i >= 0; --i) {
+    png[offset + 8 + count + i] = value;
+    value >>= 8;
+  }
 }
 
 void png_rejects_unsupported_headers_and_chunks() {
@@ -152,7 +156,10 @@ void png_rejects_corruption_truncation_and_extra_data() {
   const size_t idatBytes = png.size() - 57;
   png.insert(png.begin() + 41 + idatBytes, 0); // Trailing data inside IDAT.
   uint32_t extended = idatBytes + 1;
-  for (int i = 3; i >= 0; --i) { png[33 + i] = extended; extended >>= 8; }
+  for (int i = 3; i >= 0; --i) {
+    png[33 + i] = extended;
+    extended >>= 8;
+  }
   crc(png, 33);
   TEST_ASSERT_FALSE(dashboardPng::decode(png.data(), png.size(), output.data()));
   for (const char* name : {"short.png", "long.png", "bad-filter.png"}) {
@@ -169,7 +176,8 @@ void png_cancellation_and_allocation_failure_release_scratch() {
     auto png = original;
     int remaining = limit;
     const unsigned allocated = testHeap::allocations, freed = testHeap::frees;
-    TEST_ASSERT_FALSE(dashboardPng::decode(png.data(), png.size(), output.data(),
+    TEST_ASSERT_FALSE(dashboardPng::decode(
+        png.data(), png.size(), output.data(),
         [](void* context) { return --*static_cast<int*>(context) < 0; }, &remaining));
     TEST_ASSERT_EQUAL(testHeap::allocations - allocated, testHeap::frees - freed);
   }

@@ -10,9 +10,12 @@ void setUp() {}
 void tearDown() {}
 reminder::Snapshot snapshot(int count = 1) {
   reminder::Snapshot s;
-  s.version = 1; s.serverMs = 1000; s.count = count;
+  s.version = 1;
+  s.serverMs = 1000;
+  s.count = count;
   for (int i = 0; i < count; ++i) {
-    s.items[i].id = i + 1; s.items[i].due = 2000 + i * 1000;
+    s.items[i].id = i + 1;
+    s.items[i].due = 2000 + i * 1000;
     s.items[i].created = 1000;
     strcpy(s.items[i].text, "Яйца");
   }
@@ -36,8 +39,11 @@ void sequence_and_offline_read() {
   TEST_ASSERT_TRUE(state.read());
   TEST_ASSERT_EQUAL(-1, state.current());
   TEST_ASSERT_EQUAL(2, state.pendingCount);
-  s.version++; s.count = 0; s.ackCount = 2;
-  s.acknowledged[0] = 1; s.acknowledged[1] = 2;
+  s.version++;
+  s.count = 0;
+  s.ackCount = 2;
+  s.acknowledged[0] = 1;
+  s.acknowledged[1] = 2;
   TEST_ASSERT_TRUE(state.apply(s));
   TEST_ASSERT_EQUAL(0, state.pendingCount);
   TEST_ASSERT_TRUE(state.apply(s));
@@ -45,13 +51,16 @@ void sequence_and_offline_read() {
 void simultaneous_order_and_cancellation() {
   reminder::State state;
   auto s = snapshot(3);
-  for (size_t i = 0; i < s.count; ++i) s.items[i].due = 2000;
+  for (size_t i = 0; i < s.count; ++i)
+    s.items[i].due = 2000;
   s.items[0].created = 1500;
   TEST_ASSERT_TRUE(state.apply(s));
   TEST_ASSERT_TRUE(state.fire(9000)); // cold overdue: one group, all fired
   TEST_ASSERT_FALSE(state.fire(9000));
   TEST_ASSERT_EQUAL(1, state.items[state.current()].id);
-  s.version++; s.items[0] = s.items[2]; s.count = 2;
+  s.version++;
+  s.items[0] = s.items[2];
+  s.count = 2;
   TEST_ASSERT_TRUE(state.apply(s));
   TEST_ASSERT_EQUAL(3, state.items[state.current()].id);
   TEST_ASSERT_FALSE(state.fire(9000));
@@ -63,14 +72,18 @@ void stale_and_queue_capacity() {
   auto s = snapshot(10);
   TEST_ASSERT_TRUE(state.apply(s));
   state.fire(99999);
-  for (int i = 0; i < 10; ++i) TEST_ASSERT_TRUE(state.read());
+  for (int i = 0; i < 10; ++i)
+    TEST_ASSERT_TRUE(state.read());
   TEST_ASSERT_EQUAL(10, state.pendingCount);
-  auto replacement = snapshot(); replacement.version++;
+  auto replacement = snapshot();
+  replacement.version++;
   replacement.items[0].id = 99;
   TEST_ASSERT_FALSE(state.apply(replacement)); // preserve every pending ack
   TEST_ASSERT_EQUAL(10, state.pendingCount);
-  replacement.count = 0; replacement.ackCount = 10;
-  for (int i = 0; i < 10; ++i) replacement.acknowledged[i] = i + 1;
+  replacement.count = 0;
+  replacement.ackCount = 10;
+  for (int i = 0; i < 10; ++i)
+    replacement.acknowledged[i] = i + 1;
   TEST_ASSERT_TRUE(state.apply(replacement));
   TEST_ASSERT_FALSE(state.apply(s));
   replacement.serverMs--;
@@ -85,7 +98,8 @@ void button_hold_and_release() {
     TEST_ASSERT_FALSE(gate.poll(true, 1000, 30));
     TEST_ASSERT_FALSE(gate.poll(false, 1001, 30));
     TEST_ASSERT_FALSE(gate.poll(true, 1010, 30)); // bounce, not another press
-    gate.poll(false, 1100, 30); gate.poll(false, 1130, 30);
+    gate.poll(false, 1100, 30);
+    gate.poll(false, 1130, 30);
     TEST_ASSERT_FALSE(gate.poll(true, 1200, 30));
     TEST_ASSERT_TRUE(gate.poll(true, 1230, 30));
     gate.armed = false; // held button when voice was interrupted
@@ -94,22 +108,28 @@ void button_hold_and_release() {
 }
 void json_validation() {
   JsonDocument doc;
-  const char* valid = R"({"version":1,"server_time_ms":1000,"active":[{"id":1,"text":"Яйца","due_at_ms":2000,"created_at_ms":900}],"acknowledged_ids":[]})";
+  const char* valid =
+      R"({"version":1,"server_time_ms":1000,"active":[{"id":1,"text":"Яйца","due_at_ms":2000,"created_at_ms":900}],"acknowledged_ids":[]})";
   reminder::Snapshot s;
   TEST_ASSERT_FALSE(deserializeJson(doc, valid));
   TEST_ASSERT_TRUE(reminder::parse(doc.as<JsonVariantConst>(), s));
   TEST_ASSERT_EQUAL_STRING("Яйца", s.items[0].text);
   doc["active"][0]["text"] = std::string(241, 'x');
   TEST_ASSERT_FALSE(reminder::parse(doc.as<JsonVariantConst>(), s));
-  deserializeJson(doc, valid); doc["active"][0]["id"] = "1";
+  deserializeJson(doc, valid);
+  doc["active"][0]["id"] = "1";
   TEST_ASSERT_FALSE(reminder::parse(doc.as<JsonVariantConst>(), s));
-  deserializeJson(doc, valid); doc["active"].as<JsonArray>().add(doc["active"][0]);
+  deserializeJson(doc, valid);
+  doc["active"].as<JsonArray>().add(doc["active"][0]);
   TEST_ASSERT_FALSE(reminder::parse(doc.as<JsonVariantConst>(), s));
-  deserializeJson(doc, valid); doc.remove("active");
+  deserializeJson(doc, valid);
+  doc.remove("active");
   TEST_ASSERT_FALSE(reminder::parse(doc.as<JsonVariantConst>(), s));
-  deserializeJson(doc, valid); doc["active"].clear();
+  deserializeJson(doc, valid);
+  doc["active"].clear();
   TEST_ASSERT_FALSE(reminder::parse(doc.as<JsonVariantConst>(), s));
-  deserializeJson(doc, valid); doc["active"].to<JsonArray>();
+  deserializeJson(doc, valid);
+  doc["active"].to<JsonArray>();
   TEST_ASSERT_TRUE(reminder::parse(doc.as<JsonVariantConst>(), s));
   TEST_ASSERT_EQUAL(0, s.count);
 }
@@ -127,7 +147,8 @@ void upload_race_and_full_text() {
   std::string text(240, 'W');
   text += "\n\nГолосовой запрос прерван";
   const int lines = textWrapLines(fontFreeSans12, text.c_str(), 1, reminderLayout::kWidth);
-  TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kHeight, (lines - 1) * fontFreeSans12.yAdvance + textBoxHeight(fontFreeSans12, 1));
+  TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kHeight, (lines - 1) * fontFreeSans12.yAdvance +
+                                                         textBoxHeight(fontFreeSans12, 1));
   TEST_ASSERT_FALSE(reminder::validText("a\nb"));
   TEST_ASSERT_FALSE(reminder::validText("\xc0\x80"));
   TEST_ASSERT_FALSE(reminder::validText("\xed\xa0\x80"));
@@ -162,19 +183,20 @@ void repeat_series() {
   TEST_ASSERT_EQUAL(0, retained.alarm.nextTicks);
   TEST_ASSERT_EQUAL(0, retained.alarm.count);
   // Cancellation clears the series too, but future reminders remain.
-  s.version++; s.items[0] = s.items[1]; s.count = 1;
+  s.version++;
+  s.items[0] = s.items[1];
+  s.count = 1;
   state.apply(s);
   TEST_ASSERT_EQUAL(0, state.alarm.nextTicks);
   TEST_ASSERT_EQUAL(0, state.alarm.count);
 }
 void reminder_layout_bounds() {
   const std::string samples[] = {"Яйца", "Проверить духовку и выключить свет",
-    std::string(240, 'W') + "\n\nГолосовой запрос прерван"};
+                                 std::string(240, 'W') + "\n\nГолосовой запрос прерван"};
   for (const auto& text : samples) {
     const auto box = reminderLayout::measure(text.c_str());
     TEST_ASSERT_GREATER_OR_EQUAL(reminderLayout::kTop, box.y);
-    TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kTop + reminderLayout::kHeight,
-                              box.y + box.height);
+    TEST_ASSERT_LESS_OR_EQUAL(reminderLayout::kTop + reminderLayout::kHeight, box.y + box.height);
     Seeed_GFX gfx(800, 480);
     reminderLayout::draw(gfx, text.c_str());
     for (int y = 0; y < 480; ++y)

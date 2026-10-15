@@ -6,7 +6,10 @@
 #define ESP32 1
 #include "../../src/sticky/buzzer.cpp"
 
-struct Tone { uint32_t hz; unsigned long at; };
+struct Tone {
+  uint32_t hz;
+  unsigned long at;
+};
 std::vector<Tone> tones;
 unsigned long clockMs;
 bool muted, attachOk, attached, parked;
@@ -40,18 +43,23 @@ void digitalWrite(uint8_t pin, uint8_t level) {
 }
 bool silentMode::enabled() { return muted; }
 void setUp() {
-  tones.clear(); clockMs = 100; muted = false; attachOk = true;
-  attached = false; parked = false;
+  tones.clear();
+  clockMs = 100;
+  muted = false;
+  attachOk = true;
+  attached = false;
+  parked = false;
 }
 void tearDown() {}
 constexpr const char* kEriccson =
-  "Ericcson:d=4,o=5,b=355:16b4,16d,16b4,16d,16b4,16d,16b4,16d,"
-  "16d,16f,16d,16f,16d,16f,16d,16f,16f,16a,16f,16a,16f,16a,16f,16a,1p,2p,"
-  "16b4,16d,16b4,16d,16b4,16d,16b4,16d,16d,16f,16d,16f,16d,16f,16d,16f,"
-  "16f,16a,16f,16a,16f,16a,16f,16a";
+    "Ericcson:d=4,o=5,b=355:16b4,16d,16b4,16d,16b4,16d,16b4,16d,"
+    "16d,16f,16d,16f,16d,16f,16d,16f,16f,16a,16f,16a,16f,16a,16f,16a,1p,2p,"
+    "16b4,16d,16b4,16d,16b4,16d,16b4,16d,16d,16f,16d,16f,16d,16f,16d,16f,"
+    "16f,16a,16f,16a,16f,16a,16f,16a";
 void playEriccson() {
   TEST_ASSERT_TRUE(stickyBuzzer::startRtttl(kEriccson));
-  while (stickyBuzzer::pollRtttl()) delay(1);
+  while (stickyBuzzer::pollRtttl())
+    delay(1);
 }
 void ericcson_notes_rests_and_completion() {
   muted = true; // Reminder playback bypasses silent mode.
@@ -81,8 +89,10 @@ void ericcson_notes_rests_and_completion() {
 }
 void voice_cues_and_attachment_failure() {
   muted = true;
-  stickyBuzzer::ready(); stickyBuzzer::taken();
-  stickyBuzzer::answer(); stickyBuzzer::error();
+  stickyBuzzer::ready();
+  stickyBuzzer::taken();
+  stickyBuzzer::answer();
+  stickyBuzzer::error();
   TEST_ASSERT_TRUE(tones.empty());
   muted = false;
   stickyBuzzer::taken();
@@ -90,7 +100,8 @@ void voice_cues_and_attachment_failure() {
   TEST_ASSERT_EQUAL(2500, tones[0].hz);
   TEST_ASSERT_EQUAL(160, clockMs);
   TEST_ASSERT_TRUE(parked);
-  tones.clear(); attachOk = false;
+  tones.clear();
+  attachOk = false;
   stickyBuzzer::notification();
   TEST_ASSERT_TRUE(tones.empty());
   TEST_ASSERT_EQUAL(160, clockMs);
@@ -102,12 +113,16 @@ void responsive_player_and_validation() {
   TEST_ASSERT_FALSE(tones.empty());
   TEST_ASSERT_FALSE(attached);
   TEST_ASSERT_TRUE(parked);
-  tones.clear(); clockMs = 100;
+  tones.clear();
+  clockMs = 100;
   TEST_ASSERT_TRUE(rtttl::valid("Test:b=120,o=5,d=8:c#,d.6,p"));
-  const char* bad[] = {"", "NoColon", "X:", "X:d=0:c", "X:b=0:c", "X:o=9:c", "X:o=01:c",
-    "X:d=4,d=8:c", "X:d=4:16", "X:d=4:c,", "X:d=4:x", "X:d=4:c..",
-    "X:d=4:p#", "X:l=0:c", "X:b=25:1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c"};
-  for (auto song : bad) TEST_ASSERT_FALSE(rtttl::valid(song));
+  const char* bad[] = {"",         "NoColon",     "X:",
+                       "X:d=0:c",  "X:b=0:c",     "X:o=9:c",
+                       "X:o=01:c", "X:d=4,d=8:c", "X:d=4:16",
+                       "X:d=4:c,", "X:d=4:x",     "X:d=4:c..",
+                       "X:d=4:p#", "X:l=0:c",     "X:b=25:1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c,1c"};
+  for (auto song : bad)
+    TEST_ASSERT_FALSE(rtttl::valid(song));
   TEST_ASSERT_FALSE(rtttl::valid("X:o=7:c", 1));
   TEST_ASSERT_FALSE(rtttl::valid("X:o=0:c", -1));
   TEST_ASSERT_TRUE(stickyBuzzer::startRtttl("X:d=4,o=5,b=120:a", 1));

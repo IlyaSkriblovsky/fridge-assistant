@@ -31,7 +31,7 @@ struct MicLevel {
 };
 
 class StickyMic {
- public:
+public:
   static constexpr int kPinClk = 19;
   static constexpr int kPinData = 20;
   static constexpr int kPinPowerEnable = 38;
@@ -85,7 +85,7 @@ class StickyMic {
   // Human-readable reason the last begin()/readLevel() returned false.
   const char* lastError() const { return _lastError; }
 
- private:
+private:
   I2SClass _i2s;
   bool _started = false;
   uint32_t _sampleRate = kSampleRate;

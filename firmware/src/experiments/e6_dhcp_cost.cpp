@@ -44,7 +44,7 @@
 #include <esp_timer.h>
 #include <lwip/dhcp.h>
 #include <lwip/netif.h>
-#include <lwip/prot/dhcp.h>  // the DHCP_STATE_* names; lwip/dhcp.h has only the struct
+#include <lwip/prot/dhcp.h> // the DHCP_STATE_* names; lwip/dhcp.h has only the struct
 
 #include "secrets.h"
 
@@ -87,23 +87,23 @@ struct Lease {
   uint32_t gw;
   uint32_t mask;
   uint32_t dns;
-  uint32_t seconds;  // what the server offered, from the lwIP struct
+  uint32_t seconds; // what the server offered, from the lwIP struct
   bool valid;
 };
 
 struct Row {
-  uint8_t mode;  // 0 dhcp, 1 cached, 2 cached but deliberately stale
+  uint8_t mode; // 0 dhcp, 1 cached, 2 cached but deliberately stale
   uint16_t linkMs;
   uint16_t ipMs;
   uint16_t probeMs;   // both attempts together, not just the one that answered
-  uint16_t recoverMs;  // 0 unless a stale lease had to be thrown away
-  uint16_t bootMs;  // the top of setup() to the probe being over
+  uint16_t recoverMs; // 0 unless a stale lease had to be thrown away
+  uint16_t bootMs;    // the top of setup() to the probe being over
   uint8_t tries;
   uint8_t target;
   uint32_t leaseS;
   bool online;
-  bool connected;  // the probe completed a handshake
-  bool answered;   // ... or was refused, which proves the address just as well
+  bool connected; // the probe completed a handshake
+  bool answered;  // ... or was refused, which proves the address just as well
 };
 
 RTC_DATA_ATTR uint32_t g_magic;
@@ -128,34 +128,56 @@ constexpr const char* kRowFormat = "%3s  %-6s %7s %8s %8s %8s %5s  %-8s %s\n";
 
 const char* dhcpStateName(uint8_t state) {
   switch (state) {
-    case DHCP_STATE_OFF: return "OFF";
-    case DHCP_STATE_REQUESTING: return "REQUESTING";
-    case DHCP_STATE_INIT: return "INIT";
-    case DHCP_STATE_REBOOTING: return "REBOOTING";
-    case DHCP_STATE_REBINDING: return "REBINDING";
-    case DHCP_STATE_RENEWING: return "RENEWING";
-    case DHCP_STATE_SELECTING: return "SELECTING";
-    case DHCP_STATE_INFORMING: return "INFORMING";
-    case DHCP_STATE_CHECKING: return "CHECKING";
-    case DHCP_STATE_PERMANENT: return "PERMANENT";
-    case DHCP_STATE_BOUND: return "BOUND";
-    case DHCP_STATE_RELEASING: return "RELEASING";
-    case DHCP_STATE_BACKING_OFF: return "BACKING_OFF";
-    default: return "?";
+  case DHCP_STATE_OFF:
+    return "OFF";
+  case DHCP_STATE_REQUESTING:
+    return "REQUESTING";
+  case DHCP_STATE_INIT:
+    return "INIT";
+  case DHCP_STATE_REBOOTING:
+    return "REBOOTING";
+  case DHCP_STATE_REBINDING:
+    return "REBINDING";
+  case DHCP_STATE_RENEWING:
+    return "RENEWING";
+  case DHCP_STATE_SELECTING:
+    return "SELECTING";
+  case DHCP_STATE_INFORMING:
+    return "INFORMING";
+  case DHCP_STATE_CHECKING:
+    return "CHECKING";
+  case DHCP_STATE_PERMANENT:
+    return "PERMANENT";
+  case DHCP_STATE_BOUND:
+    return "BOUND";
+  case DHCP_STATE_RELEASING:
+    return "RELEASING";
+  case DHCP_STATE_BACKING_OFF:
+    return "BACKING_OFF";
+  default:
+    return "?";
   }
 }
 
 // What each state means in packets, which is the whole point of the timeline.
 const char* dhcpStateNote(uint8_t state) {
   switch (state) {
-    case DHCP_STATE_INIT: return "the client exists";
-    case DHCP_STATE_SELECTING: return "DISCOVER is out";
-    case DHCP_STATE_REQUESTING: return "an OFFER came back, REQUEST is out";
-    case DHCP_STATE_REBOOTING: return "asking for the previous address";
-    case DHCP_STATE_CHECKING: return "the ACK is in, ARP-checking the address";
-    case DHCP_STATE_BOUND: return "the address is ours";
-    case DHCP_STATE_BACKING_OFF: return "nobody answered; waiting to try again";
-    default: return "";
+  case DHCP_STATE_INIT:
+    return "the client exists";
+  case DHCP_STATE_SELECTING:
+    return "DISCOVER is out";
+  case DHCP_STATE_REQUESTING:
+    return "an OFFER came back, REQUEST is out";
+  case DHCP_STATE_REBOOTING:
+    return "asking for the previous address";
+  case DHCP_STATE_CHECKING:
+    return "the ACK is in, ARP-checking the address";
+  case DHCP_STATE_BOUND:
+    return "the address is ours";
+  case DHCP_STATE_BACKING_OFF:
+    return "nobody answered; waiting to try again";
+  default:
+    return "";
   }
 }
 
@@ -163,20 +185,25 @@ const char* dhcpStateNote(uint8_t state) {
 // started and the client has been created, which is most of the first 100 ms.
 struct dhcp* stationDhcp() {
   esp_netif_t* handle = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (handle == nullptr) return nullptr;
+  if (handle == nullptr)
+    return nullptr;
   struct netif* impl = static_cast<struct netif*>(esp_netif_get_netif_impl(handle));
-  if (impl == nullptr) return nullptr;
+  if (impl == nullptr)
+    return nullptr;
   return netif_dhcp_data(impl);
 }
 
 void sampleDhcp(uint32_t ms) {
   const struct dhcp* client = stationDhcp();
-  if (client == nullptr) return;
+  if (client == nullptr)
+    return;
 
   g_tries = client->tries;
-  if (client->offered_t0_lease != 0) g_leaseSeconds = client->offered_t0_lease;
+  if (client->offered_t0_lease != 0)
+    g_leaseSeconds = client->offered_t0_lease;
 
-  if (client->state == g_lastState) return;
+  if (client->state == g_lastState)
+    return;
   g_lastState = client->state;
   if (g_sampleCount < kMaxSamples) {
     g_samples[g_sampleCount].state = client->state;
@@ -231,13 +258,16 @@ Probe probeNetwork(const IPAddress& gateway) {
   const uint32_t gatewayMs = static_cast<uint32_t>((esp_timer_get_time() - startUs) / 1000);
   client.stop();
   Serial1.printf("  probe: the gateway %s after %lu ms\n",
-                 gatewayOk ? "accepted" : (gatewayMs + 50 < kProbeTimeoutMs ? "refused" : "timed out"),
+                 gatewayOk ? "accepted"
+                           : (gatewayMs + 50 < kProbeTimeoutMs ? "refused" : "timed out"),
                  static_cast<unsigned long>(gatewayMs));
-  if (gatewayOk || gatewayMs + 50 < kProbeTimeoutMs) return {gatewayOk, true, gatewayMs, kGateway};
+  if (gatewayOk || gatewayMs + 50 < kProbeTimeoutMs)
+    return {gatewayOk, true, gatewayMs, kGateway};
 
   char host[48] = {0};
   unsigned int port = 80;
-  if (sscanf(secrets::kBackendBaseUrl, "http://%47[^:/]:%u", host, &port) < 1) host[0] = '\0';
+  if (sscanf(secrets::kBackendBaseUrl, "http://%47[^:/]:%u", host, &port) < 1)
+    host[0] = '\0';
   if (host[0] == '\0') {
     return {false, false, gatewayMs, kNothing};
   }
@@ -251,7 +281,8 @@ Probe probeNetwork(const IPAddress& gateway) {
                  ok ? "accepted" : (backendMs + 50 < kProbeTimeoutMs ? "refused" : "timed out"),
                  static_cast<unsigned long>(backendMs));
 
-  if (ok || backendMs + 50 < kProbeTimeoutMs) return {ok, true, totalMs, kBackend};
+  if (ok || backendMs + 50 < kProbeTimeoutMs)
+    return {ok, true, totalMs, kBackend};
   return {false, false, totalMs, kNothing};
 }
 
@@ -271,8 +302,10 @@ uint32_t recoverWithDhcp(const IPAddress& stale) {
   for (;;) {
     const uint32_t ms = static_cast<uint32_t>((esp_timer_get_time() - startUs) / 1000);
     const IPAddress now = WiFi.localIP();
-    if (static_cast<uint32_t>(now) != 0 && now != stale && WiFi.status() == WL_CONNECTED) return ms;
-    if (ms >= kRecoverTimeoutMs) return ms;
+    if (static_cast<uint32_t>(now) != 0 && now != stale && WiFi.status() == WL_CONNECTED)
+      return ms;
+    if (ms >= kRecoverTimeoutMs)
+      return ms;
     sampleDhcp(ms);
     delay(kPollMs);
   }
@@ -280,9 +313,12 @@ uint32_t recoverWithDhcp(const IPAddress& stale) {
 
 const char* targetName(uint8_t target) {
   switch (target) {
-    case kBackend: return "backend";
-    case kGateway: return "gateway";
-    default: return "--";
+  case kBackend:
+    return "backend";
+  case kGateway:
+    return "gateway";
+  default:
+    return "--";
   }
 }
 
@@ -296,7 +332,7 @@ void printTable() {
     const Row& row = g_log[i];
 
     char index[8], link[12] = "--", ip[12] = "FAILED", probe[12] = "--", boot[12], retries[8],
-        lease[12] = "--";
+                   lease[12] = "--";
     char answered[10];
 
     snprintf(index, sizeof(index), "%lu", static_cast<unsigned long>(i + 1));
@@ -315,8 +351,10 @@ void printTable() {
       snprintf(lease, sizeof(lease), "--");
     }
 
-    if (row.online) snprintf(ip, sizeof(ip), "%u ms", row.ipMs);
-    if (row.online) snprintf(probe, sizeof(probe), "%u ms", row.probeMs);
+    if (row.online)
+      snprintf(ip, sizeof(ip), "%u ms", row.ipMs);
+    if (row.online)
+      snprintf(probe, sizeof(probe), "%u ms", row.probeMs);
     snprintf(answered, sizeof(answered), "%s%s", row.answered ? "" : "no ",
              row.answered ? targetName(row.target) : "");
 
@@ -332,11 +370,12 @@ void record(const Row& row) {
     g_cycles = 0;
     g_lease.valid = false;
   }
-  if (g_cycles < kLogRows) g_log[g_cycles] = row;
+  if (g_cycles < kLogRows)
+    g_log[g_cycles] = row;
   ++g_cycles;
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   const int64_t tEntry = esp_timer_get_time();
@@ -356,7 +395,9 @@ void setup() {
 
   Serial1.println();
   Serial1.printf("E6 dhcp rig -- cycle %lu, %s, wake %s\n", static_cast<unsigned long>(cycle),
-                 poisoned ? "a lease from the wrong network" : cached ? "cached lease" : "dhcp",
+                 poisoned ? "a lease from the wrong network"
+                 : cached ? "cached lease"
+                          : "dhcp",
                  stickyPower::wakeupCauseName());
 
   Row row = {};
@@ -385,15 +426,17 @@ void setup() {
     const IPAddress dns = poisoned ? IPAddress(10, 42, 0, 254) : IPAddress(g_lease.dns);
     Serial1.printf("  installing %s, gw %s, dns %s -- no client will run\n", ip.toString().c_str(),
                    gw.toString().c_str(), dns.toString().c_str());
-    if (!WiFi.config(ip, gw, mask, dns)) Serial1.println("  WiFi.config() refused the lease");
+    if (!WiFi.config(ip, gw, mask, dns))
+      Serial1.println("  WiFi.config() refused the lease");
   }
   const int64_t tConfig = esp_timer_get_time();
 
-  Serial1.printf("  before begin(): %lu ms boot and console, %lu ms persistent, %lu ms mode, %lu ms config\n",
-                 static_cast<unsigned long>((tSerial - tEntry) / 1000),
-                 static_cast<unsigned long>((tPersistent - tSerial) / 1000),
-                 static_cast<unsigned long>((tMode - tPersistent) / 1000),
-                 static_cast<unsigned long>((tConfig - tMode) / 1000));
+  Serial1.printf(
+      "  before begin(): %lu ms boot and console, %lu ms persistent, %lu ms mode, %lu ms config\n",
+      static_cast<unsigned long>((tSerial - tEntry) / 1000),
+      static_cast<unsigned long>((tPersistent - tSerial) / 1000),
+      static_cast<unsigned long>((tMode - tPersistent) / 1000),
+      static_cast<unsigned long>((tConfig - tMode) / 1000));
 
   if (!wifi.begin(secrets::kWifiSsid, secrets::kWifiPassword)) {
     Serial1.printf("FAILED: %s\n", wifi.lastError());
@@ -438,9 +481,8 @@ void setup() {
       const uint32_t recovered = recoverWithDhcp(WiFi.localIP());
       row.recoverMs = static_cast<uint16_t>(recovered);
       const bool ok = WiFi.status() == WL_CONNECTED;
-      Serial1.printf("  recovery: DHCP %s after %lu ms, now %s\n",
-                     ok ? "answered" : "gave up", static_cast<unsigned long>(recovered),
-                     WiFi.localIP().toString().c_str());
+      Serial1.printf("  recovery: DHCP %s after %lu ms, now %s\n", ok ? "answered" : "gave up",
+                     static_cast<unsigned long>(recovered), WiFi.localIP().toString().c_str());
       if (ok) {
         const Probe again = probeNetwork(WiFi.gatewayIP());
         row.answered = again.answered;
@@ -467,7 +509,8 @@ void setup() {
 
   row.bootMs = static_cast<uint16_t>((esp_timer_get_time() - tEntry) / 1000);
 
-  if (!cached) printTimeline();
+  if (!cached)
+    printTimeline();
   record(row);
   printTable();
 

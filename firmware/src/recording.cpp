@@ -29,7 +29,7 @@ struct HeaderWriter {
   }
 };
 
-}  // namespace
+} // namespace
 
 bool Recording::begin(uint32_t sampleRate, uint32_t maxSeconds) {
   if (sampleRate == 0 || maxSeconds == 0) {
@@ -75,26 +75,30 @@ void Recording::end() {
 // relaxed: nobody else moves it between the load and the store. The store is the
 // release that the readers' acquire pairs with.
 int16_t* Recording::writeHead() {
-  if (_buffer == nullptr) return nullptr;
+  if (_buffer == nullptr)
+    return nullptr;
   return reinterpret_cast<int16_t*>(_buffer + kHeaderBytes) +
          _samples.load(std::memory_order_relaxed);
 }
 
 uint32_t Recording::nextChunkSamples() const {
-  if (_buffer == nullptr) return 0;
+  if (_buffer == nullptr)
+    return 0;
   const uint32_t room = _capacity - _samples.load(std::memory_order_relaxed);
   return room < kChunkSamples ? room : kChunkSamples;
 }
 
 void Recording::commit(uint32_t samples) {
-  if (_buffer == nullptr) return;
+  if (_buffer == nullptr)
+    return;
   const uint32_t now = _samples.load(std::memory_order_relaxed);
   const uint32_t room = _capacity - now;
   _samples.store(now + (samples < room ? samples : room), std::memory_order_release);
 }
 
 uint32_t Recording::recordedMs() const {
-  if (_sampleRate == 0) return 0;
+  if (_sampleRate == 0)
+    return 0;
   return static_cast<uint32_t>(static_cast<uint64_t>(committed()) * 1000 / _sampleRate);
 }
 
@@ -113,14 +117,14 @@ void Recording::writeHeader() {
 
   HeaderWriter w{_buffer};
   w.tag("RIFF");
-  w.u32(kUnknownLength);  // everything in the file after this field
+  w.u32(kUnknownLength); // everything in the file after this field
   w.tag("WAVE");
   w.tag("fmt ");
-  w.u32(16);              // fmt chunk body length: 16 for plain PCM
-  w.u16(1);               // format tag: PCM, uncompressed
+  w.u32(16); // fmt chunk body length: 16 for plain PCM
+  w.u16(1);  // format tag: PCM, uncompressed
   w.u16(kChannels);
   w.u32(_sampleRate);
-  w.u32(_sampleRate * kBlockAlign);  // byte rate
+  w.u32(_sampleRate * kBlockAlign); // byte rate
   w.u16(kBlockAlign);
   w.u16(kBitsPerSample);
   w.tag("data");

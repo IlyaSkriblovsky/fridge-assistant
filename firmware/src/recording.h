@@ -54,7 +54,7 @@
 // starts and after it has been joined.
 
 class Recording {
- public:
+public:
   // A canonical PCM WAV header: RIFF/WAVE, one fmt chunk, one data chunk, no
   // extensions. Also a multiple of 4, so the samples behind it stay aligned.
   static constexpr size_t kHeaderBytes = 44;
@@ -103,7 +103,7 @@ class Recording {
   // Human-readable reason the last begin() returned false.
   const char* lastError() const { return _lastError; }
 
- private:
+private:
   uint32_t committed() const { return _samples.load(std::memory_order_acquire); }
 
   // Fills the reserved bytes. Called once per allocation; begin() is the only
@@ -111,7 +111,7 @@ class Recording {
   void writeHeader();
 
   uint8_t* _buffer = nullptr;
-  uint32_t _capacity = 0;  // samples the buffer holds, header excluded
+  uint32_t _capacity = 0; // samples the buffer holds, header excluded
   std::atomic<uint32_t> _samples{0};
   uint32_t _sampleRate = 0;
   const char* _lastError = "";

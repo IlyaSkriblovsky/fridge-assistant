@@ -21,7 +21,8 @@ void broken_utf8_recovers_without_losing_following_text() {
     TEST_ASSERT_EQUAL_UINT32(0xfffd, textNextCodepoint(&cursor));
     TEST_ASSERT_EQUAL_UINT32(0, textNextCodepoint(&cursor));
   }
-  const char* cursor = "\xe2\x82" "A";
+  const char* cursor = "\xe2\x82"
+                       "A";
   TEST_ASSERT_EQUAL_UINT32(0xfffd, textNextCodepoint(&cursor));
   TEST_ASSERT_EQUAL_UINT32('A', textNextCodepoint(&cursor));
   TEST_ASSERT_EQUAL_UINT32(0, textNextCodepoint(&cursor));
@@ -36,9 +37,11 @@ void copy_preserves_character_boundaries_at_every_buffer_size() {
     textCopy(out, size, source);
     size_t expected = 0;
     for (size_t boundary : boundaries)
-      if (boundary < size) expected = boundary;
+      if (boundary < size)
+        expected = boundary;
     TEST_ASSERT_EQUAL_UINT(expected, std::strlen(out));
-    if (expected) TEST_ASSERT_EQUAL_MEMORY(source, out, expected);
+    if (expected)
+      TEST_ASSERT_EQUAL_MEMORY(source, out, expected);
     TEST_ASSERT_EQUAL_CHAR('#', out[size]);
   }
   char out[] = "sentinel";
@@ -50,15 +53,14 @@ void copy_preserves_character_boundaries_at_every_buffer_size() {
 }
 
 void every_face_supports_our_scripts_and_falls_back_per_character() {
-  for (const TextFace* face : {&fontFreeSans12, &fontFreeSans18, &fontFreeSans24,
-                              &fontFreeSansBold24}) {
+  for (const TextFace* face :
+       {&fontFreeSans12, &fontFreeSans18, &fontFreeSans24, &fontFreeSansBold24}) {
     for (uint32_t cp : {0x41u, 0x401u, 0x44fu, 0x3bbu, 0x2026u, 0x2116u})
       TEST_ASSERT_TRUE(textHasGlyph(*face, cp));
     TEST_ASSERT_FALSE(textHasGlyph(*face, 0x1f600));
     TEST_ASSERT_EQUAL_INT(textWidth(*face, "?", 1), textWidth(*face, u8"😀", 1));
     TEST_ASSERT_GREATER_THAN(0, textWidth(*face, u8"Яλ", 1));
-    TEST_ASSERT_EQUAL_INT(2 * textWidth(*face, u8"AЯλ", 1),
-                         textWidth(*face, u8"AЯλ", 2));
+    TEST_ASSERT_EQUAL_INT(2 * textWidth(*face, u8"AЯλ", 1), textWidth(*face, u8"AЯλ", 2));
     TEST_ASSERT_EQUAL_INT(0, textWidth(*face, nullptr, 1));
     TEST_ASSERT_EQUAL_INT(0, textWidth(*face, "", 1));
   }
@@ -99,8 +101,8 @@ void truncated_last_line_draws_ellipsis_and_respects_line_limit() {
 
   actual.fillScreen(TFT_WHITE);
   expected.fillScreen(TFT_WHITE);
-  TEST_ASSERT_EQUAL_INT(2, textDrawWrapped(actual, face, "AA AA", 4, 2, 1,
-                                          textWidth(face, "AA", 1), 2));
+  TEST_ASSERT_EQUAL_INT(
+      2, textDrawWrapped(actual, face, "AA AA", 4, 2, 1, textWidth(face, "AA", 1), 2));
   textDraw(expected, face, "AA", 4, 2, 1);
   textDraw(expected, face, "AA", 4, 2 + face.yAdvance, 1);
   TEST_ASSERT_TRUE(actual.px == expected.px);

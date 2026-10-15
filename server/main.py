@@ -161,13 +161,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         f"  Public IP (needs port forwarding to be reachable): {public or 'unavailable'}"
     )
     print()
-    refresh_task = asyncio.create_task(jobs.periodic(
-        "shopping-list", shopping_list.refresh, shopping_list.REFRESH_SECONDS,
-        daytime_only=True
-    ))
-    weather_task = asyncio.create_task(jobs.periodic(
-        "weather", weather.refresh, weather.REFRESH_SECONDS
-    ))
+    refresh_task = asyncio.create_task(
+        jobs.periodic(
+            "shopping-list",
+            shopping_list.refresh,
+            shopping_list.REFRESH_SECONDS,
+            daytime_only=True,
+        )
+    )
+    weather_task = asyncio.create_task(
+        jobs.periodic("weather", weather.refresh, weather.REFRESH_SECONDS)
+    )
     try:
         async with telegram_bot.running(telegram_config, app.state.gemini):
             yield
@@ -213,7 +217,9 @@ async def authorize(request: Request) -> None:
     preview = request.url.path == "/sticky/dashboard"
     if preview and scheme.lower() == "basic":
         try:
-            username, _, password = base64.b64decode(given, validate=True).partition(b":")
+            username, _, password = base64.b64decode(given, validate=True).partition(
+                b":"
+            )
             if username == b"sticky" and hmac.compare_digest(password, expected):
                 return
         except (ValueError, binascii.Error):
@@ -237,7 +243,9 @@ app = FastAPI(
 def sticky_dashboard(
     battery_pct: Annotated[int | None, Query(ge=0, le=100)] = None,
     temperature_c: Annotated[float | None, Query(allow_inf_nan=False)] = None,
-    humidity_pct: Annotated[float | None, Query(ge=0, le=100, allow_inf_nan=False)] = None,
+    humidity_pct: Annotated[
+        float | None, Query(ge=0, le=100, allow_inf_nan=False)
+    ] = None,
 ) -> Response:
     """Render a 1bpp PNG off the event loop."""
     device_readings.save(battery_pct, temperature_c, humidity_pct)
@@ -253,7 +261,9 @@ def sticky_dashboard(
 
 
 class ReminderSync(BaseModel):
-    read_ids: list[Annotated[StrictInt, Field(gt=0, le=9007199254740991)]] = Field(max_length=10)
+    read_ids: list[Annotated[StrictInt, Field(gt=0, le=9007199254740991)]] = Field(
+        max_length=10
+    )
 
 
 @app.post("/sticky/reminders/sync")
@@ -312,7 +322,9 @@ async def audio(request: Request) -> dict[str, object]:
         try:
             token = reminders.REQUEST_TIME.set(request_time)
             try:
-                reply = await assistant.answer(request.app.state.gemini, bytes(wav), log)
+                reply = await assistant.answer(
+                    request.app.state.gemini, bytes(wav), log
+                )
             finally:
                 reminders.REQUEST_TIME.reset(token)
         except errors.APIError as exc:

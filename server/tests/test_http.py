@@ -42,11 +42,13 @@ async def test_audio_response_and_reassembled_wav(client, answer, gemini, wav):
 
     async def body():
         for start in range(0, len(streamed), 17):
-            yield bytes(streamed[start:start + 17])
+            yield bytes(streamed[start : start + 17])
 
-    reply = await client.post("/audio", content=body(), headers={
-        "Content-Type": "audio/wav", "Authorization": "bEaReR test"
-    })
+    reply = await client.post(
+        "/audio",
+        content=body(),
+        headers={"Content-Type": "audio/wav", "Authorization": "bEaReR test"},
+    )
     assert reply.status_code == 200
     assert reply.json()["response"] == answer.return_value
     assert reply.json()["reminders"]["active"] == []
@@ -65,10 +67,16 @@ async def test_size_limit(client, answer, monkeypatch, size, expected_calls):
     )
 
 
-@pytest.mark.parametrize("error,message", [
-    (errors.APIError(429, {}), "Gemini ответил ошибкой 429, попробуй ещё раз."),
-    (httpx.ConnectError("offline"), "Не получилось связаться с Gemini, попробуй ещё раз."),
-])
+@pytest.mark.parametrize(
+    "error,message",
+    [
+        (errors.APIError(429, {}), "Gemini ответил ошибкой 429, попробуй ещё раз."),
+        (
+            httpx.ConnectError("offline"),
+            "Не получилось связаться с Gemini, попробуй ещё раз.",
+        ),
+    ],
+)
 async def test_gemini_errors(client, answer, error, message):
     answer.side_effect = error
     reply = await client.post("/audio", content=b"audio")
@@ -76,11 +84,14 @@ async def test_gemini_errors(client, answer, error, message):
     assert reply.json()["response"] == message
 
 
-@pytest.mark.parametrize("path,status,body", [
-    ("/audio/fault/500", 500, {"detail": "deliberate failure"}),
-    ("/audio/fault/empty", 200, {}),
-    ("/audio/fault/slow", 200, {"response": "Received 5 bytes, eventually"}),
-])
+@pytest.mark.parametrize(
+    "path,status,body",
+    [
+        ("/audio/fault/500", 500, {"detail": "deliberate failure"}),
+        ("/audio/fault/empty", 200, {}),
+        ("/audio/fault/slow", 200, {"response": "Received 5 bytes, eventually"}),
+    ],
+)
 async def test_fault_responses(client, answer, sleep, path, status, body):
     reply = await client.post(path, content=b"audio")
     assert reply.status_code == status
@@ -105,19 +116,31 @@ async def stream_request(path, events, token="test"):
         assert not pending, "Application responded before draining the upload"
         sent.append(message)
 
-    await main.app({
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-        "method": "POST", "scheme": "http", "path": path, "raw_path": path.encode(),
-        "query_string": b"", "root_path": "", "server": ("test", 80),
-        "client": ("test", 1234),
-        "headers": [(b"authorization", f"Bearer {token}".encode())],
-    }, receive, send)
+    await main.app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "root_path": "",
+            "server": ("test", 80),
+            "client": ("test", 1234),
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        },
+        receive,
+        send,
+    )
     return sent
 
 
-@pytest.mark.parametrize("path,token", [(path, "wrong") for path in PATHS] + [
-    (path, "test") for path in PATHS
-])
+@pytest.mark.parametrize(
+    "path,token",
+    [(path, "wrong") for path in PATHS] + [(path, "test") for path in PATHS],
+)
 async def test_drains_before_response(client, answer, sleep, monkeypatch, path, token):
     monkeypatch.setattr(main, "MAX_AUDIO_BYTES", 2)
     events = [
@@ -131,10 +154,14 @@ async def test_drains_before_response(client, answer, sleep, monkeypatch, path, 
 
 @pytest.mark.parametrize("token", ["test", "wrong"])
 async def test_disconnect_never_executes(client, answer, token):
-    sent = await stream_request("/audio", [
-        {"type": "http.request", "body": b"partial", "more_body": True},
-        {"type": "http.disconnect"},
-    ], token)
+    sent = await stream_request(
+        "/audio",
+        [
+            {"type": "http.request", "body": b"partial", "more_body": True},
+            {"type": "http.disconnect"},
+        ],
+        token,
+    )
     answer.assert_not_awaited()
     assert sent[0]["status"] == (200 if token == "test" else 401)
     if token == "test":

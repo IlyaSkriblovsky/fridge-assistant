@@ -109,7 +109,9 @@ def run(client: genai.Client, model: str, path: Path) -> None:
     contents: list[types.Content] = [
         types.Content(
             role="user",
-            parts=[types.Part.from_bytes(data=path.read_bytes(), mime_type="audio/wav")],
+            parts=[
+                types.Part.from_bytes(data=path.read_bytes(), mime_type="audio/wav")
+            ],
         )
     ]
     config = types.GenerateContentConfig(
@@ -155,8 +157,12 @@ def run(client: genai.Client, model: str, path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Try Gemini on device recordings.")
-    parser.add_argument("files", nargs="*", type=Path, help="WAV files (default: recordings/*.wav)")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"default: {DEFAULT_MODEL}")
+    parser.add_argument(
+        "files", nargs="*", type=Path, help="WAV files (default: recordings/*.wav)"
+    )
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL, help=f"default: {DEFAULT_MODEL}"
+    )
     args = parser.parse_args()
 
     files = args.files or sorted(RECORDINGS_DIR.glob("*.wav"))

@@ -89,11 +89,11 @@ constexpr int kPinLogTx = 43;
 // 0x22, Display Update Control 2: a list of steps 0x20 then runs. The library
 // sends all of them in one go, which is why its busy wait covers the waveform
 // and the power-down together.
-constexpr uint8_t kFullBoth = 0xF7;     // what Driver_SSD1677::update() sends
-constexpr uint8_t kFullDrive = 0xF4;    // ... without "disable analog, disable OSC"
-constexpr uint8_t kPartialBoth = 0xFF;  // what updatePartial() sends
+constexpr uint8_t kFullBoth = 0xF7;    // what Driver_SSD1677::update() sends
+constexpr uint8_t kFullDrive = 0xF4;   // ... without "disable analog, disable OSC"
+constexpr uint8_t kPartialBoth = 0xFF; // what updatePartial() sends
 constexpr uint8_t kPartialDrive = 0xFC;
-constexpr uint8_t kPowerDown = 0x03;    // the two steps taken out of the above
+constexpr uint8_t kPowerDown = 0x03; // the two steps taken out of the above
 
 // Six passes over the three shapes, alternating unsplit and split, which is
 // three of each per shape. About 26 seconds of panel.
@@ -109,9 +109,12 @@ enum Shape : uint8_t { kFull = 0, kBand = 1, kWhole = 2 };
 
 const char* shapeName(uint8_t shape) {
   switch (shape) {
-    case kFull: return "full";
-    case kBand: return "band";
-    default: return "whole";
+  case kFull:
+    return "full";
+  case kBand:
+    return "band";
+  default:
+    return "whole";
   }
 }
 
@@ -131,9 +134,7 @@ struct Marks {
 Marks g_marks;
 bool g_split = false;
 
-uint32_t us(int64_t from, int64_t to) {
-  return to > from ? static_cast<uint32_t>(to - from) : 0;
-}
+uint32_t us(int64_t from, int64_t to) { return to > from ? static_cast<uint32_t>(to - from) : 0; }
 
 // BUSY, both edges, timestamped from the interrupt rather than from a 1 ms
 // poll. Armed once the panel is up and reset at the top of every refresh.
@@ -148,7 +149,8 @@ int8_t g_busyPin = -1;
 
 void IRAM_ATTR busyIsr() {
   const uint32_t n = g_edgeCount;
-  if (n >= kMaxEdges) return;
+  if (n >= kMaxEdges)
+    return;
   g_edges[n].us = esp_timer_get_time();
   g_edges[n].level = static_cast<uint8_t>(gpio_get_level(static_cast<gpio_num_t>(g_busyPin)));
   g_edgeCount = n + 1;
@@ -159,7 +161,7 @@ void IRAM_ATTR busyIsr() {
 // controller except the one thing the rig is for: sending 0x22 twice instead of
 // once, so the waveform and the power-down land in separate busy waits.
 class Driver_SSD1677_Timed : public Driver_SSD1677_Sticky {
- public:
+public:
   Driver_SSD1677_Timed(uint16_t w = 800, uint16_t h = 480, int8_t busyPin = -1)
       : Driver_SSD1677_Sticky(w, h, busyPin) {}
 
@@ -207,7 +209,7 @@ class Driver_SSD1677_Timed : public Driver_SSD1677_Sticky {
     g_marks.sleep1 = esp_timer_get_time();
   }
 
- private:
+private:
   // Unsplit is byte for byte what Driver_SSD1677::update() does. Split issues
   // the same steps in two goes, each with its own busy wait, so the waveform
   // and the shutdown after it are two numbers instead of one.
@@ -216,7 +218,8 @@ class Driver_SSD1677_Timed : public Driver_SSD1677_Sticky {
     sequence(g_split ? drive : both);
     g_marks.drive1 = esp_timer_get_time();
 
-    if (!g_split) return;
+    if (!g_split)
+      return;
 
     g_marks.power0 = esp_timer_get_time();
     sequence(kPowerDown);
@@ -224,11 +227,13 @@ class Driver_SSD1677_Timed : public Driver_SSD1677_Sticky {
   }
 
   void sequence(uint8_t byte) {
-    if (!_bus) return;
+    if (!_bus)
+      return;
     _bus->writeCommand(0x22);
     _bus->writeData(byte);
     _bus->writeCommand(0x20);
-    if (g_busyPin >= 0) (void)waitForReadyPin(g_busyPin, false);
+    if (g_busyPin >= 0)
+      (void)waitForReadyPin(g_busyPin, false);
   }
 };
 
@@ -248,7 +253,7 @@ struct Config_Sticky_SSD1677_Timed {
 struct Row {
   uint8_t shape;
   bool split;
-  bool cold;  // the first refresh after the panel rail came up
+  bool cold; // the first refresh after the panel rail came up
   uint32_t cpuUs, wakeUs, pushUs, driveUs, powerUs, sleepUs, tailUs, totalUs;
   uint32_t pushBytes;
   uint32_t edges;
@@ -289,7 +294,8 @@ Row closeRefresh(uint8_t shape, bool cold) {
       row.wakeUs + row.pushUs + row.driveUs + row.powerUs + row.sleepUs + row.tailUs;
   row.cpuUs = row.totalUs > accounted ? row.totalUs - accounted : 0;
 
-  if (g_rowCount < kMaxRows) g_rows[g_rowCount] = row;
+  if (g_rowCount < kMaxRows)
+    g_rows[g_rowCount] = row;
   ++g_rowCount;
   return row;
 }
@@ -304,8 +310,7 @@ void printEdges(const char* label) {
   }
   Serial1.println();
   for (uint32_t i = 0; i < count && i < kMaxEdges; ++i) {
-    Serial1.printf("    %+8ld ms  %s\n",
-                   static_cast<long>((g_edges[i].us - g_marks.drive0) / 1000),
+    Serial1.printf("    %+8ld ms  %s\n", static_cast<long>((g_edges[i].us - g_marks.drive0) / 1000),
                    g_edges[i].level ? "high" : "low");
   }
 }
@@ -355,10 +360,8 @@ void drawWhole(uint32_t pass) {
   display.drawString(line, 40, display.height() / 2);
 }
 
-constexpr const char* kHeader =
-    "  %-3s %-6s %-7s %8s %8s %8s %8s %8s %8s %8s %9s\n";
-constexpr const char* kRowFormat =
-    "  %-3s %-6s %-7s %8s %8s %8s %8s %8s %8s %8s %9s\n";
+constexpr const char* kHeader = "  %-3s %-6s %-7s %8s %8s %8s %8s %8s %8s %8s %9s\n";
+constexpr const char* kRowFormat = "  %-3s %-6s %-7s %8s %8s %8s %8s %8s %8s %8s %9s\n";
 
 void field(char* out, size_t size, uint32_t microseconds) {
   if (microseconds == 0) {
@@ -400,14 +403,16 @@ void printTable() {
 // The median of one column over the rows of one shape and one mode. Three
 // samples each, so this is the middle one and it is only worth more than the
 // mean because a cold first refresh should not drag the number it is not about.
-uint32_t median(uint8_t shape, bool split, uint32_t Row::*field) {
+uint32_t median(uint8_t shape, bool split, uint32_t Row::* field) {
   uint32_t values[kMaxRows];
   uint32_t n = 0;
   const uint32_t rows = g_rowCount < kMaxRows ? g_rowCount : kMaxRows;
   for (uint32_t i = 0; i < rows; ++i) {
-    if (g_rows[i].shape == shape && g_rows[i].split == split) values[n++] = g_rows[i].*field;
+    if (g_rows[i].shape == shape && g_rows[i].split == split)
+      values[n++] = g_rows[i].*field;
   }
-  if (n == 0) return 0;
+  if (n == 0)
+    return 0;
   for (uint32_t i = 1; i < n; ++i) {
     const uint32_t v = values[i];
     uint32_t j = i;
@@ -451,21 +456,25 @@ void printSummary() {
     // The whole point of alternating: if taking the power-down steps out of
     // 0x22 changed the total, the byte does not mean what the split assumes and
     // the power column is not a measurement.
-    const long delta =
-        static_cast<long>(split / 1000) - static_cast<long>(one / 1000);
+    const long delta = static_cast<long>(split / 1000) - static_cast<long>(one / 1000);
     Serial1.printf("         split costs %+ld ms against one go -- %s\n", delta,
-                   (delta > -40 && delta < 40)
-                       ? "the same refresh, so the split is honest"
-                       : "NOT the same refresh: distrust the power column");
+                   (delta > -40 && delta < 40) ? "the same refresh, so the split is honest"
+                                               : "NOT the same refresh: distrust the power column");
     Serial1.println();
   }
 }
 
 void runShape(uint8_t shape, uint32_t pass, bool cold) {
   switch (shape) {
-    case kFull: drawFull(pass); break;
-    case kBand: drawBand(); break;
-    default: drawWhole(pass); break;
+  case kFull:
+    drawFull(pass);
+    break;
+  case kBand:
+    drawBand();
+    break;
+  default:
+    drawWhole(pass);
+    break;
   }
 
   armRefresh();
@@ -487,10 +496,11 @@ void runShape(uint8_t shape, uint32_t pass, bool cold) {
                  static_cast<unsigned long>(row.totalUs / 1000),
                  ok ? "" : "  -- the controller refused the partial update");
 
-  if (pass == 1 && shape != kWhole) printEdges(shapeName(shape));
+  if (pass == 1 && shape != kWhole)
+    printEdges(shapeName(shape));
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   const int64_t tEntry = esp_timer_get_time();
@@ -513,7 +523,8 @@ void setup() {
   Serial1.printf("  panel up %lu ms after entry, BUSY on GPIO%d\n",
                  static_cast<unsigned long>((esp_timer_get_time() - tEntry) / 1000), g_busyPin);
 
-  if (g_busyPin >= 0) attachInterrupt(g_busyPin, busyIsr, CHANGE);
+  if (g_busyPin >= 0)
+    attachInterrupt(g_busyPin, busyIsr, CHANGE);
 
   for (uint32_t pass = 1; pass <= kPasses; ++pass) {
     // Alternating rather than blocked, so a drift in the panel over half a
@@ -524,7 +535,8 @@ void setup() {
     }
   }
 
-  if (g_busyPin >= 0) detachInterrupt(g_busyPin);
+  if (g_busyPin >= 0)
+    detachInterrupt(g_busyPin);
 
   printTable();
   printSummary();

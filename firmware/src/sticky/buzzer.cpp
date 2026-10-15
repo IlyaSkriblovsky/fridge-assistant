@@ -12,12 +12,11 @@ static bool rtttlActive = false;
 // library output on our already attached pin and stop it synchronously.
 // Scope these substitutions to the pinned header-only library, never Arduino.
 static void rtttlWriteTone(uint8_t, uint32_t hz) {
-  if (hz) hz = rtttlOctaveShift >= 0 ? hz << rtttlOctaveShift : hz >> -rtttlOctaveShift;
+  if (hz)
+    hz = rtttlOctaveShift >= 0 ? hz << rtttlOctaveShift : hz >> -rtttlOctaveShift;
   ledcWriteTone(stickyBuzzer::kPin, hz);
 }
-static void rtttlStopTone(uint8_t) {
-  ledcWriteTone(stickyBuzzer::kPin, 0);
-}
+static void rtttlStopTone(uint8_t) { ledcWriteTone(stickyBuzzer::kPin, 0); }
 #define ledcWriteTone rtttlWriteTone
 #define noTone rtttlStopTone
 #include <PlayRtttl.hpp>
@@ -63,19 +62,21 @@ void park() {
   digitalWrite(stickyBuzzer::kPin, LOW);
 }
 
-}  // namespace
+} // namespace
 
 static void playNotes(const stickyBuzzer::Note* notes, size_t count) {
   using namespace stickyBuzzer;
-  if (notes == nullptr || count == 0) return;
+  if (notes == nullptr || count == 0)
+    return;
 
   // Attached once for the whole pattern; re-attaching between notes would put a
   // pad glitch into every gap. The attach frequency is irrelevant -- the first
   // ledcWriteTone() below sets the one that is heard.
-  if (!ledcAttach(kPin, kHighHz, kResolutionBits)) return;
+  if (!ledcAttach(kPin, kHighHz, kResolutionBits))
+    return;
 
   for (size_t i = 0; i < count; ++i) {
-    ledcWriteTone(kPin, notes[i].hz);  // hz 0 writes a zero duty: a rest
+    ledcWriteTone(kPin, notes[i].hz); // hz 0 writes a zero duty: a rest
     delay(notes[i].ms);
   }
 
@@ -91,31 +92,38 @@ void stickyBuzzer::answer() { play(kAnswer); }
 void stickyBuzzer::error() { play(kError); }
 
 void stickyBuzzer::play(const Note* notes, size_t count) {
-  if (!silentMode::enabled()) playNotes(notes, count);
+  if (!silentMode::enabled())
+    playNotes(notes, count);
 }
 // Reminder alarms bypass silent mode; ordinary voice cues still use play().
 bool stickyBuzzer::startRtttl(const char* song, int octaveShift) {
   stopRtttl();
-  if (!ledcAttach(kPin, kHighHz, kResolutionBits)) return false;
+  if (!ledcAttach(kPin, kHighHz, kResolutionBits))
+    return false;
   rtttlOctaveShift = octaveShift;
   rtttlActive = true;
   startPlayRtttl(kPin, song);
   return true;
 }
 bool stickyBuzzer::pollRtttl() {
-  if (!rtttlActive) return false;
-  if (updatePlayRtttl()) return true;
+  if (!rtttlActive)
+    return false;
+  if (updatePlayRtttl())
+    return true;
   rtttlActive = false;
   park();
   return false;
 }
 void stickyBuzzer::stopRtttl() {
-  if (!rtttlActive) return;
+  if (!rtttlActive)
+    return;
   stopPlayRtttl();
   rtttlActive = false;
   park();
 }
 void stickyBuzzer::notification() {
-  if (!startRtttl(config::kNotificationRtttl)) return;
-  while (pollRtttl()) delay(1);
+  if (!startRtttl(config::kNotificationRtttl))
+    return;
+  while (pollRtttl())
+    delay(1);
 }
