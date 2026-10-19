@@ -80,6 +80,33 @@ def test_restore_keeps_original_position_before_placeholders(keep):
     assert note.unchecked == [restored, bread, blank]
 
 
+@pytest.mark.parametrize("blank_tail", [[], ["", " \t\u00a0"]])
+def test_indented_placeholder_stays_with_parent(keep, blank_tail):
+    note = keep.get.return_value
+    bread = note.add("Хлеб", sort=NewListItemPlacementValue.Bottom)
+    child = bread.add("", sort=NewListItemPlacementValue.Bottom)
+    placeholders = [
+        note.add(text, sort=NewListItemPlacementValue.Bottom) for text in blank_tail
+    ]
+    original_sort = (bread.sort, child.sort)
+
+    shopping.add(["молоко", "сыр"])
+
+    assert [item.text for item in note.unchecked] == [
+        "Хлеб",
+        "",
+        "Молоко",
+        "Сыр",
+        *blank_tail,
+    ]
+    assert child.parent_item is bread
+    assert bread.subitems == [child]
+    assert all(not item.indented for item in note.unchecked if item is not child)
+    assert all(item in note.unchecked for item in placeholders)
+    if not blank_tail:
+        assert (bread.sort, child.sort) == original_sort
+
+
 @pytest.fixture
 def keep(monkeypatch):
     client = Mock()

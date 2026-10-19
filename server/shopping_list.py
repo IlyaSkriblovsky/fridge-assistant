@@ -107,10 +107,12 @@ def put(note: List, text: str) -> str:
         ticked.text = capitalize_item(ticked.text)
         ticked.checked = False
         return RESTORED
-    # Preserve blank placeholders at the end of the active shopping list.
+    # Preserve top-level blank placeholders at the end of the active list.
     trailing = []
     for item in reversed(note.unchecked):
-        if item.text.strip():
+        # Keep groups subitems with their parent, so they are a boundary even
+        # when blank: a new top-level purchase cannot split that group.
+        if item.indented or item.text.strip():
             break
         trailing.append(item)
     added = note.add(capitalize_item(text), sort=NewListItemPlacementValue.Bottom)
