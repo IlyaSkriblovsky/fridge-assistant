@@ -107,8 +107,20 @@ def put(note: List, text: str) -> str:
         ticked.text = capitalize_item(ticked.text)
         ticked.checked = False
         return RESTORED
-    # Keep's own default setting puts new items at the bottom.
-    note.add(capitalize_item(text), sort=NewListItemPlacementValue.Bottom)
+    # Preserve blank placeholders at the end of the active shopping list.
+    trailing = []
+    for item in reversed(note.unchecked):
+        if item.text.strip():
+            break
+        trailing.append(item)
+    added = note.add(capitalize_item(text), sort=NewListItemPlacementValue.Bottom)
+    if trailing:
+        ordered = note.items
+        ordered.remove(added)
+        ordered.insert(ordered.index(trailing[-1]), added)
+        positions = {item.id: index for index, item in enumerate(ordered)}
+        # Let gkeepapi assign spaced sort values, even when old values tie.
+        note.sort_items(key=lambda item: positions[item.id])
     return ADDED
 
 

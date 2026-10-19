@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 from gkeepapi.exception import APIException, KeepException
-from gkeepapi.node import List, Note
+from gkeepapi.node import List, NewListItemPlacementValue, Note
 
 import shopping_list as shopping
 
@@ -31,6 +31,53 @@ def test_unchecked_match_takes_precedence():
     note.add("молоко")
     assert shopping.put(note, "МОЛОКО") == shopping.ALREADY_LISTED
     assert len(note.checked) == 1
+
+
+@pytest.mark.parametrize(
+    "texts,insertion",
+    [
+        ([], 0),
+        (["Хлеб", "Яблоки"], 2),
+        (["Хлеб", "", "Яблоки"], 3),
+        (["Хлеб", "", "Яблоки", "", " \t\n\u00a0\u2003"], 3),
+        (["", " \t\n\u00a0\u2003"], 0),
+    ],
+)
+@pytest.mark.parametrize("tied_sort_values", [False, True])
+def test_add_preserves_placeholders_and_request_order(
+    keep, texts, insertion, tied_sort_values
+):
+    note = keep.get.return_value
+    originals = [
+        note.add(text, sort=NewListItemPlacementValue.Bottom) for text in texts
+    ]
+    if tied_sort_values:
+        for item in originals:
+            item.sort = 100
+    checked = note.add("Куплено", checked=True, sort=NewListItemPlacementValue.Bottom)
+
+    result = shopping.add(["молоко", "сыр", "МОЛОКО"])
+
+    assert [entry["result"] for entry in result["items"]] == [
+        shopping.ADDED,
+        shopping.ADDED,
+        shopping.ALREADY_LISTED,
+    ]
+    assert [item.text for item in note.unchecked] == (
+        texts[:insertion] + ["Молоко", "Сыр"] + texts[insertion:]
+    )
+    assert [item for item in note.unchecked if item in originals] == originals
+    assert note.checked == [checked]
+
+
+def test_restore_keeps_original_position_before_placeholders(keep):
+    note = keep.get.return_value
+    restored = note.add("молоко", checked=True, sort=NewListItemPlacementValue.Bottom)
+    bread = note.add("Хлеб", sort=NewListItemPlacementValue.Bottom)
+    blank = note.add("", sort=NewListItemPlacementValue.Bottom)
+
+    assert shopping.add(["молоко"])["items"][0]["result"] == shopping.RESTORED
+    assert note.unchecked == [restored, bread, blank]
 
 
 @pytest.fixture
